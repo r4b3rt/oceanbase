@@ -66,7 +66,7 @@ OceanBase Database is under [MulanPubL - 2.0](http://license.coscl.org.cn/MulanP
 4. [How to modify document](https://github.com/oceanbase/oceanbase/wiki/how_to_modify_docs)
 5. [How to debug OceanBase](https://github.com/oceanbase/oceanbase/wiki/how_to_debug)
 6. [How to run test](https://github.com/oceanbase/oceanbase/wiki/how_to_test)
-7. [How to fix one_bug](https://github.com/oceanbase/oceanbase/wiki/how_to_fix_bug)
+7. [How to fix bugs](https://github.com/oceanbase/oceanbase/wiki/how_to_fix_bug)
 
 
 
