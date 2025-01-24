@@ -13,55 +13,38 @@
 #ifndef OB_ADMIN_DUMPSST_EXECUTOR_H_
 #define OB_ADMIN_DUMPSST_EXECUTOR_H_
 #include "../ob_admin_executor.h"
+#include "../ob_admin_common_utils.h"
 #include "lib/container/ob_array.h"
-#include "share/config/ob_config_manager.h"
-#include "storage/blocksstable/ob_block_sstable_struct.h"
-#include "storage/blocksstable/ob_store_file.h"
 #include "storage/ob_i_table.h"
 #include "observer/ob_server_struct.h"
 #include "observer/ob_srv_network_frame.h"
 #include "observer/omt/ob_worker_processor.h"
 #include "observer/omt/ob_multi_tenant.h"
 #include "observer/ob_server_reload_config.h"
-#include "storage/blocksstable/ob_store_file_system.h"
-#include "storage/ob_tenant_file_super_block_checkpoint_reader.h"
-#include "storage/ob_server_pg_meta_checkpoint_reader.h"
 
 namespace oceanbase
 {
-namespace storage
-{
-  class ObBaseFileMgr;
-  class ObPartitionMetaRedoModule;
+namespace storage {
+  struct ObHotTabletInfoIndex;
 }
-
 namespace tools
 {
 
 enum ObAdminDumpsstCmd
 {
-  DUMP_MACRO_META,
-  DUMP_SUPER_BLOCK,
-  DUMP_MACRO_DATA,
-  PRINT_MACRO_BLOCK,
-  DUMP_SSTABLE,
-  DUMP_SSTABLE_META,
+  DUMP_SUPER_BLOCK = 0,
+  DUMP_MACRO_DATA = 1,
+  PRINT_MACRO_BLOCK = 2,
+  DUMP_TABLET_META = 3,
+  DUMP_TABLE_STORE = 4,
+  DUMP_STORAGE_SCHEMA = 5,
+  DUMP_SSTABLE = 6,
+  DUMP_IS_DELETED_OBJ = 7,
+  DUMP_META_LIST = 8,
+  DUMP_GC_INFO = 9,
+  DUMP_PREWARM_INDEX = 10,
+  DUMP_PREWARM_DATA = 11,
   DUMP_MAX,
-};
-
-struct ObDumpMacroBlockContext final
-{
-public:
-  ObDumpMacroBlockContext()
-    : macro_id_(-1), micro_id_(-1), tenant_id_(common::OB_INVALID_ID), file_id_(-1)
-  {}
-  ~ObDumpMacroBlockContext() = default;
-  bool is_valid() const { return macro_id_ >= 0; }
-  TO_STRING_KV(K_(macro_id), K_(micro_id), K_(tenant_id), K_(file_id));
-  int64_t macro_id_;
-  int64_t micro_id_;
-  uint64_t tenant_id_;
-  int64_t file_id_;
 };
 
 class ObAdminDumpsstExecutor : public ObAdminExecutor
@@ -72,89 +55,37 @@ public:
   virtual int execute(int argc, char *argv[]);
 private:
   int parse_cmd(int argc, char *argv[]);
+  int parse_macro_id(const char *optarg, ObDumpMacroBlockContext &context);
   void print_macro_block();
   void print_usage();
   void print_macro_meta();
   void print_super_block();
-  int dump_macro_block(const ObDumpMacroBlockContext &context);
   void dump_sstable();
   void dump_sstable_meta();
-  int open_store_file();
-  int load_config();
-  int replay_slog_to_get_sstable(storage::ObSSTable *&sstable);
+  void dump_macro_block(const ObDumpMacroBlockContext &macro_block_context);
+  void dump_tablet_meta(const ObDumpMacroBlockContext &macro_block_context);
+  void dump_table_store(const ObDumpMacroBlockContext &macro_block_context);
+  void dump_storage_schema(const ObDumpMacroBlockContext &macro_block_context);
+#ifdef OB_BUILD_SHARED_STORAGE
+  void dump_prewarm_index(const ObDumpMacroBlockContext &macro_block_context);
+  void dump_prewarm_data(const ObDumpMacroBlockContext &macro_block_context);
+  void dump_is_deleted_obj(const ObDumpMacroBlockContext &macro_block_context);
+  void dump_meta_list(const ObDumpMacroBlockContext &macro_block_context);
+  void dump_gc_info(const ObDumpMacroBlockContext &macro_block_context);
+  int do_dump_prewarm_index(const char *path, storage::ObHotTabletInfoIndex &index);
+#endif
 
+#ifdef OB_BUILD_TDE_SECURITY
+  int init_master_key_getter();
+#endif
 
-  blocksstable::ObStorageEnv storage_env_;
-  char data_dir_[common::OB_MAX_FILE_NAME_LENGTH];
-  char slog_dir_[common::OB_MAX_FILE_NAME_LENGTH];
-  char clog_dir_[common::OB_MAX_FILE_NAME_LENGTH];
-  char ilog_dir_[common::OB_MAX_FILE_NAME_LENGTH];
-  char clog_shm_path_[common::OB_MAX_FILE_NAME_LENGTH];
-  char ilog_shm_path_[common::OB_MAX_FILE_NAME_LENGTH];
-  char sstable_dir_[common::OB_MAX_FILE_NAME_LENGTH];
   bool is_quiet_;
-  bool in_csv_;
   ObAdminDumpsstCmd cmd_;
-  storage::ObITable::TableKey table_key_;
-  bool skip_log_replay_;
+  bool hex_print_;
   ObDumpMacroBlockContext dump_macro_context_;
-  observer::ObServerReloadConfig reload_config_;
-  common::ObConfigManager config_mgr_;
-};
-
-class ObAdminSlogReplayer final
-{
-public:
-  explicit ObAdminSlogReplayer(storage::ObBaseFileMgr &file_mgr,
-                                  storage::ObPartitionMetaRedoModule &pg_mgr,
-                                  char *slog_dir);
-  virtual ~ObAdminSlogReplayer();
-
-  int replay_slog();
-  int init();
-  void reset();
-  int get_sstable(storage::ObITable::TableKey table_key, storage::ObSSTable *&sstable);
-
-private:
-  int read_checkpoint_and_replay_log(common::ObLogCursor &checkpoint);
-  int replay_server_slog(
-      const char *slog_dir,
-      const common::ObLogCursor &replay_start_cursor,
-      const blocksstable::ObStorageLogCommittedTransGetter &committed_trans_getter);
-  int replay_pg_slog(const char *slog_dir,
-      const common::ObLogCursor &replay_start_cursor,
-      const blocksstable::ObStorageLogCommittedTransGetter &committed_trans_getter,
-      common::ObLogCursor &checkpoint);
-
-private:
-  class ServerMetaSLogFilter : public blocksstable::ObISLogFilter
-  {
-  public:
-    ServerMetaSLogFilter() = default;
-    virtual ~ServerMetaSLogFilter() = default;
-    virtual int filter(const ObISLogFilter::Param &param, bool &is_filtered) const override;
-  };
-
-  class PGMetaSLogFilter : public blocksstable::ObISLogFilter
-  {
-  public:
-    explicit PGMetaSLogFilter(storage::ObBaseFileMgr &file_mgr) : file_mgr_(file_mgr) {};
-    virtual ~PGMetaSLogFilter() = default;
-    virtual int filter(const ObISLogFilter::Param &param, bool &is_filtered) const override;
-  private:
-    storage::ObBaseFileMgr &file_mgr_;
-  };
-
-  const common::ObAddr svr_addr_;
-  blocksstable::ObStorageFileWithRef svr_root_;
-  storage::ObBaseFileMgr &file_mgr_;
-  storage::ObPartitionMetaRedoModule &pg_mgr_;
-  blocksstable::ObServerSuperBlock super_block_;
-  storage::ObServerPGMetaCheckpointReader pg_meta_reader_;
-  storage::ObTenantFileSuperBlockCheckpointReader tenant_file_reader_;
-  char *slog_dir_;
-
-  DISALLOW_COPY_AND_ASSIGN(ObAdminSlogReplayer);
+  char *key_hex_str_;
+  int64_t master_key_id_;
+  common::ObArenaAllocator io_allocator_;
 };
 
 } //namespace tools

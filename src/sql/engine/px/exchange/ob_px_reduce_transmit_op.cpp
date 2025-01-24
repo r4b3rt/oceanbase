@@ -16,9 +16,11 @@
 #include "sql/engine/ob_physical_plan.h"
 #include "sql/engine/ob_exec_context.h"
 
-namespace oceanbase {
+namespace oceanbase
+{
 using namespace common;
-namespace sql {
+namespace sql
+{
 
 OB_SERIALIZE_MEMBER((ObPxReduceTransmitOpInput, ObPxTransmitOpInput));
 
@@ -41,7 +43,7 @@ int ObPxReduceTransmitOp::do_transmit()
 {
   int ret = OB_SUCCESS;
   ObAllToOneSliceIdxCalc fixed_slice_calc(ctx_.get_allocator());
-  ret = send_rows(fixed_slice_calc);
+  ret = send_rows<ObSliceIdxCalc::ALL_TO_ONE>(fixed_slice_calc);
   return ret;
 }
 
@@ -50,5 +52,5 @@ int ObPxReduceTransmitOp::inner_close()
   return ObPxTransmitOp::inner_close();
 }
 
-}  // end namespace sql
-}  // end namespace oceanbase
+} // end namespace sql
+} // end namespace oceanbase

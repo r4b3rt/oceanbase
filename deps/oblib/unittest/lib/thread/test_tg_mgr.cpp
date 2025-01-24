@@ -17,16 +17,32 @@ using namespace oceanbase;
 using namespace oceanbase::common;
 using namespace oceanbase::lib;
 
-class TestTimerTask : public ObTimerTask {
+class TestTG : public testing::Test
+{
+protected:
+  static void SetUpTestCase()
+  {
+    ASSERT_EQ(OB_SUCCESS, ObTimerService::get_instance().start());
+  }
+
+  static void TearDownTestCase()
+  {
+    ObTimerService::get_instance().stop();
+    ObTimerService::get_instance().wait();
+    ObTimerService::get_instance().destroy();
+  }
+};
+
+class TestTimerTask : public ObTimerTask
+{
 public:
-  TestTimerTask() : running_(false), task_run_count_(0)
-  {}
+  TestTimerTask() : running_(false), task_run_count_(0) {}
 
   void runTimerTask()
   {
     running_ = true;
     ++task_run_count_;
-    this_routine::usleep(50000);
+    ::usleep(500000);
     running_ = false;
   }
 
@@ -34,48 +50,53 @@ public:
   int64_t task_run_count_;
 };
 
-TEST(TG, timer)
+TEST_F(TestTG, timer)
 {
   int tg_id = TGDefIDs::TEST1;
   TestTimerTask task;
   // start
   ASSERT_EQ(OB_SUCCESS, TG_START(tg_id));
   ASSERT_EQ(OB_SUCCESS, TG_SCHEDULE(tg_id, task, 0, true));
-  this_routine::usleep(40000);
+  ::usleep(250000);
   ASSERT_TRUE(task.running_);
-  this_routine::usleep(60000);
+  ::usleep(750000);
   ASSERT_EQ(1, task.task_run_count_);
-  ASSERT_EQ(OB_SUCCESS, TG_STOP(tg_id));
-  ASSERT_EQ(OB_SUCCESS, TG_WAIT(tg_id));
+  ASSERT_EQ(OB_SUCCESS, TG_STOP_R(tg_id));
+  TG_WAIT_ONLY(tg_id);
+  ASSERT_EQ(OB_SUCCESS, TG_CANCEL_R(tg_id, task));
+  ASSERT_EQ(OB_SUCCESS, TG_WAIT_R(tg_id));
+  // TG_WAIT = wait + destroy
+  ASSERT_EQ(OB_ERR_UNEXPECTED, TG_CANCEL_R(tg_id, task));
 
   // restart
   ASSERT_EQ(OB_SUCCESS, TG_START(tg_id));
   ASSERT_EQ(OB_SUCCESS, TG_SCHEDULE(tg_id, task, 0, true));
-  this_routine::usleep(40000);
+  ::usleep(250000);
   ASSERT_TRUE(task.running_);
-  this_routine::usleep(60000);
+  ::usleep(750000);
   ASSERT_EQ(2, task.task_run_count_);
-  ASSERT_EQ(OB_SUCCESS, TG_STOP(tg_id));
-  ASSERT_EQ(OB_SUCCESS, TG_WAIT(tg_id));
+  ASSERT_EQ(OB_SUCCESS, TG_STOP_R(tg_id));
+  ASSERT_EQ(OB_SUCCESS, TG_WAIT_R(tg_id));
 
   ASSERT_TRUE(TG_EXIST(tg_id));
   TG_DESTROY(tg_id);
   ASSERT_FALSE(TG_EXIST(tg_id));
 }
 
-class Handler : public TGTaskHandler {
+class Handler : public TGTaskHandler
+{
 public:
-  void handle(void* task) override
+  void handle(void *task) override
   {
     UNUSED(task);
     ++handle_count_;
-    this_routine::usleep(50000);
+    ::usleep(50000);
   }
 
-  int64_t handle_count_ = 0;
+  int64_t handle_count_=0;
 };
 
-TEST(TG, queue_thread)
+TEST_F(TestTG, queue_thread)
 {
   int tg_id = TGDefIDs::TEST2;
   Handler handler;
@@ -83,18 +104,18 @@ TEST(TG, queue_thread)
   ASSERT_EQ(OB_SUCCESS, TG_SET_HANDLER(tg_id, handler));
   ASSERT_EQ(OB_SUCCESS, TG_START(tg_id));
   ASSERT_EQ(OB_SUCCESS, TG_PUSH_TASK(tg_id, &tg_id));
-  this_routine::usleep(50000);
-  ASSERT_EQ(OB_SUCCESS, TG_STOP(tg_id));
-  ASSERT_EQ(OB_SUCCESS, TG_WAIT(tg_id));
+  ::usleep(50000);
+  ASSERT_EQ(OB_SUCCESS, TG_STOP_R(tg_id));
+  ASSERT_EQ(OB_SUCCESS, TG_WAIT_R(tg_id));
   ASSERT_EQ(1, handler.handle_count_);
 
   // restart
   ASSERT_EQ(OB_SUCCESS, TG_SET_HANDLER(tg_id, handler));
   ASSERT_EQ(OB_SUCCESS, TG_START(tg_id));
   ASSERT_EQ(OB_SUCCESS, TG_PUSH_TASK(tg_id, &tg_id));
-  this_routine::usleep(50000);
-  ASSERT_EQ(OB_SUCCESS, TG_STOP(tg_id));
-  ASSERT_EQ(OB_SUCCESS, TG_WAIT(tg_id));
+  ::usleep(50000);
+  ASSERT_EQ(OB_SUCCESS, TG_STOP_R(tg_id));
+  ASSERT_EQ(OB_SUCCESS, TG_WAIT_R(tg_id));
   ASSERT_EQ(2, handler.handle_count_);
 
   ASSERT_TRUE(TG_EXIST(tg_id));
@@ -102,31 +123,22 @@ TEST(TG, queue_thread)
   ASSERT_FALSE(TG_EXIST(tg_id));
 }
 
-class MyDTask : public common::IObDedupTask {
+class MyDTask: public common::IObDedupTask
+{
 public:
-  MyDTask() : common::IObDedupTask(common::T_BLOOMFILTER)
-  {}
-  virtual int64_t hash() const
-  {
-    return reinterpret_cast<int64_t>(this);
-  }
-  virtual bool operator==(const IObDedupTask& task) const
-  {
-    return this == &task;
-  }
+  MyDTask() : common::IObDedupTask(common::T_BLOOMFILTER) {}
+  virtual int64_t hash() const { return reinterpret_cast<int64_t>(this); }
+  virtual bool operator ==(const IObDedupTask &task) const { return this == &task; }
   virtual int64_t get_deep_copy_size() const
   {
     return sizeof(*this);
   }
-  virtual IObDedupTask* deep_copy(char* buffer, const int64_t buf_size) const
+  virtual IObDedupTask *deep_copy(char *buffer, const int64_t buf_size) const
   {
     UNUSED(buf_size);
     return new (buffer) MyDTask;
   }
-  virtual int64_t get_abs_expired_time() const
-  {
-    return 0;
-  }
+  virtual int64_t get_abs_expired_time() const {  return 0;  }
   virtual int process()
   {
     handle_count_++;
@@ -137,24 +149,24 @@ public:
 };
 int64_t MyDTask::handle_count_ = 0;
 
-TEST(TG, dedup_queue)
+TEST_F(TestTG, dedup_queue)
 {
   int tg_id = TGDefIDs::TEST3;
   MyDTask task;
   // start
   ASSERT_EQ(OB_SUCCESS, TG_START(tg_id));
   ASSERT_EQ(OB_SUCCESS, TG_PUSH_TASK(tg_id, task));
-  this_routine::usleep(50000);
-  ASSERT_EQ(OB_SUCCESS, TG_STOP(tg_id));
-  ASSERT_EQ(OB_SUCCESS, TG_WAIT(tg_id));
+  ::usleep(50000);
+  ASSERT_EQ(OB_SUCCESS, TG_STOP_R(tg_id));
+  ASSERT_EQ(OB_SUCCESS, TG_WAIT_R(tg_id));
   ASSERT_EQ(1, task.handle_count_);
 
   // restart
   ASSERT_EQ(OB_SUCCESS, TG_START(tg_id));
   ASSERT_EQ(OB_SUCCESS, TG_PUSH_TASK(tg_id, task));
-  this_routine::usleep(50000);
-  ASSERT_EQ(OB_SUCCESS, TG_STOP(tg_id));
-  ASSERT_EQ(OB_SUCCESS, TG_WAIT(tg_id));
+  ::usleep(50000);
+  ASSERT_EQ(OB_SUCCESS, TG_STOP_R(tg_id));
+  ASSERT_EQ(OB_SUCCESS, TG_WAIT_R(tg_id));
   ASSERT_EQ(2, task.handle_count_);
 
   ASSERT_TRUE(TG_EXIST(tg_id));
@@ -162,36 +174,38 @@ TEST(TG, dedup_queue)
   ASSERT_FALSE(TG_EXIST(tg_id));
 }
 
-class MyRunnable : public TGRunnable {
+class MyRunnable : public TGRunnable
+{
 public:
   void run1() override
   {
+
     run_count_++;
     while (!has_set_stop()) {
-      this_routine::usleep(50000);
+      ::usleep(50000);
     }
   }
-  int64_t run_count_ = 0;
+  int64_t run_count_=0;
 };
 
-TEST(TG, thread_pool)
+TEST_F(TestTG, thread_pool)
 {
   int tg_id = TGDefIDs::TEST4;
   MyRunnable runnable;
   // start
   ASSERT_EQ(OB_SUCCESS, TG_SET_RUNNABLE(tg_id, runnable));
   ASSERT_EQ(OB_SUCCESS, TG_START(tg_id));
-  this_routine::usleep(50000);
-  ASSERT_EQ(OB_SUCCESS, TG_STOP(tg_id));
-  ASSERT_EQ(OB_SUCCESS, TG_WAIT(tg_id));
+  ::usleep(50000);
+  ASSERT_EQ(OB_SUCCESS, TG_STOP_R(tg_id));
+  ASSERT_EQ(OB_SUCCESS, TG_WAIT_R(tg_id));
   ASSERT_EQ(1, runnable.run_count_);
 
   // restart
   ASSERT_EQ(OB_SUCCESS, TG_SET_RUNNABLE(tg_id, runnable));
   ASSERT_EQ(OB_SUCCESS, TG_START(tg_id));
-  this_routine::usleep(50000);
-  ASSERT_EQ(OB_SUCCESS, TG_STOP(tg_id));
-  ASSERT_EQ(OB_SUCCESS, TG_WAIT(tg_id));
+  ::usleep(50000);
+  ASSERT_EQ(OB_SUCCESS, TG_STOP_R(tg_id));
+  ASSERT_EQ(OB_SUCCESS, TG_WAIT_R(tg_id));
   ASSERT_EQ(2, runnable.run_count_);
 
   ASSERT_TRUE(TG_EXIST(tg_id));
@@ -199,21 +213,51 @@ TEST(TG, thread_pool)
   ASSERT_FALSE(TG_EXIST(tg_id));
 }
 
-class MyTask : public share::ObAsyncTask {
+TEST_F(TestTG, reentrant_thread_pool)
+{
+  int tg_id = TGDefIDs::TEST8;
+  MyRunnable runnable;
+  // start
+  ASSERT_EQ(OB_SUCCESS, TG_SET_RUNNABLE(tg_id, runnable));
+  ASSERT_EQ(OB_SUCCESS, TG_START(tg_id));
+  ::usleep(50000);
+  ASSERT_EQ(OB_SUCCESS, TG_REENTRANT_LOGICAL_START(tg_id));
+  ::usleep(50000);
+  TG_REENTRANT_LOGICAL_STOP(tg_id);
+  ::usleep(50000);
+  TG_REENTRANT_LOGICAL_WAIT(tg_id);
+  ASSERT_EQ(1, runnable.run_count_);
+  ASSERT_EQ(OB_SUCCESS, TG_REENTRANT_LOGICAL_START(tg_id));
+  ::usleep(50000);
+  ASSERT_EQ(OB_SUCCESS, TG_STOP_R(tg_id));
+  ASSERT_EQ(OB_SUCCESS, TG_WAIT_R(tg_id));
+  ASSERT_EQ(2, runnable.run_count_);
+  // restart
+  ASSERT_EQ(OB_SUCCESS, TG_SET_RUNNABLE(tg_id, runnable));
+  ASSERT_EQ(OB_SUCCESS, TG_START(tg_id));
+  ::usleep(50000);
+  ASSERT_EQ(OB_SUCCESS, TG_STOP_R(tg_id));
+  ASSERT_EQ(OB_SUCCESS, TG_WAIT_R(tg_id));
+  ASSERT_EQ(2, runnable.run_count_);
+
+  ASSERT_TRUE(TG_EXIST(tg_id));
+  TG_DESTROY(tg_id);
+  ASSERT_FALSE(TG_EXIST(tg_id));
+}
+class MyTask : public share::ObAsyncTask
+{
 public:
   virtual int process() override
   {
     handle_count_++;
-    this_routine::usleep(50000);
+    ::usleep(50000);
     return OB_SUCCESS;
   }
 
   virtual int64_t get_deep_copy_size() const override
-  {
-    return sizeof(*this);
-  }
+  { return sizeof(*this); }
 
-  virtual ObAsyncTask* deep_copy(char* buf, const int64_t buf_size) const override
+  virtual ObAsyncTask *deep_copy(char *buf, const int64_t buf_size) const override
   {
     UNUSED(buf_size);
     return new (buf) MyTask();
@@ -222,24 +266,24 @@ public:
 };
 int64_t MyTask::handle_count_ = 0;
 
-TEST(TG, async_task_queue)
+TEST_F(TestTG, async_task_queue)
 {
   int tg_id = TGDefIDs::TEST5;
   MyTask task;
   // start
   ASSERT_EQ(OB_SUCCESS, TG_START(tg_id));
   ASSERT_EQ(OB_SUCCESS, TG_PUSH_TASK(tg_id, task));
-  this_routine::usleep(50000);
-  ASSERT_EQ(OB_SUCCESS, TG_STOP(tg_id));
-  ASSERT_EQ(OB_SUCCESS, TG_WAIT(tg_id));
+  ::usleep(50000);
+  ASSERT_EQ(OB_SUCCESS, TG_STOP_R(tg_id));
+  ASSERT_EQ(OB_SUCCESS, TG_WAIT_R(tg_id));
   ASSERT_EQ(1, task.handle_count_);
 
   // restart
   ASSERT_EQ(OB_SUCCESS, TG_START(tg_id));
   ASSERT_EQ(OB_SUCCESS, TG_PUSH_TASK(tg_id, task));
-  this_routine::usleep(50000);
-  ASSERT_EQ(OB_SUCCESS, TG_STOP(tg_id));
-  ASSERT_EQ(OB_SUCCESS, TG_WAIT(tg_id));
+  ::usleep(50000);
+  ASSERT_EQ(OB_SUCCESS, TG_STOP_R(tg_id));
+  ASSERT_EQ(OB_SUCCESS, TG_WAIT_R(tg_id));
   ASSERT_EQ(2, task.handle_count_);
 
   ASSERT_TRUE(TG_EXIST(tg_id));
@@ -247,51 +291,54 @@ TEST(TG, async_task_queue)
   ASSERT_FALSE(TG_EXIST(tg_id));
 }
 
-TEST(TG, timer_group)
+class MapQueueThreadHandler : public TGTaskHandler
+{
+public:
+  void handle(void *task) override
+  {}
+  void handle(void *task, volatile bool &is_stopped) override
+  {
+    UNUSED(task);
+    UNUSED(is_stopped);
+    ++handle_count_;
+    ::usleep(50000);
+  }
+
+  int64_t handle_count_ = 0;
+};
+
+TEST_F(TestTG, map_queue_thread)
 {
   int tg_id = TGDefIDs::TEST6;
-  TestTimerTask tasks[2];
+  MapQueueThreadHandler handler;
   // start
+  ASSERT_EQ(OB_SUCCESS, TG_SET_HANDLER(tg_id, handler));
   ASSERT_EQ(OB_SUCCESS, TG_START(tg_id));
-  for (int i = 0; i < ARRAYSIZEOF(tasks); i++) {
-    ASSERT_EQ(OB_SUCCESS, TG_SCHEDULE(tg_id, i, tasks[i], 0, true));
-  }
-  this_routine::usleep(40000);
-  for (int i = 0; i < ARRAYSIZEOF(tasks); i++) {
-    ASSERT_TRUE(tasks[i].running_);
-  }
-  this_routine::usleep(60000);
-  for (int i = 0; i < ARRAYSIZEOF(tasks); i++) {
-    ASSERT_EQ(1, tasks[i].task_run_count_);
-  }
-  ASSERT_EQ(OB_SUCCESS, TG_STOP(tg_id));
-  ASSERT_EQ(OB_SUCCESS, TG_WAIT(tg_id));
+  ASSERT_EQ(OB_SUCCESS, TG_PUSH_TASK(tg_id, &tg_id, 0));
+  ::usleep(50000);
+  ASSERT_EQ(OB_SUCCESS, TG_STOP_R(tg_id));
+  ASSERT_EQ(OB_SUCCESS, TG_WAIT_R(tg_id));
+  ASSERT_EQ(1, handler.handle_count_);
 
   // restart
+  ASSERT_EQ(OB_SUCCESS, TG_SET_HANDLER(tg_id, handler));
   ASSERT_EQ(OB_SUCCESS, TG_START(tg_id));
-  for (int i = 0; i < ARRAYSIZEOF(tasks); i++) {
-    ASSERT_EQ(OB_SUCCESS, TG_SCHEDULE(tg_id, i, tasks[i], 0, true));
-  }
-  this_routine::usleep(40000);
-  for (int i = 0; i < ARRAYSIZEOF(tasks); i++) {
-    ASSERT_TRUE(tasks[i].running_);
-  }
-  this_routine::usleep(60000);
-  for (int i = 0; i < ARRAYSIZEOF(tasks); i++) {
-    ASSERT_EQ(2, tasks[i].task_run_count_);
-  }
-  ASSERT_EQ(OB_SUCCESS, TG_STOP(tg_id));
-  ASSERT_EQ(OB_SUCCESS, TG_WAIT(tg_id));
+  ASSERT_EQ(OB_SUCCESS, TG_PUSH_TASK(tg_id, &tg_id, 1));
+  ::usleep(50000);
+  ASSERT_EQ(OB_SUCCESS, TG_STOP_R(tg_id));
+  ASSERT_EQ(OB_SUCCESS, TG_WAIT_R(tg_id));
+  ASSERT_EQ(2, handler.handle_count_);
 
   ASSERT_TRUE(TG_EXIST(tg_id));
   TG_DESTROY(tg_id);
   ASSERT_FALSE(TG_EXIST(tg_id));
 }
 
-int main(int argc, char* argv[])
+int main(int argc, char *argv[])
 {
   oceanbase::common::ObLogger::get_logger().set_log_level("INFO");
   OB_LOGGER.set_log_level("INFO");
+  OB_LOGGER.set_file_name("test_tg_mgr.log", true);
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }

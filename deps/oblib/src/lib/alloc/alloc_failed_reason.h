@@ -16,21 +16,28 @@
 #include <stdint.h>
 #include "lib/coro/co_var.h"
 
-namespace oceanbase {
-namespace lib {
-enum AllocFailedReason {
-  SINGLE_ALLOC_SIZE_OVERFLOW = 0,
+namespace oceanbase
+{
+namespace lib
+{
+enum AllocFailedReason
+{
+  UNKNOWN = 0,
+  SINGLE_ALLOC_SIZE_OVERFLOW,
   CTX_HOLD_REACH_LIMIT,
   TENANT_HOLD_REACH_LIMIT,
   SERVER_HOLD_REACH_LIMIT,
-  PHYSICAL_MEMORY_EXHAUST
+  PHYSICAL_MEMORY_EXHAUST,
+  ERRSIM_INJECTION
 };
 
-struct AllocFailedCtx {
+struct AllocFailedCtx
+{
 public:
   int reason_;
   int64_t alloc_size_;
-  union {
+  union
+  {
     int errno_;
     struct {
       int64_t ctx_id_;
@@ -47,13 +54,25 @@ public:
       int64_t server_limit_;
     };
   };
+  bool need_wash_block() const
+  {
+    return reason_ == lib::CTX_HOLD_REACH_LIMIT ||
+           reason_ == lib::TENANT_HOLD_REACH_LIMIT ||
+           reason_ == lib::SERVER_HOLD_REACH_LIMIT;
+  }
+  bool need_wash_chunk() const
+  {
+    return reason_ == lib::PHYSICAL_MEMORY_EXHAUST;
+
+  }
 };
 
-char* alloc_failed_msg();
+char *alloc_failed_msg();
 
-AllocFailedCtx& g_alloc_failed_ctx();
+AllocFailedCtx &g_alloc_failed_ctx();
+void print_alloc_failed_msg();
 
-}  // end of namespace lib
-}  // end of namespace oceanbase
+} // end of namespace lib
+} // end of namespace oceanbase
 
 #endif /* _OCEABASE_LIB_ALLOC_FAILED_REASON_H_ */

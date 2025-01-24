@@ -8,14 +8,16 @@
  * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PubL v2 for more details.
+ * This file is for define of func json_unquote
  */
 
-// This file is for define of func json_unquote
+
 #ifndef OCEANBASE_SQL_OB_EXPR_JSON_UNQUOTE_H_
 #define OCEANBASE_SQL_OB_EXPR_JSON_UNQUOTE_H_
 
 #include "sql/engine/expr/ob_expr_operator.h"
 #include "lib/json_type/ob_json_tree.h"
+#include "sql/engine/expr/ob_expr_multi_mode_func_helper.h"
 using namespace oceanbase::common;
 
 namespace oceanbase
@@ -28,11 +30,8 @@ public:
   explicit ObExprJsonUnquote(common::ObIAllocator &alloc);
   virtual ~ObExprJsonUnquote();
 
-  int calc_result1(common::ObObj &result, const common::ObObj &obj, common::ObExprCtx &expr_ctx) const override;
-
-  template <typename T>
-  static int calc(const T &data, ObObjType type, ObCollationType cs_type,
-                  ObIAllocator *allocator, ObJsonBuffer &j_buf, bool &is_null);
+  static int calc(ObEvalCtx &ctx, const ObDatum &data, ObDatumMeta meta, bool has_lob_header,
+                  MultimodeAlloctor *allocator, ObJsonBuffer &j_buf, bool &is_null);
 
   virtual int calc_result_type1(ObExprResType &type,
                                 ObExprResType &type1,

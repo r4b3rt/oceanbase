@@ -15,32 +15,61 @@
 #include "share/ob_define.h"
 #include "lib/container/ob_array.h"
 #include "lib/string/ob_string.h"
-namespace oceanbase {
-namespace sql {
-class ObResolverParams;
+#include "pl/dblink/ob_pl_dblink_guard.h"
+namespace oceanbase
+{
+namespace sql
+{
+struct ObResolverParams;
 class ObDMLStmt;
 class ObSynonymChecker;
 class ObSQLSessionInfo;
 class ObSchemaChecker;
 struct ObQualifiedName;
-class ObSequenceNamespaceChecker {
+class ObSequenceNamespaceChecker
+{
 public:
-  explicit ObSequenceNamespaceChecker(ObResolverParams& resolver_params) : params_(resolver_params)
-  {}
-  ~ObSequenceNamespaceChecker(){};
-  int check_sequence_namespace(const ObQualifiedName& q_name, ObSynonymChecker& syn_checker, uint64_t& sequence_id);
-  int check_sequence_namespace(const ObQualifiedName& q_name, ObSynonymChecker& syn_checker,
-      ObSQLSessionInfo* session_info, ObSchemaChecker* schema_checker, uint64_t& sequence_id);
-  inline static bool is_curr_or_next_val(const common::ObString& s)
+  explicit ObSequenceNamespaceChecker(ObResolverParams &resolver_params);
+  explicit ObSequenceNamespaceChecker(const ObSchemaChecker *schema_checker,
+                                      const ObSQLSessionInfo *session_info);
+  ~ObSequenceNamespaceChecker() {};
+  int check_sequence_namespace(const ObQualifiedName &q_name,
+                               ObSynonymChecker &syn_checker,
+                               uint64_t &sequence_id,
+                               uint64_t *dblink_id=NULL);
+  int check_sequence_namespace(const ObQualifiedName &q_name,
+                               ObSynonymChecker &syn_checker,
+                               const ObSQLSessionInfo *session_info,
+                               const ObSchemaChecker *schema_checker,
+                               uint64_t &sequence_id,
+                               uint64_t *dblink_id=NULL);
+  inline static bool is_curr_or_next_val(const common::ObString &s)
   {
-    return 0 == s.case_compare("nextval") || 0 == s.case_compare("currval");
+    return 0 == s.case_compare("nextval")  || 0 == s.case_compare("currval");
   }
-
 private:
-  int check_sequence_with_synonym_recursively(const uint64_t tenant_id, const uint64_t database_id,
-      const common::ObString& sequence_name, ObSynonymChecker& syn_checker, ObSchemaChecker* schema_checker,
-      bool& exists, uint64_t& sequence_id);
-  ObResolverParams& params_;
+  int check_sequence_with_synonym_recursively(const uint64_t tenant_id,
+                                              const uint64_t database_id,
+                                              const common::ObString &sequence_name,
+                                              ObSynonymChecker &syn_checker,
+                                              const ObSchemaChecker *schema_checker,
+                                              bool &exists,
+                                              uint64_t &sequence_id);
+  int check_link_sequence_exists(const pl::ObDbLinkSchema *dblink_schema,
+                                sql::ObSQLSessionInfo *session_info,
+                                const ObString &database_name,
+                                const ObString &sequence_name,
+                                bool &exists,
+                                bool &has_currval,
+                                number::ObNumber &currval);
+  int fetch_dblink_sequence_schema(const uint64_t tenant_id,
+                                  const uint64_t db_id,
+                                  const uint64_t dblink_id,
+                                  const common::ObString &sequence_name,
+                                  ObSQLSessionInfo *session_info,
+                                  uint64_t &sequence_id);
+  const ObSchemaChecker *schema_checker_;
+  const ObSQLSessionInfo *session_info_;
 };
 }  // namespace sql
 }  // namespace oceanbase

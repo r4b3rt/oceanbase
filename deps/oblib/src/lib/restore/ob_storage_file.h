@@ -14,58 +14,65 @@
 #define SRC_LIBRARY_SRC_LIB_RESTORE_OB_STORAGE_FILE_H_
 
 #include "ob_i_storage.h"
+#include "lib/container/ob_heap.h"            // ObBinaryHeap
+#include "lib/container/ob_array_iterator.h"
 
-namespace oceanbase {
-namespace common {
-class ObStorageFileUtil : public ObIStorageUtil {
+namespace oceanbase
+{
+namespace common
+{
+
+static constexpr char OB_STORAGE_NFS_ALLOCATOR[] = "StorageNFS";
+
+class ObStorageFileUtil: public ObIStorageUtil
+{
 public:
   ObStorageFileUtil();
   virtual ~ObStorageFileUtil();
-  virtual int is_exist(const common::ObString& uri, const common::ObString& storage_info, bool& exist);
-  virtual int get_file_length(const common::ObString& uri, const common::ObString& storage_info, int64_t& file_length);
-  virtual int del_file(const common::ObString& uri, const common::ObString& storage_info);
-  virtual int write_single_file(
-      const common::ObString& uri, const common::ObString& storage_info, const char* buf, const int64_t size);
-  virtual int mkdir(const common::ObString& uri, const common::ObString& storage_info);
-  virtual int update_file_modify_time(const common::ObString& uri, const common::ObString& storage_info);
-  virtual int list_files(const common::ObString& uri, const common::ObString& storage_info,
-      common::ObIAllocator& allocator, common::ObIArray<common::ObString>& file_names);
-  virtual int del_dir(const common::ObString& uri, const common::ObString& storage_info);
-  virtual int get_pkeys_from_dir(const common::ObString& uri, const common::ObString& storage_info,
-      common::ObIArray<common::ObPartitionKey>& pkeys);
-  virtual int delete_tmp_files(const common::ObString& dir_path, const common::ObString& storage_info);
-  virtual int is_empty_directory(
-      const common::ObString& uri, const common::ObString& storage_info, bool& is_empty_directory);
-  virtual int is_tagging(const common::ObString& uri, const common::ObString& storage_info, bool& is_tagging);
-  virtual int check_backup_dest_lifecycle(
-      const common::ObString& dir_path, const common::ObString& storage_info, bool& is_set_lifecycle);
-  virtual int list_directories(const common::ObString& uri, const common::ObString& storage_info,
-      common::ObIAllocator& allocator, common::ObIArray<common::ObString>& directories_names);
+  virtual int open(common::ObObjectStorageInfo *storage_info)
+  {
+    UNUSED(storage_info);
+    return OB_SUCCESS;
+  }
 
+  virtual void close() {}
+
+  virtual int is_exist(const common::ObString &uri, bool &exist);
+  virtual int get_file_length(const common::ObString &uri, int64_t &file_length);
+  virtual int head_object_meta(const common::ObString &uri, ObStorageObjectMetaBase &obj_meta);
+  virtual int del_file(const common::ObString &uri);
+  virtual int batch_del_files(
+      const ObString &uri,
+      hash::ObHashMap<ObString, int64_t> &files_to_delete,
+      ObIArray<int64_t> &failed_files_idx) override;
+  virtual int write_single_file(const common::ObString &uri, const char *buf, const int64_t size);
+  virtual int mkdir(const common::ObString &uri);
+  virtual int list_files(const common::ObString &uri, common::ObBaseDirEntryOperator &op);
+  virtual int list_files(const common::ObString &uri, ObStorageListCtxBase &list_ctx);
+  virtual int del_dir(const common::ObString &uri);
+  virtual int list_directories(const common::ObString &uri, common::ObBaseDirEntryOperator &op);
+  virtual int is_tagging(const common::ObString &uri, bool &is_tagging);
+  virtual int del_unmerged_parts(const ObString &uri) override;
 private:
-  int get_partition_ids_from_dir(const char* dir_path, common::ObIArray<int64_t>& partition_ids);
-  int get_tmp_file_format_timestamp(const char* file_name, bool& is_tmp_file, int64_t& timestamp);
+  int get_tmp_file_format_timestamp(const char *file_name, bool &is_tmp_file, int64_t &timestamp);
+  int check_is_appendable(const common::ObString &uri, struct dirent &entry, bool &is_appendable_file);
 
 private:
   DISALLOW_COPY_AND_ASSIGN(ObStorageFileUtil);
 };
 
-class ObStorageFileReader : public ObIStorageReader {
+class ObStorageFileReader: public ObIStorageReader
+{
 public:
   ObStorageFileReader();
   virtual ~ObStorageFileReader();
-  virtual int open(const common::ObString& uri, const common::ObString& storage_info);
-  virtual int pread(char* buf, const int64_t buf_size, int64_t offset, int64_t& read_size);
-  virtual int close();
-  virtual int64_t get_length() const
-  {
-    return file_length_;
-  }
-  virtual bool is_opened() const
-  {
-    return is_opened_;
-  }
-
+  virtual int open(const common::ObString &uri,
+      common::ObObjectStorageInfo *storage_info = NULL, const bool head_meta = true) override;
+  virtual int pread(char *buf,
+      const int64_t buf_size, const int64_t offset, int64_t &read_size) override;
+  virtual int close() override;
+  virtual int64_t get_length() const override { return file_length_; }
+  virtual bool is_opened() const override { return is_opened_; }
 private:
   int fd_;
   bool is_opened_;
@@ -75,83 +82,155 @@ private:
 };
 
 // Only used for NFS file systems mounted in direct form, so there is no fsync
-class ObStorageFileBaseWriter : public ObIStorageWriter {
+class ObStorageFileBaseWriter: public ObIStorageWriter
+{
 public:
   ObStorageFileBaseWriter();
   virtual ~ObStorageFileBaseWriter();
-  virtual int open(const common::ObString& uri, const common::ObString& storage_info) = 0;
+  virtual int open(const common::ObString &uri, common::ObObjectStorageInfo *storage_info = NULL) = 0;
   virtual int open(const int flags);
-  virtual int write(const char* buf, const int64_t size);
-  virtual int pwrite(const char* buf, const int64_t size, const int64_t offset);
+  virtual int write(const char *buf,const int64_t size);
+  virtual int pwrite(const char *buf, const int64_t size, const int64_t offset);
   virtual int close();
-  virtual int64_t get_length() const
-  {
-    return file_length_;
-  }
-  virtual bool is_opened() const
-  {
-    return is_opened_;
-  }
-
+  virtual int64_t get_length() const { return file_length_; }
+  virtual bool is_opened() const { return is_opened_; }
+protected:
+  int inner_pwrite(const char *buf, const int64_t size, const int64_t offset);
 protected:
   int fd_;
   bool is_opened_;
   char path_[OB_MAX_URI_LENGTH];
   int64_t file_length_;
   bool has_error_;
-
 private:
   DISALLOW_COPY_AND_ASSIGN(ObStorageFileBaseWriter);
 };
 
 // Only used for NFS file systems mounted in direct form, so there is no fsync
-class ObStorageFileWriter : public ObStorageFileBaseWriter {
+// allow to call write() at most once. if call write() multiple times, then return error.
+class ObStorageFileSingleWriter: public ObStorageFileBaseWriter
+{
 public:
-  ObStorageFileWriter();
-  virtual ~ObStorageFileWriter();
-  virtual int open(const common::ObString& uri, const common::ObString& storage_info);
+  ObStorageFileSingleWriter();
+  virtual ~ObStorageFileSingleWriter();
+  virtual int open(const common::ObString &uri, common::ObObjectStorageInfo *storage_info = NULL);
+  virtual int write(const char *buf,const int64_t size) override;
   virtual int close() override;
-
-private:
+protected:
+  int close_and_rename();
+protected:
   char real_path_[OB_MAX_URI_LENGTH];
-  DISALLOW_COPY_AND_ASSIGN(ObStorageFileWriter);
+private:
+  DISALLOW_COPY_AND_ASSIGN(ObStorageFileSingleWriter);
+  bool is_file_path_obtained_;
+  bool is_written_;
+};
+
+// allow to call pwrite() mulitle times. the real file is not readable until close, which rename
+// tmp file to real file. only used for implementing MultiPartWriter.
+class ObStorageFileMultipleWriter: public ObStorageFileSingleWriter
+{
+public:
+  ObStorageFileMultipleWriter() {}
+  virtual ~ObStorageFileMultipleWriter() {}
+  virtual int open(const common::ObString &uri, common::ObObjectStorageInfo *storage_info = NULL) override;
+  virtual int write(const char *buf,const int64_t size) override;
+  virtual int close() override;
+  void set_error();
+private:
+  DISALLOW_COPY_AND_ASSIGN(ObStorageFileMultipleWriter);
 };
 
 // Only used for NFS file systems mounted in direct form, so there is no fsync
 // use file lock to gurantee one process appendding this file
-class ObStorageFileAppender : public ObStorageFileBaseWriter {
+class ObStorageFileAppender: public ObStorageFileBaseWriter
+{
 public:
   ObStorageFileAppender();
   ObStorageFileAppender(StorageOpenMode mode);
   virtual ~ObStorageFileAppender();
-  virtual int open(const common::ObString& uri, const common::ObString& storage_info);
+  virtual int open(const common::ObString &uri, common::ObObjectStorageInfo *storage_info = NULL);
+  virtual int pwrite(const char *buf, const int64_t size, const int64_t offset) override;
   virtual int close() override;
-
+  void set_open_mode(StorageOpenMode mode) {open_mode_ = mode;}
 private:
-  int get_open_flag_and_mode_(int& flag, bool& need_lock);
-
+  int get_open_flag_and_mode_(int &flag, bool &need_lock);
 private:
   bool need_unlock_;
   StorageOpenMode open_mode_;
   DISALLOW_COPY_AND_ASSIGN(ObStorageFileAppender);
 };
 
-// Only used for NFS file systems mounted in direct form, so there is no fsync
-class ObStorageFileMetaWrapper : public ObIStorageMetaWrapper {
+class ObStorageFileMultiPartWriter : public ObStorageFileMultipleWriter, public ObIStorageMultiPartWriter
+{
 public:
-  ObStorageFileMetaWrapper();
-  virtual ~ObStorageFileMetaWrapper();
+  ObStorageFileMultiPartWriter() {}
+  virtual ~ObStorageFileMultiPartWriter() {}
 
-  virtual int get(const common::ObString& uri, const common::ObString& storage_info, char* buf, const int64_t buf_size,
-      int64_t& read_size);
-  virtual int set(
-      const common::ObString& uri, const common::ObString& storage_info, const char* buf, const int64_t buf_size);
+  virtual int open(const common::ObString &uri, common::ObObjectStorageInfo *storage_info) override
+  {
+    return ObStorageFileMultipleWriter::open(uri, storage_info);
+  }
+  virtual int write(const char *buf, const int64_t size) override
+  {
+    return ObStorageFileMultipleWriter::write(buf, size);
+  }
+  virtual int pwrite(const char *buf, const int64_t size, const int64_t offset) override
+  {
+    UNUSED(offset);
+    return write(buf, size);
+  }
+  virtual int64_t get_length() const override
+  {
+    return ObStorageFileMultipleWriter::get_length();
+  }
+  virtual bool is_opened() const override
+  {
+    return ObStorageFileMultipleWriter::is_opened();
+  }
+
+  virtual int complete() override;
+  virtual int abort() override;
+  virtual int close() override;
 
 private:
-  DISALLOW_COPY_AND_ASSIGN(ObStorageFileMetaWrapper);
+  DISALLOW_COPY_AND_ASSIGN(ObStorageFileMultiPartWriter);
 };
 
-}  // namespace common
-}  // namespace oceanbase
+class ObStorageParallelFileMultiPartWriter: public ObIStorageParallelMultipartWriter
+{
+public:
+  ObStorageParallelFileMultiPartWriter();
+  virtual ~ObStorageParallelFileMultiPartWriter();
+  void reset();
+
+  virtual int open(const ObString &uri, ObObjectStorageInfo *storage_info) override;
+  // During the upload phase, each part of the file is written to a separate temporary file
+  virtual int upload_part(const char *buf, const int64_t size, const int64_t part_id) override;
+  // Upon completion, these temporary files are read in sequence according to their assigned
+  // part IDs and merged into the final target file.
+  virtual int complete() override;
+  // If the upload is aborted, all temporary
+  // files are removed to clean up the storage space
+  virtual int abort() override;
+  virtual int close() override;
+  virtual bool is_opened() const override { return is_opened_; }
+
+private:
+  static constexpr const char *TMP_NAME_FORMAT = "%s%s.tmp.%ld";
+
+  SpinRWLock lock_;
+  bool is_opened_;
+  char real_path_[OB_MAX_URI_LENGTH];
+  char path_[OB_MAX_URI_LENGTH];
+  int64_t max_part_size_;
+  ObArray<int64_t> uploaded_part_id_list_;
+
+  DISALLOW_COPY_AND_ASSIGN(ObStorageParallelFileMultiPartWriter);
+};
+
+
+}//common
+}//oceanbase
 
 #endif /* SRC_LIBRARY_SRC_LIB_RESTORE_OB_STORAGE_FILE_H_ */

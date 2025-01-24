@@ -14,12 +14,17 @@
 
 using namespace oceanbase::common;
 
-namespace oceanbase {
-namespace observer {
+namespace oceanbase
+{
+namespace observer
+{
 
 ObTenantVirtualEventName::ObTenantVirtualEventName()
-    : ObVirtualTableScannerIterator(), event_iter_(0), tenant_id_(OB_INVALID_ID)
-{}
+    : ObVirtualTableScannerIterator(),
+    event_iter_(0),
+    tenant_id_(OB_INVALID_ID)
+{
+}
 
 ObTenantVirtualEventName::~ObTenantVirtualEventName()
 {
@@ -31,12 +36,12 @@ void ObTenantVirtualEventName::reset()
   ObVirtualTableScannerIterator::reset();
   event_iter_ = 0;
   tenant_id_ = OB_INVALID_ID;
-  for (int64_t i = 0; i < OB_ROW_MAX_COLUMNS_COUNT; i++) {
+  for (int64_t i = 0; i  < OB_ROW_MAX_COLUMNS_COUNT; i++) {
     cells_[i].reset();
   }
 }
 
-int ObTenantVirtualEventName::inner_get_next_row(ObNewRow*& row)
+int ObTenantVirtualEventName::inner_get_next_row(ObNewRow *&row)
 {
   int ret = OB_SUCCESS;
   if (OB_UNLIKELY(NULL == allocator_)) {
@@ -50,7 +55,7 @@ int ObTenantVirtualEventName::inner_get_next_row(ObNewRow*& row)
     cur_row_.cells_ = cells_;
     cur_row_.count_ = reserved_column_cnt_;
 
-    if (event_iter_ >= ObWaitEventIds::WAIT_EVENT_END) {
+    if (event_iter_ >= WAIT_EVENTS_TOTAL) {
       ret = OB_ITER_END;
     }
 
@@ -58,8 +63,8 @@ int ObTenantVirtualEventName::inner_get_next_row(ObNewRow*& row)
       uint64_t cell_idx = 0;
       for (int64_t i = 0; OB_SUCC(ret) && i < col_count; ++i) {
         uint64_t col_id = output_column_ids_.at(i);
-        switch (col_id) {
-          case TENANT_ID: {
+        switch(col_id) {
+           case TENANT_ID: {
             cells_[cell_idx].set_int(tenant_id_);
             break;
           }
@@ -77,7 +82,7 @@ int ObTenantVirtualEventName::inner_get_next_row(ObNewRow*& row)
             break;
           }
           case DISPLAY_NAME: {
-            cells_[cell_idx].set_varchar(OB_WAIT_EVENTS[event_iter_].display_name_);
+            cells_[cell_idx].set_varchar(OB_WAIT_EVENTS[event_iter_].event_name_);
             cells_[cell_idx].set_collation_type(ObCharset::get_default_collation(ObCharset::get_default_charset()));
             break;
           }
@@ -111,7 +116,8 @@ int ObTenantVirtualEventName::inner_get_next_row(ObNewRow*& row)
           }
           default: {
             ret = OB_ERR_UNEXPECTED;
-            SERVER_LOG(WARN, "invalid column id", K(ret), K(cell_idx), K(output_column_ids_), K(col_id));
+            SERVER_LOG(WARN, "invalid column id", K(ret), K(cell_idx),
+                       K(output_column_ids_), K(col_id));
             break;
           }
         }

@@ -30,20 +30,36 @@ uint32_t gHashItemNum = 128;
 typedef uint64_t HashKey;
 typedef uint64_t HashValue;
 
-class CallBack {
-public:
-  void operator()(HashMapPair<HashKey, HashValue>& v)
-  {
-    v.second = v_;
-  };
-  void set_v(HashValue v)
-  {
-    v_ = v;
-  };
-
-private:
-  HashValue v_;
+class CallBack
+{
+  public:
+    void operator () (HashMapPair<HashKey, HashValue> &v)
+    {
+      v.second = v_;
+    };
+    void set_v(HashValue v)
+    {
+      v_ = v;
+    };
+  private:
+    HashValue v_;
 };
+
+class Predicate
+{
+  public:
+    bool operator () (HashMapPair<HashKey, HashValue> &v)
+    {
+      return v.second >= min_value_;
+    };
+    void set_min_value(HashValue v)
+    {
+      min_value_ = v;
+    };
+  private:
+    HashValue min_value_;
+};
+
 
 TEST(TestObHashMap, create)
 {
@@ -59,14 +75,14 @@ TEST(TestObHashMap, create)
 TEST(TestObHashMap, set)
 {
   ObHashMap<HashKey, HashValue> hm;
-  uint64_t key[4] = {1, 2, 1, 1 + static_cast<uint64_t>(cal_next_prime(gHashItemNum))};
+  uint64_t key[4] = {1, 2, 1, 1 + static_cast<uint64_t> (cal_next_prime(gHashItemNum))};
   uint64_t value[4] = {100, 200, 300, 301};
 
   // no create
   EXPECT_EQ(OB_NOT_INIT, hm.set_refactored(key[0], value[0], 0));
 
   hm.create(cal_next_prime(gHashItemNum), ObModIds::OB_HASH_BUCKET);
-  // normal insert
+  // normal insert 
   EXPECT_EQ(OB_SUCCESS, hm.set_refactored(key[0], value[0], 0));
   // insert different bucket keys
   EXPECT_EQ(OB_SUCCESS, hm.set_refactored(key[1], value[1], 0));
@@ -83,7 +99,7 @@ TEST(TestObHashMap, set)
 TEST(TestObHashMap, get)
 {
   ObHashMap<HashKey, HashValue> hm;
-  uint64_t key[4] = {1, 2, 1, 1 + static_cast<uint64_t>(cal_next_prime(gHashItemNum))};
+  uint64_t key[4] = {1, 2, 1, 1 + static_cast<uint64_t> (cal_next_prime(gHashItemNum))};
   uint64_t value[4] = {100, 200, 300, 301};
   HashValue value_tmp;
 
@@ -112,7 +128,7 @@ TEST(TestObHashMap, get)
 TEST(TestObHashMap, erase)
 {
   ObHashMap<HashKey, HashValue> hm;
-  uint64_t key[4] = {1, 2, 1, 1 + static_cast<uint64_t>(cal_next_prime(gHashItemNum))};
+  uint64_t key[4] = {1, 2, 1, 1 + static_cast<uint64_t> (cal_next_prime(gHashItemNum))};
   uint64_t value[4] = {100, 200, 300, 301};
 
   // no create
@@ -136,7 +152,7 @@ TEST(TestObHashMap, erase)
 TEST(TestObHashMap, clear)
 {
   ObHashMap<HashKey, HashValue> hm;
-  uint64_t key[4] = {1, 2, 1, 1 + static_cast<uint64_t>(cal_next_prime(gHashItemNum))};
+  uint64_t key[4] = {1, 2, 1, 1 + static_cast<uint64_t> (cal_next_prime(gHashItemNum))};
   uint64_t value[4] = {100, 200, 300, 301};
 
   // no create
@@ -188,17 +204,20 @@ TEST(TestObHashMap, iterator)
   EXPECT_EQ(true, (++iter) == hm.end());
   EXPECT_EQ(true, (++citer) == hm.end());
 
-  uint64_t key[4] = {1, 2, 5, 5 + static_cast<uint64_t>(cal_next_prime(gHashItemNum))};
+  uint64_t key[4] = {1, 2, 5, 5 + static_cast<uint64_t> (cal_next_prime(gHashItemNum))};
   uint64_t value[4] = {100, 200, 500, 501};
-  for (int32_t i = 3; i >= 0; i--) {
+  for (int32_t i = 3; i >= 0; i--)
+  {
     hm.set_refactored(key[i], value[i], 0);
   }
   iter = hm.begin();
   citer = chm.begin();
-  for (uint32_t i = 0; iter != hm.end(); iter++, i++) {
+  for (uint32_t i = 0; iter != hm.end(); iter++, i++)
+  {
     EXPECT_EQ(value[i], iter->second);
   }
-  for (uint32_t i = 0; citer != chm.end(); citer++, i++) {
+  for (uint32_t i = 0; citer != chm.end(); citer++, i++)
+  {
     EXPECT_EQ(value[i], citer->second);
   }
 }
@@ -218,9 +237,10 @@ TEST(TestObHashMap, serialization)
   EXPECT_EQ(0, hm.serialization(arw));
   EXPECT_EQ(0, hm.deserialization(arr));
 
-  uint64_t key[4] = {1, 2, 1, 1 + static_cast<uint64_t>(cal_next_prime(gHashItemNum))};
+  uint64_t key[4] = {1, 2, 1, 1 + static_cast<uint64_t> (cal_next_prime(gHashItemNum))};
   uint64_t value[4] = {100, 200, 300, 301};
-  for (uint32_t i = 0; i < 4; i++) {
+  for (uint32_t i = 0; i < 4; i++)
+  {
     hm.set_refactored(key[i], value[i], 0);
   }
   EXPECT_NE(OB_SUCCESS, hm.serialization(arw_nil));
@@ -252,7 +272,7 @@ TEST(TestObHashMap, atomic)
   callback.set_v(value_update);
   HashValue value_tmp;
 
-  // no create
+  //no create
   EXPECT_EQ(OB_NOT_INIT, hm.atomic_refactored(key, callback));
 
   hm.create(cal_next_prime(gHashItemNum), ObModIds::OB_HASH_BUCKET);
@@ -270,43 +290,93 @@ TEST(TestObHashMap, atomic)
   EXPECT_EQ(value_update, value_tmp);
 }
 
-struct GAllocator {
-  void* alloc(const int64_t sz)
+TEST(TestObHashMap, set_or_update)
+{
+  ObHashMap<HashKey, HashValue> hm;
+  uint64_t key = 1;
+  uint64_t value = 100;
+  CallBack callback;
+  HashValue value_tmp;
+
+  // 没有create
+  EXPECT_EQ(OB_NOT_INIT, hm.set_or_update(key, value, callback));
+  hm.create(cal_next_prime(gHashItemNum), ObModIds::OB_HASH_BUCKET);
+
+  callback.set_v(value);
+  EXPECT_EQ(OB_HASH_NOT_EXIST, hm.get_refactored(key, value_tmp));
+  EXPECT_EQ(OB_SUCCESS, hm.set_or_update(key, value, callback));
+  EXPECT_EQ(OB_SUCCESS, hm.get_refactored(key, value_tmp));
+  EXPECT_EQ(value, value_tmp);
+
+  uint64_t value_update = 3000;
+  callback.set_v(value_update);
+  EXPECT_EQ(OB_SUCCESS, hm.set_or_update(key, value, callback));
+  EXPECT_EQ(OB_SUCCESS, hm.get_refactored(key, value_tmp));
+  EXPECT_EQ(value_update, value_tmp);
+}
+
+TEST(TestObHashMap, erase_if)
+{
+  ObHashMap<HashKey, HashValue> hm;
+  uint64_t key = 1;
+  uint64_t value = 100;
+  Predicate pred;
+  HashValue value_tmp;
+  bool is_erased = true;
+
+  // 没有create
+  EXPECT_EQ(OB_NOT_INIT, hm.erase_if(key, pred, is_erased));
+  hm.create(cal_next_prime(gHashItemNum), ObModIds::OB_HASH_BUCKET);
+
+  pred.set_min_value(value + 1);
+  EXPECT_EQ(OB_HASH_NOT_EXIST, hm.get_refactored(key, value_tmp));
+  EXPECT_EQ(OB_SUCCESS, hm.set_refactored(key, value));
+  EXPECT_EQ(OB_SUCCESS, hm.erase_if(key, pred, is_erased, &value_tmp));
+  EXPECT_EQ(false, is_erased);
+  EXPECT_EQ(OB_SUCCESS, hm.get_refactored(key, value_tmp));
+  EXPECT_EQ(value, value_tmp);
+
+  pred.set_min_value(value);
+  value_tmp = 0;
+  EXPECT_EQ(OB_SUCCESS, hm.erase_if(key, pred, is_erased, &value_tmp));
+  EXPECT_EQ(true, is_erased);
+  EXPECT_EQ(value, value_tmp);
+  EXPECT_EQ(OB_HASH_NOT_EXIST, hm.get_refactored(key, value_tmp));
+}
+
+struct GAllocator
+{
+  void *alloc(const int64_t sz)
   {
     fprintf(stdout, "::malloc\n");
     return ::malloc(sz);
   }
-  void free(void* p)
+  void free(void *p)
   {
     fprintf(stdout, "::free\n");
     ::free(p);
   }
-  void clear(){};
-  void set_attr(const ObMemAttr& attr)
-  {
-    UNUSED(attr);
-  };
-  void set_label(const lib::ObLabel& label)
-  {
-    UNUSED(label);
-  };
+  void clear() {};
+  void set_attr(const ObMemAttr &attr) {UNUSED(attr);};
+  void set_label(const lib::ObLabel &label) {UNUSED(label);};
 };
 
 template <class T>
-class GAllocBigArray : public BigArrayTemp<T, GAllocator> {};
+class GAllocBigArray : public BigArrayTemp<T, GAllocator>
+{
+};
 
 TEST(TestObHashMap, use_gallocator)
 {
   ObHashMap<HashKey,
-      HashValue,
-      ReadWriteDefendMode,
-      hash_func<HashKey>,
-      equal_to<HashKey>,
-      SimpleAllocer<HashMapTypes<HashKey, HashValue>::AllocType, 1024, SpinMutexDefendMode, GAllocator>,
-      GAllocBigArray>
-      hm;
+            HashValue,
+            ReadWriteDefendMode,
+            hash_func<HashKey>,
+            equal_to<HashKey>,
+            SimpleAllocer<HashMapTypes<HashKey, HashValue>::AllocType, 1024, SpinMutexDefendMode, GAllocator>,
+            GAllocBigArray> hm;
 
-  uint64_t key[4] = {1, 2, 1, 1 + static_cast<uint64_t>(cal_next_prime(gHashItemNum))};
+  uint64_t key[4] = {1, 2, 1, 1 + static_cast<uint64_t> (cal_next_prime(gHashItemNum))};
   uint64_t value[4] = {100, 200, 300, 301};
 
   // no create
@@ -356,8 +426,8 @@ TEST(TestObHashMap, buckect_iterator)
   EXPECT_EQ(0, hm2.size());
 }
 
-int main(int argc, char** argv)
+int main(int argc, char **argv)
 {
-  testing::InitGoogleTest(&argc, argv);
+  testing::InitGoogleTest(&argc,argv);
   return RUN_ALL_TESTS();
 }

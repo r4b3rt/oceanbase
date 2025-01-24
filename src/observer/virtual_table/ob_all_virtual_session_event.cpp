@@ -11,22 +11,26 @@
  */
 
 #include "observer/virtual_table/ob_all_virtual_session_event.h"
+#include "share/ash/ob_di_util.h"
 
 using namespace oceanbase::common;
 
-namespace oceanbase {
-namespace observer {
+namespace oceanbase
+{
+namespace observer
+{
 
 ObAllVirtualSessionEvent::ObAllVirtualSessionEvent()
     : ObVirtualTableScannerIterator(),
-      session_status_(),
-      addr_(NULL),
-      ipstr_(),
-      port_(0),
-      session_iter_(0),
-      event_iter_(0),
-      collect_(NULL)
-{}
+    session_status_(),
+    addr_(NULL),
+    ipstr_(),
+    port_(0),
+    session_iter_(0),
+    event_iter_(0),
+    collect_(NULL)
+{
+}
 
 ObAllVirtualSessionEvent::~ObAllVirtualSessionEvent()
 {
@@ -45,11 +49,11 @@ void ObAllVirtualSessionEvent::reset()
   collect_ = NULL;
 }
 
-int ObAllVirtualSessionEvent::set_ip(common::ObAddr* addr)
+int ObAllVirtualSessionEvent::set_ip(common::ObAddr *addr)
 {
   int ret = OB_SUCCESS;
   char ipbuf[common::OB_IP_STR_BUFF];
-  if (NULL == addr) {
+  if (NULL == addr){
     ret = OB_ENTRY_NOT_EXIST;
   } else if (!addr_->ip_to_string(ipbuf, sizeof(ipbuf))) {
     SERVER_LOG(ERROR, "ip to string failed");
@@ -67,16 +71,16 @@ int ObAllVirtualSessionEvent::set_ip(common::ObAddr* addr)
 int ObAllVirtualSessionEvent::get_all_diag_info()
 {
   int ret = OB_SUCCESS;
-  if (OB_SUCCESS != (ret = ObDISessionCache::get_instance().get_all_diag_info(session_status_))) {
+  if (OB_SUCCESS != (ret = share::ObDiagnosticInfoUtil::get_all_diag_info(session_status_, effective_tenant_id_))) {
     SERVER_LOG(WARN, "Fail to get session status, ", K(ret));
   }
   return ret;
 }
 
-int ObAllVirtualSessionEvent::inner_get_next_row(ObNewRow*& row)
+int ObAllVirtualSessionEvent::inner_get_next_row(ObNewRow *&row)
 {
   int ret = OB_SUCCESS;
-  ObObj* cells = cur_row_.cells_;
+  ObObj *cells =  cur_row_.cells_;
   if (OB_UNLIKELY(NULL == allocator_)) {
     ret = OB_NOT_INIT;
     SERVER_LOG(WARN, "allocator is NULL", K(ret));
@@ -89,12 +93,38 @@ int ObAllVirtualSessionEvent::inner_get_next_row(ObNewRow*& row)
         SERVER_LOG(WARN, "can't get session status", K(ret));
       }
     }
-    if (0 == event_iter_) {
+    if (0 != event_iter_) {
+      for (; event_iter_ < WAIT_EVENTS_TOTAL; event_iter_++) {
+        if (collect_->base_value_.get_event_stats().get(event_iter_)->total_waits_ != 0) {
+          break;
+        }
+      }
+      if (event_iter_ >= WAIT_EVENTS_TOTAL) {
+        event_iter_ = 0;
+        session_iter_++;
+        collect_->lock_.unlock();
+      }
+    }
+    while (OB_SUCCESS == ret && 0 == event_iter_ && session_iter_ < session_status_.count()) {
       while (OB_SUCCESS == ret && session_iter_ < session_status_.count()) {
-        collect_ = session_status_.at(session_iter_).second;
+        collect_ = &session_status_.at(session_iter_).second;
         if (NULL != collect_ && OB_SUCCESS == collect_->lock_.try_rdlock()) {
-          if (session_status_.at(session_iter_).first == collect_->session_id_) {
-            break;
+          const uint64_t tenant_id = collect_->base_value_.get_tenant_id();
+          if (session_status_.at(session_iter_).first == collect_->session_id_
+              && (is_sys_tenant(effective_tenant_id_) || tenant_id == effective_tenant_id_)) {
+            for (; event_iter_ < WAIT_EVENTS_TOTAL; event_iter_++) {
+              if (collect_->base_value_.get_event_stats().get(event_iter_)->total_waits_ != 0) {
+                // event_iter_ 0 means NULL_EVENT which cannot have actual wait.
+                break;
+              }
+            }
+            if (event_iter_ >= WAIT_EVENTS_TOTAL) {
+              event_iter_ = 0;
+              session_iter_++;
+              collect_->lock_.unlock();
+            } else {
+              break;
+            }
           } else {
             session_iter_++;
             collect_->lock_.unlock();
@@ -117,7 +147,7 @@ int ObAllVirtualSessionEvent::inner_get_next_row(ObNewRow*& row)
       double value = 0;
       for (int64_t cell_idx = 0; OB_SUCC(ret) && cell_idx < col_count; ++cell_idx) {
         uint64_t col_id = output_column_ids_.at(cell_idx);
-        switch (col_id) {
+        switch(col_id) {
           case SESSION_ID: {
             cells[cell_idx].set_int(collect_->session_id_);
             break;
@@ -177,9 +207,8 @@ int ObAllVirtualSessionEvent::inner_get_next_row(ObNewRow*& row)
           }
           case AVERAGE_WAIT: {
             if (0 != collect_->base_value_.get_event_stats().get(event_iter_)->total_waits_) {
-              value = (static_cast<double>(collect_->base_value_.get_event_stats().get(event_iter_)->time_waited_) /
-                          static_cast<double>(collect_->base_value_.get_event_stats().get(event_iter_)->total_waits_)) /
-                      10000;
+              value = (static_cast<double>(collect_->base_value_.get_event_stats().get(event_iter_)->time_waited_)
+                    / static_cast<double>(collect_->base_value_.get_event_stats().get(event_iter_)->total_waits_)) / 10000;
               cells[cell_idx].set_double(value);
             } else {
               cells[cell_idx].set_double(0);
@@ -193,7 +222,8 @@ int ObAllVirtualSessionEvent::inner_get_next_row(ObNewRow*& row)
           default: {
             collect_->lock_.unlock();
             ret = OB_ERR_UNEXPECTED;
-            SERVER_LOG(WARN, "invalid column id", K(ret), K(cell_idx), K(output_column_ids_), K(col_id));
+            SERVER_LOG(WARN, "invalid column id", K(ret), K(cell_idx),
+                       K(output_column_ids_), K(col_id));
             break;
           }
         }
@@ -203,7 +233,7 @@ int ObAllVirtualSessionEvent::inner_get_next_row(ObNewRow*& row)
     if (OB_SUCC(ret)) {
       event_iter_++;
       row = &cur_row_;
-      if (event_iter_ >= ObWaitEventIds::WAIT_EVENT_END) {
+      if (event_iter_ >= WAIT_EVENTS_TOTAL) {
         event_iter_ = 0;
         session_iter_++;
         collect_->lock_.unlock();
@@ -218,21 +248,24 @@ int ObAllVirtualSessionEventI1::get_all_diag_info()
   int ret = OB_SUCCESS;
   int64_t index_id = -1;
   uint64_t key = 0;
-  std::pair<uint64_t, common::ObDISessionCollect*> pair;
-  for (int64_t i = 0; OB_SUCC(ret) && i < get_index_ids().count(); ++i) {
-    index_id = get_index_ids().at(i);
-    if (0 < index_id) {
-      key = static_cast<uint64_t>(index_id);
-      pair.first = key;
-      if (OB_SUCCESS != (ret = ObDISessionCache::get_instance().get_the_diag_info(key, pair.second))) {
-        if (OB_ENTRY_NOT_EXIST == ret) {
-          ret = OB_SUCCESS;
+  typedef std::pair<uint64_t, common::ObDISessionCollect> DiPair;
+  HEAP_VAR(DiPair, pair)
+  {
+    for (int64_t i = 0; OB_SUCC(ret) && i < get_index_ids().count(); ++i) {
+      index_id = get_index_ids().at(i);
+      if (0 < index_id) {
+        key = static_cast<uint64_t>(index_id);
+        pair.first = key;
+        if (OB_SUCCESS != (ret = share::ObDiagnosticInfoUtil::get_the_diag_info(key, pair.second))) {
+          if (OB_ENTRY_NOT_EXIST == ret) {
+            ret = OB_SUCCESS;
+          } else {
+            SERVER_LOG(WARN, "Fail to get session status, ", K(ret));
+          }
         } else {
-          SERVER_LOG(WARN, "Fail to get session status, ", K(ret));
-        }
-      } else {
-        if (OB_SUCCESS != (ret = session_status_.push_back(pair))) {
-          SERVER_LOG(WARN, "Fail to push diag info value to array, ", K(ret));
+          if (OB_SUCCESS != (ret = session_status_.push_back(pair))) {
+            SERVER_LOG(WARN, "Fail to push diag info value to array, ", K(ret));
+          }
         }
       }
     }
@@ -240,5 +273,5 @@ int ObAllVirtualSessionEventI1::get_all_diag_info()
   return ret;
 }
 
-}  // namespace observer
-}  // namespace oceanbase
+}/* ns observer*/
+}/* ns oceanbase */

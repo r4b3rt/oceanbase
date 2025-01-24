@@ -17,39 +17,40 @@
 #define OK(s) ASSERT_EQ(OB_SUCCESS, (s));
 #define NOT_EXIST(s) ASSERT_EQ(OB_ENTRY_NOT_EXIST, (s))
 
-namespace oceanbase {
+namespace oceanbase
+{
 using namespace storage;
 using namespace common;
-namespace unittest {
-class TestHandleCache : public ::testing::Test {};
+namespace unittest
+{
+class TestHandleCache : public ::testing::Test
+{
+};
 
-class TestKey {
+class TestKey
+{
 public:
-  TestKey()
-  {}
-  TestKey(const int key) : key_(key)
-  {}
-  uint64_t hash() const
-  {
-    return key_;
-  }
-  int64_t to_string(char* buf, int64_t buf_len) const
+  TestKey() {}
+  TestKey(const int key) : key_(key) {}
+  uint64_t hash() const { return key_; }
+  int64_t to_string(char *buf, int64_t buf_len) const
   {
     UNUSED(buf);
     UNUSED(buf_len);
     return 0;
   }
-  bool operator==(const TestKey& key) const
+  bool operator == (const TestKey &key) const
   {
     return key_ == key.key_;
   }
   int key_;
 };
 
-class TestHandle {
+class TestHandle
+{
 public:
-  void reset()
-  {}
+  int64_t get_handle_size() { return 0; }
+  void reset() {}
   int v_;
 };
 
@@ -78,7 +79,7 @@ TEST_F(TestHandleCache, basic)
   OK(handle_cache.put_handle(key, handle));
   OK(handle_cache.get_handle(key, handle));
   ASSERT_EQ(64, handle.v_);
-  key.key_ = 0;
+  key.key_= 0;
   OK(handle_cache.get_handle(key, handle));
   ASSERT_EQ(0, handle.v_);
 
@@ -88,10 +89,10 @@ TEST_F(TestHandleCache, basic)
   OK(handle_cache.put_handle(key, handle));
   OK(handle_cache.get_handle(key, handle));
   ASSERT_EQ(32, handle.v_);
-  key.key_ = 0;
+  key.key_= 0;
   OK(handle_cache.get_handle(key, handle));
   ASSERT_EQ(0, handle.v_);
-  key.key_ = 64;
+  key.key_= 64;
   OK(handle_cache.get_handle(key, handle));
   ASSERT_EQ(64, handle.v_);
 
@@ -112,10 +113,10 @@ TEST_F(TestHandleCache, basic)
   ASSERT_EQ(3, handle.v_);
   key.key_ = 32;
   NOT_EXIST(handle_cache.get_handle(key, handle));
-  key.key_ = 0;
+  key.key_= 0;
   OK(handle_cache.get_handle(key, handle));
   ASSERT_EQ(0, handle.v_);
-  key.key_ = 64;
+  key.key_= 64;
   OK(handle_cache.get_handle(key, handle));
   ASSERT_EQ(64, handle.v_);
 
@@ -131,10 +132,10 @@ TEST_F(TestHandleCache, basic)
   ASSERT_EQ(4, handle_cache.lru_list_.get_size());
 }
 
-}  // namespace unittest
-}  // namespace oceanbase
+}
+}
 
-int main(int argc, char** argv)
+int main(int argc, char **argv)
 {
   OB_LOGGER.set_log_level("INFO");
   testing::InitGoogleTest(&argc, argv);

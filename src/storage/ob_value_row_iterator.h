@@ -13,86 +13,82 @@
 #ifndef OCEANBASE_STORAGE_OB_VALUE_ROW_ITERATOR_
 #define OCEANBASE_STORAGE_OB_VALUE_ROW_ITERATOR_
 
+#include "access/ob_table_access_param.h"
 #include "lib/allocator/page_arena.h"
 #include "lib/hash/ob_placement_hashmap.h"
 #include "lib/container/ob_se_array.h"
 #include "lib/allocator/page_arena.h"
 #include "common/row/ob_row_iterator.h"
-#include "common/rowkey/ob_rowkey.h"
 #include "storage/ob_i_store.h"
-#include "storage/ob_dml_param.h"
-namespace oceanbase {
-namespace storage {
-class ObValueRowIterator : public common::ObNewRowIterator {
-  static const int64_t DEFAULT_ROW_NUM = 2;
-  typedef common::ObSEArray<common::ObNewRow, DEFAULT_ROW_NUM> RowArray;
+#include "storage/access/ob_dml_param.h"
+#include "blocksstable/ob_datum_rowkey.h"
+#include "blocksstable/ob_datum_row_iterator.h"
 
+namespace oceanbase
+{
+namespace storage
+{
+class ObTablet;
+
+class ObValueRowIterator : public blocksstable::ObDatumRowIterator
+{
+  static const int64_t DEFAULT_ROW_NUM = 2;
+  typedef common::ObSEArray<blocksstable::ObDatumRow*, DEFAULT_ROW_NUM> RowArray;
 public:
   ObValueRowIterator();
   virtual ~ObValueRowIterator();
-  virtual int init(bool unique, int64_t data_table_rowkey_cnt);
-  virtual int get_next_row(common::ObNewRow*& row);
-  virtual int get_next_rows(common::ObNewRow*& rows, int64_t& row_count);
-  virtual int add_row(common::ObNewRow& row);
+  virtual int init(bool unique);
+  virtual int get_next_row(blocksstable::ObDatumRow *&row);
+  virtual int add_row(blocksstable::ObDatumRow &row, const blocksstable::ObStorageDatumUtils &rowkey_datum_utils);
   virtual void reset();
-
 private:
   bool is_inited_;
   bool unique_;
   common::ObArenaAllocator allocator_;
   RowArray rows_;
   int64_t cur_idx_;
-  int64_t data_table_rowkey_cnt_;
-
 private:
   DISALLOW_COPY_AND_ASSIGN(ObValueRowIterator);
 };
 
 class ObSingleMerge;
-class ObSingleRowGetter {
+class ObSingleRowGetter
+{
   typedef common::ObFixedArray<int32_t, common::ObIAllocator> Projector;
-
+  const ObQRIterType ITER_TYPE = T_SINGLE_GET;
 public:
-  ObSingleRowGetter(common::ObIAllocator &allocator, ObPartitionStore &store);
+  ObSingleRowGetter(common::ObIAllocator &allocator, ObTablet &tablet);
   ~ObSingleRowGetter();
 
-  int init_dml_access_ctx(const ObStoreCtx &store_ctx, const ObDMLBaseParam &dml_param);
+  int init_dml_access_ctx(
+      ObStoreCtx &store_ctx,
+      bool skip_read_lob = false);
   int init_dml_access_param(
-      ObRelativeTable &data_table, const ObDMLBaseParam &dml_param, const common::ObIArray<uint64_t> &out_col_ids);
-  ObTableAccessParam &get_access_param()
-  {
-    return access_param_;
-  }
-  ObTableAccessContext &get_access_ctx()
-  {
-    return access_ctx_;
-  }
-  void set_relative_table(ObRelativeTable *relative_table)
-  {
-    relative_table_ = relative_table;
-  }
-  int open(const ObStoreRowkey &rowkey, bool use_fuse_row_cache = false);
-  int get_next_row(common::ObNewRow *&row);
-
+      ObRelativeTable &data_table,
+      const common::ObIArray<uint64_t> &out_col_ids,
+      const bool skip_read_lob = false);
+  int prepare_cached_iter_node(const ObDMLBaseParam &dml_param);
+  ObTableAccessParam &get_access_param() { return access_param_; }
+  ObTableAccessContext &get_access_ctx() { return access_ctx_; }
+  void set_relative_table(ObRelativeTable *relative_table) { relative_table_ = relative_table; }
+  int open(const blocksstable::ObDatumRowkey &rowkey, bool use_fuse_row_cache = false);
+  int get_next_row(blocksstable::ObDatumRow *&row);
 private:
-  int create_table_param();
-
+  bool can_use_global_iter_pool(const ObDMLBaseParam &dml_param) const;
+  int init_single_merge();
 private:
-  ObPartitionStore &store_;
+  ObTablet *tablet_;
   ObSingleMerge *single_merge_;
-  const ObStoreCtx *store_ctx_;
+  ObStoreCtx *store_ctx_;
   Projector output_projector_;
   ObTableAccessParam access_param_;
   ObTableAccessContext access_ctx_;
   ObGetTableParam get_table_param_;
   ObRelativeTable *relative_table_;
-  share::schema::ObTableParam *table_param_;
-  union {
-    ObExtStoreRowkey ext_rowkey_;
-  };
   common::ObIAllocator &allocator_;
+  CachedIteratorNode *cached_iter_node_;
 };
-}  // end namespace storage
-}  // end namespace oceanbase
+} // end namespace storage
+} // end namespace oceanbase
 
-#endif  // OCEANBASE_STORAGE_OB_VALUE_ROW_ITERATOR_
+#endif // OCEANBASE_STORAGE_OB_VALUE_ROW_ITERATOR_

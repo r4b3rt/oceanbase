@@ -22,14 +22,20 @@ namespace blocksstable {
 
 class ObMicroBlockRowExister : public ObIMicroBlockRowFetcher {
 public:
-  ObMicroBlockRowExister();
-  virtual ~ObMicroBlockRowExister();
-  int is_exist(const common::ObStoreRowkey& rowkey, const ObFullMacroBlockMeta& macro_meta,
-      const ObMicroBlockData& block_data, const storage::ObSSTableRowkeyHelper* rowkey_helper, bool& exist,
-      bool& found);
+  ObMicroBlockRowExister() {}
+  virtual ~ObMicroBlockRowExister() {}
+  virtual int init(
+      const storage::ObTableIterParam &param,
+      storage::ObTableAccessContext &context,
+      const blocksstable::ObSSTable *sstable) override final;
+  int is_exist(
+      const ObDatumRowkey &rowkey,
+      const ObMicroBlockData &block_data,
+      bool &exist,
+      bool &found);
 };
 
-}  // namespace blocksstable
-}  // namespace oceanbase
+}
+}
 
 #endif /* OB_MICRO_BLOCK_ROW_EXISTER_H_ */

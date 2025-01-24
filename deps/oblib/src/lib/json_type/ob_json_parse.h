@@ -8,9 +8,9 @@
  * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PubL v2 for more details.
+ * This file contains interface support for the json parse abstraction.
  */
 
-// This file contains interface support for the json parse abstraction.
 #ifndef OCEANBASE_SQL_OB_JSON_PARSE
 #define OCEANBASE_SQL_OB_JSON_PARSE
 
@@ -23,13 +23,30 @@
 namespace oceanbase {
 namespace common {
 
+#define HAS_FLAG(flags, specific) (((flags) & (specific)) == (specific))
+#define ADD_FLAG_IF_NEED(expr, flags, specific) \
+  if (expr) {                                   \
+    (flags) |= (specific);                      \
+  }
+
+const int JSON_DOCUMENT_MAX_DEPTH = 100;
 class ObJsonParser final
 {
 public:
+  static const uint32_t JSN_DEFAULT_FLAG = 0;
+  static const uint32_t JSN_STRICT_FLAG = 1;
+  static const uint32_t JSN_RELAXED_FLAG = 2;
+  static const uint32_t JSN_UNIQUE_FLAG = 4;
+  static const uint32_t JSN_SCHEMA_FLAG = 8;
+  static const uint32_t JSN_PRESERVE_DUP_FLAG = 16;
+
   static const int PARSE_SYNTAXERR_MESSAGE_LENGTH = 256;
-  static int get_tree(ObIAllocator *allocator, const ObString &text, ObJsonNode *&j_tree);
-  static int get_tree(ObIAllocator *allocator, const char *text,
-                      uint64_t length, ObJsonNode *&j_tree);
+  static int get_tree(ObIAllocator *allocator, const ObString &text,
+                      ObJsonNode *&j_tree, uint32_t parse_flag = 0,
+                      uint32_t max_depth_config = JSON_DOCUMENT_MAX_DEPTH);
+  static int get_tree(ObIAllocator *allocator, const char *text, uint64_t length,
+                      ObJsonNode *&j_tree, uint32_t parse_flag = 0,
+                      uint32_t max_depth_config = JSON_DOCUMENT_MAX_DEPTH);
 
   // Parse json text to json tree with rapidjson.
   // 
@@ -43,23 +60,18 @@ public:
   static int parse_json_text(ObIAllocator *allocator, 
                              const char *text, uint64_t length,
                              const char *&syntaxerr, uint64_t *offset,
-                             ObJsonNode *&j_tree);
+                             ObJsonNode *&j_tree, uint32_t parse_flag = 0,
+                             uint32_t max_depth_config = JSON_DOCUMENT_MAX_DEPTH);
 
-  // The tree has a maximum depth of 100 layers
-  static constexpr int JSON_DOCUMENT_MAX_DEPTH = 100;
-
-  // Verify that the current JSON tree depth exceeds the maximum depth
-  //
-  // @param [in] depth Current json tree depth.
-  // @return  Returns true beyond the maximum depth, false otherwise.
-  static bool is_json_doc_over_depth(uint64_t depth);
   
   // Check json document syntax.(for json_valid)
   //
   // @param [in] j_doc The json documemt which need to check.
   // @param [in] allocator   Alloc memory In the parsing process.
   // @return  Returns OB_SUCCESS on success, error code otherwise.
-  static int check_json_syntax(const ObString &j_doc, ObIAllocator *allocator = NULL);
+  static int check_json_syntax(const ObString &j_doc, ObIAllocator *allocator = NULL,
+                               uint32_t parse_flag = 0,
+                               uint32_t max_depth_config = JSON_DOCUMENT_MAX_DEPTH);
 private:
   DISALLOW_COPY_AND_ASSIGN(ObJsonParser);
 };
@@ -91,6 +103,9 @@ public:
     } else { // original ptr is not null, new size is not zero
       ptr = allocator_->realloc(originalPtr, originalSize, newSize);
     }
+    if (OB_ISNULL(ptr)) {
+      throw std::bad_alloc();
+    }
     return ptr;
   }
   static void Free(void *ptr) { UNUSED(ptr); } // do nothing
@@ -111,13 +126,19 @@ public:
     EXPECT_OBJECT_VALUE,
     EXPECT_EOF
   };
-  explicit ObRapidJsonHandler(ObIAllocator *allocator)
+  explicit ObRapidJsonHandler(ObIAllocator *allocator, bool with_unique_key = false, bool is_schema = false, bool preserve_dup_key = false, uint32_t json_depth_config = JSON_DOCUMENT_MAX_DEPTH)
       : next_state_(ObJsonExpectNextState::EXPECT_ANYTHING),
         dom_as_built_(NULL),
         current_element_(NULL),
         depth_(0),
         key_(),
-        allocator_(allocator)
+        allocator_(allocator),
+        err_code_(OB_SUCCESS),
+        with_unique_key_(with_unique_key),
+        with_duplicate_key_(false),
+        is_schema_(is_schema),
+        preserve_dup_key_(preserve_dup_key),
+        config_json_max_depth_(json_depth_config < JSON_DOCUMENT_MAX_DEPTH ? JSON_DOCUMENT_MAX_DEPTH : json_depth_config)
   {
   }
   virtual ~ObRapidJsonHandler() {}
@@ -158,6 +179,10 @@ public:
   bool StartArray();
   bool EndArray(rapidjson::SizeType length);
   bool Key(const char *str, rapidjson::SizeType length, bool copy);
+  bool has_duplicate_key() { return with_duplicate_key_; }
+  int get_error_code() { return err_code_; }
+  uint32_t get_json_max_depth_config();
+  bool is_json_doc_over_depth();
 
 private:
   ObJsonExpectNextState next_state_;  // The state that is expected to be resolved next.
@@ -166,6 +191,12 @@ private:
   uint64_t depth_;                    // The depth of the tree currently parsed.
   common::ObString key_;              // The current resolved key value
   ObIAllocator *allocator_;           // A memory allocator that allocates node memory.
+  int err_code_;                      // error code
+  bool with_unique_key_;              // Whether check unique key for object
+  bool with_duplicate_key_;           // Whether contain duplicate key for object
+  bool is_schema_;                    // is json schema text
+  bool preserve_dup_key_;             // preserve duplicate key
+  uint32_t config_json_max_depth_;
   DISALLOW_COPY_AND_ASSIGN(ObRapidJsonHandler);
 };
 
@@ -173,16 +204,18 @@ private:
 class ObJsonSyntaxCheckHandler final : public rapidjson::BaseReaderHandler<>
 {
 public:
-  explicit ObJsonSyntaxCheckHandler(ObIAllocator *allocator)
+  explicit ObJsonSyntaxCheckHandler(ObIAllocator *allocator, uint32_t json_depth_config = JSON_DOCUMENT_MAX_DEPTH)
       : allocator_(allocator),
         _depth(0),
-        _is_too_deep(false)
+        _is_too_deep(false),
+        _config_json_max_depth(json_depth_config > JSON_DOCUMENT_MAX_DEPTH ? json_depth_config : JSON_DOCUMENT_MAX_DEPTH)
   {
   }
   virtual ~ObJsonSyntaxCheckHandler() {}
   OB_INLINE bool StartObject()
   {
-    _is_too_deep = ObJsonParser::is_json_doc_over_depth(++_depth);
+    ++_depth;
+    _is_too_deep = _depth > _config_json_max_depth;
     return !_is_too_deep;
   }
   OB_INLINE bool EndObject(rapidjson::SizeType length)
@@ -193,7 +226,8 @@ public:
   }
   OB_INLINE bool StartArray()
   {
-    _is_too_deep = ObJsonParser::is_json_doc_over_depth(++_depth);
+    _depth++;
+    _is_too_deep = _depth > _config_json_max_depth;
     return !_is_too_deep;
   }
   OB_INLINE bool EndArray(rapidjson::SizeType length)
@@ -207,6 +241,7 @@ private:
   ObIAllocator *allocator_;
   uint64_t _depth;
   bool _is_too_deep;
+  uint32_t _config_json_max_depth;
   DISALLOW_COPY_AND_ASSIGN(ObJsonSyntaxCheckHandler);
 };
 

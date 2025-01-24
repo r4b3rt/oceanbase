@@ -8,11 +8,12 @@
  * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PubL v2 for more details.
+ * This file is for implement of func json_array_array_insert
  */
 
-// This file is for implement of func json_array_array_insert
 #define USING_LOG_PREFIX SQL_ENG
 #include "ob_expr_json_array_insert.h"
+#include "share/ob_json_access_utils.h"
 #include "sql/engine/expr/ob_expr_json_func_helper.h"
 
 using namespace oceanbase::common;
@@ -27,7 +28,7 @@ ObExprJsonArrayInsert::ObExprJsonArrayInsert(ObIAllocator &alloc)
       T_FUN_SYS_JSON_ARRAY_INSERT,
       N_JSON_ARRAY_INSERT, 
       MORE_THAN_TWO,
-      NOT_ROW_DIMENSION)
+      VALID_FOR_GENERATED_COL, NOT_ROW_DIMENSION)
 {
 }
 
@@ -41,14 +42,14 @@ int ObExprJsonArrayInsert::calc_result_typeN(ObExprResType& type, ObExprResType*
   UNUSED(type_ctx);
   INIT_SUCC(ret);
 
-  // param_num is odd, JSON_ARRAY_INSERT(json_doc, path, val[, path, val] ...)
+  // param_num is odd，JSON_ARRAY_INSERT(json_doc, path, val[, path, val] ...)
   if (OB_UNLIKELY(param_num <= 1 || (param_num & 1 ) == 0)) {
     ret = OB_ERR_PARAM_SIZE;
     const ObString name("json_array_insert");
     LOG_USER_ERROR(OB_ERR_PARAM_SIZE, name.length(), name.ptr());
   } else {
     type.set_json();
-
+    type.set_length((ObAccuracy::DDL_DEFAULT_ACCURACY[ObJsonType]).get_length());
     if (OB_FAIL(ObJsonExprHelper::is_valid_for_json(types_stack, 0, N_JSON_ARRAY_INSERT))) {
       LOG_WARN("wrong type for json doc.", K(ret), K(types_stack[0].get_type()));
     } else {
@@ -76,92 +77,15 @@ int ObExprJsonArrayInsert::calc_result_typeN(ObExprResType& type, ObExprResType*
   return ret;
 }
 
-int ObExprJsonArrayInsert::calc_resultN(ObObj &result, const ObObj *objs, int64_t param_num, ObExprCtx &expr_ctx) const
-{
-  INIT_SUCC(ret);
-  ObIAllocator *allocator = expr_ctx.calc_buf_;
-  ObIJsonBase *j_base = NULL;
-  bool is_null = false;
-  ObJsonBaseVector hit;
-
-  if (result_type_.get_collation_type() != CS_TYPE_UTF8MB4_BIN) {
-    ret = OB_ERR_INVALID_JSON_CHARSET;
-    LOG_WARN("invalid out put charset", K(ret), K(result_type_));
-  } else if (OB_ISNULL(objs)) {
-    ret = OB_INVALID_ARGUMENT;
-    LOG_WARN("invalid arguments", K(ret), K(objs), K(param_num));
-  } else if (OB_ISNULL(allocator)) { // check allocator
-    ret = OB_NOT_INIT;
-    LOG_WARN("varchar buffer not init", K(ret));
-  } else if (OB_FAIL(ObJsonExprHelper::get_json_doc(objs, allocator, 0, j_base, is_null))) {
-    LOG_WARN("get_json_doc failed", K(ret));
-  }
-
-  for (int32 i = 1; OB_SUCC(ret) && i < param_num && !is_null; i += 2) {
-    hit.reset();
-    ObString j_path_text = objs[i].get_string();
-    ObJsonPath j_path(j_path_text, allocator);
-    if (objs[i].get_type() == ObNullType || objs[i].is_null()) {
-      is_null = true;
-    } else if (OB_FAIL(j_path.parse_path())) {
-      LOG_WARN("parse text to path failed", K(j_path_text), K(ret));
-    } else if (j_path.can_match_many()) {
-      ret = OB_ERR_INVALID_JSON_PATH_WILDCARD;
-      LOG_USER_ERROR(OB_ERR_INVALID_JSON_PATH_WILDCARD);
-    } else if (j_path.path_node_cnt() == 0
-        || j_path.last_path_node()->get_node_type() != JPN_ARRAY_CELL) {
-      ret = OB_ERR_INVALID_JSON_PATH_ARRAY_CELL;
-      LOG_WARN("error, path illegal, last path isn't array member", K(ret), K(j_path_text));
-    } else if (OB_FAIL(j_base->seek(j_path, j_path.path_node_cnt() - 1, false, true, hit))) {
-      LOG_WARN("json seek failed", K(j_path_text), K(ret));
-    } else if (hit.size() == 0) {
-      // do nothing
-    } else {
-      ObJsonPathBasicNode *path_node = j_path.last_path_node();
-      ObIJsonBase *j_pos_node = hit[0];
-      if (j_pos_node->json_type() == ObJsonNodeType::J_ARRAY) {
-        bool is_bool = false;
-        ObIJsonBase *j_val = NULL;
-        if (OB_FAIL(get_param_is_boolean(expr_ctx, objs[i+1], is_bool))) {
-          LOG_WARN("failed: get_param_is_boolean", K(ret));
-        } else if (OB_FAIL(ObJsonExprHelper::get_json_val(objs[i+1], expr_ctx, is_bool,
-            allocator, j_val))) {
-          ret = OB_ERR_INVALID_JSON_TEXT_IN_PARAM;
-          LOG_USER_ERROR(OB_ERR_INVALID_JSON_TEXT_IN_PARAM);
-        } else {
-          ObJsonArrayIndex array_index;
-          if (OB_FAIL(path_node->get_first_array_index(j_pos_node->element_count(), array_index))) {
-            LOG_WARN("failed: get first array index", K(ret), K(j_pos_node->element_count()));
-          } else if (OB_FAIL(j_pos_node->array_insert(array_index.get_array_index(), j_val))) {
-            LOG_WARN("failed: array insert", K(ret), K(array_index.get_array_index()));
-          }
-        }
-      }
-    }
-  }
-
-  if (OB_SUCC(ret)) {
-    ObString raw_bin;
-    if (is_null) {
-      result.set_null();
-    } else if (OB_FAIL(j_base->get_raw_binary(raw_bin, allocator))) {
-      LOG_WARN("fail to get json raw binary", K(ret));
-    } else {
-      result.set_collation_type(CS_TYPE_UTF8MB4_BIN);
-      result.set_string(ObJsonType, raw_bin.ptr(), raw_bin.length());
-    }
-  }
-
-  return ret;
-}
-
 int ObExprJsonArrayInsert::eval_json_array_insert(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &res)
 {
   INIT_SUCC(ret);
-  common::ObArenaAllocator &temp_allocator = ctx.get_reset_tmp_alloc();
+  ObEvalCtx::TempAllocGuard tmp_alloc_g(ctx);
+  uint64_t tenant_id = ObMultiModeExprHelper::get_tenant_id(ctx.exec_ctx_.get_my_session());
+  MultimodeAlloctor temp_allocator(tmp_alloc_g.get_allocator(), expr.type_, tenant_id, ret);
   ObIJsonBase *j_base = NULL;
   bool is_null = false;
-  ObJsonBaseVector hit;
+  ObJsonSeekResult hit;
 
   if (expr.datum_meta_.cs_type_ != CS_TYPE_UTF8MB4_BIN) {
     ret = OB_ERR_INVALID_JSON_CHARSET;
@@ -181,14 +105,17 @@ int ObExprJsonArrayInsert::eval_json_array_insert(const ObExpr &expr, ObEvalCtx 
     hit.reset();
     ObExpr *arg = expr.args_[i];
     ObDatum *json_datum = NULL;
-    if (OB_FAIL(expr.args_[i]->eval(ctx, json_datum))) {
+    if (OB_FAIL(temp_allocator.eval_arg(expr.args_[i], ctx, json_datum))) {
       LOG_WARN("failed: eval json path datum.", K(ret));
     } else if (json_datum->is_null() || arg->datum_meta_.type_ == ObNullType) {
       is_null = true;
     } else {
       ObString j_path_text = json_datum->get_string();
       ObJsonPath *j_path;
-      if (OB_FAIL(ObJsonExprHelper::find_and_add_cache(path_cache, j_path, j_path_text, i, false))) {
+      if (OB_FAIL(ObTextStringHelper::read_real_string_data(temp_allocator, *json_datum,
+                  arg->datum_meta_, arg->obj_meta_.has_lob_header(), j_path_text))) {
+        LOG_WARN("fail to get real data.", K(ret), K(j_path_text));
+      } else if (OB_FAIL(ObJsonExprHelper::find_and_add_cache(path_cache, j_path, j_path_text, i, false))) {
         LOG_WARN("parse text to path failed", K(j_path_text), K(ret));
       } else if (j_path->path_node_cnt() == 0
           || j_path->last_path_node()->get_node_type() != JPN_ARRAY_CELL) {
@@ -203,7 +130,9 @@ int ObExprJsonArrayInsert::eval_json_array_insert(const ObExpr &expr, ObEvalCtx 
         ObIJsonBase *j_pos_node = hit[0];
         if (j_pos_node->json_type() == ObJsonNodeType::J_ARRAY) {
           ObIJsonBase *j_val = NULL;
-          if (OB_FAIL(ObJsonExprHelper::get_json_val(expr, ctx, &temp_allocator, i+1, j_val))) {
+          if (OB_FAIL(temp_allocator.add_baseline_size(expr.args_[i+1], ctx))) {
+            LOG_WARN("failed to add baselien size", K(ret), K(i + 1));
+          } else if (OB_FAIL(ObJsonExprHelper::get_json_val(expr, ctx, &temp_allocator, i+1, j_val))) {
             ret = OB_ERR_INVALID_JSON_TEXT_IN_PARAM;
             LOG_WARN("failed: get_json_val", K(ret));
           } else {
@@ -223,18 +152,10 @@ int ObExprJsonArrayInsert::eval_json_array_insert(const ObExpr &expr, ObEvalCtx 
     ObString raw_bin;
     if (is_null) {
       res.set_null();
-    } else if (OB_FAIL(j_base->get_raw_binary(raw_bin, &temp_allocator))) {
+    } else if (OB_FAIL(ObJsonWrapper::get_raw_binary(j_base, raw_bin, &temp_allocator))) {
       LOG_WARN("failed: get json raw binary", K(ret));
-    } else {
-      uint64_t length = raw_bin.length();
-      char *buf = expr.get_str_res_mem(ctx, length);
-      if (buf) {
-        MEMCPY(buf, raw_bin.ptr(), length);
-        res.set_string(buf, raw_bin.length());
-      } else {
-        ret = OB_ALLOCATE_MEMORY_FAILED;
-        LOG_WARN("failed: allocate res string buffer.", K(ret), K(length));
-      }
+    } else if (OB_FAIL(ObJsonExprHelper::pack_json_str_res(expr, ctx, res, raw_bin))) {
+      LOG_WARN("fail to pack json result", K(ret));
     }
   }
 

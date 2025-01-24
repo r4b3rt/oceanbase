@@ -14,400 +14,232 @@
 #define OCEANBASE_COMMON_OB_BITMAP_H_
 
 #include "lib/allocator/page_arena.h"
+#include "lib/utility/utility.h"
 
-namespace oceanbase {
-namespace common {
-class ObBitmap {
+namespace oceanbase
+{
+namespace common
+{
+
+OB_INLINE int64_t popcount64(uint64_t v)
+{
+  int64_t cnt = 0;
+#if __POPCNT__
+  cnt = __builtin_popcountl(v);
+#else
+  if (0 != v) {
+    v = v - ((v >> 1) & 0x5555555555555555UL);
+    v = (v & 0x3333333333333333UL) + ((v >> 2) & 0x3333333333333333UL);
+    cnt = (((v + (v >> 4)) & 0xF0F0F0F0F0F0F0FUL) * 0x101010101010101UL) >> 56;
+  }
+#endif
+  return cnt;
+}
+
+OB_INLINE uint64_t blsr64(uint64_t mask)
+{
+#ifdef __BMI__
+    return _blsr_u64(mask);
+#else
+    return mask & (mask-1);
+#endif
+}
+
+// Returns the index of the least significant 1-bit of mask.
+// mask cannot be zero.
+OB_INLINE uint64_t countr_zero64(uint64_t mask)
+{
+  return __builtin_ffsll(mask) - 1;
+}
+
+// Count Leading Zeros from highest bit, mask cannot be zero.
+OB_INLINE uint64_t countl_zero64(uint64_t mask)
+{
+  return __builtin_clzll(mask);
+}
+
+//TODO: use template to avoid branch prediction in simd
+class ObBitmap
+{
 public:
   typedef uint64_t size_type;
-  typedef uint64_t block_type;
-
-  static const size_type BYTES_PER_BLOCK = sizeof(block_type);
-  static const size_type BITS_PER_BLOCK = BYTES_PER_BLOCK * 8;
-  static const size_type BLOCKS_PER_MEM_BLOCK = 64;
-  static const size_type MEM_BLOCK_BYTES = BLOCKS_PER_MEM_BLOCK * BYTES_PER_BLOCK;
-  static const size_type MEM_BLOCK_BITS = BLOCKS_PER_MEM_BLOCK * BITS_PER_BLOCK;
-  static const size_type BLOCK_MOD_MASK = BITS_PER_BLOCK - 1;
-  static const size_type BLOCK_MOD_BITS = 6;
-
+  static const size_type DEFAULT_BLOCK_SIZE = 1024;
 public:
-  ObBitmap(ObIAllocator& allocator);
+  ObBitmap(ObIAllocator &allocator);
   virtual ~ObBitmap();
+  DISALLOW_COPY_AND_ASSIGN(ObBitmap);
 
-  /**
-   * check if bitmap is empty; not contains any data.
-   */
-  inline bool empty() const;
-
-  /**
-   * free all hold memory in bitmap.
-   * empty will return true;
-   */
-  inline void destroy();
-
-  /**
-   * set bit at %pos if value true
-   * or wipe out bit at %pos if value false, same as clear(pos)
-   */
-  inline int set(const size_type pos, const bool value = true);
-
-  /**
-   * same as set(pos, false);
-   */
-  inline int wipe(const size_type pos);
-
-  /**
-   * reset all bits in bitmap;
-   */
-  inline void reuse(const bool is_all_true = false);
-
-  /**
-   * xor with origin bit.
-   */
-  inline int flip(const size_type pos);
-
-  /**
-   * check bit at %pos if set
-   */
-  inline int test(const size_type pos, bool& result) const;
-  inline bool test(const size_type pos) const;
-
-  /**
-   * same as test(pos);
-   */
-  inline bool operator[](const size_type pos) const
-  {
-    return test(pos);
-  }
-
-  /**
-   * Expand @valid_bits_ to @valid_bits,
-   * reserve more memblocks if needed.
-   */
-  inline int expand_size(const size_type valid_bits);
-
-  inline block_type get_block(const size_type pos) const;
-
-  /**
-   * Reserve more memory if @size is larger than the capacity now
-   */
-  inline int reserve(const size_type capacity);
-
-  /**
-   * Bitwise AND operation with another bitmap with equal @valid_bits_
-   * Current bitmap is the left value, where the result of operation is stored.
-   */
-  int bit_and(const ObBitmap& right);
-
-  /**
-   * Bitwise OR operation with another bitmap with equal @valid_bits_
-   * Current bitmap is the left value, where the result of operation is stored.
-   */
-  int bit_or(const ObBitmap& right);
-
-  /**
-   * Bitwise NOT operation on the bitmap. Only the bits in range @valid_bits_ will be flipped
-   */
+  OB_INLINE bool empty() const;
+  OB_INLINE void destroy();
+  OB_INLINE int set(const size_type pos, const bool value = true);
+  OB_INLINE int wipe(const size_type pos);
+  OB_INLINE int flip(const size_type pos);
+  OB_INLINE bool test(const size_type pos) const;
+  OB_INLINE bool operator[](const size_type pos) const;
+  OB_INLINE bool is_all_false() const;
+  OB_INLINE bool is_all_true() const;
+  int bit_and(const ObBitmap &right);
+  int bit_or(const ObBitmap &right);
   int bit_not();
+  int load_blocks_from_array(size_type *block_data, size_type num_bytes);
+  int append_bitmap(
+      const ObBitmap &bitmap,
+      const uint32_t offset,
+      const bool is_reverse);
+  uint64_t popcnt() const;
+  // [start, end]
+  bool is_all_false(const int64_t start, const int64_t end) const;
+  bool is_all_true(const int64_t start, const int64_t end) const;
+  // Next true offset in the bitmap, return -1 if not found.
+  int64_t next_valid_idx(const int64_t start, const int64_t count, const bool is_reverse, int64_t &offset) const;
 
-  /**
-   * Update blocks of Bitmap from array @*block_data
-   */
-  int load_blocks_from_array(block_type* block_data, size_type num_bits);
+  int init(const size_type valid_bytes, const bool is_all_true = false);
+  int reserve(size_type capacity);
+  int copy_from(const ObBitmap &bitmap, const int64_t start, const int64_t count);
+  void reuse(const bool is_all_true = false);
+  int get_row_ids(
+      int32_t *row_ids,
+      int64_t &row_count,
+      int64_t &from,
+      const int64_t to,
+      const int64_t limit,
+      const int64_t id_offset = 0) const;
+  int generate_condensed_index();
+  OB_INLINE bool is_index_generated() { return -1 != condensed_cnt_; }
+  OB_INLINE const int32_t *get_condensed_idx() { return condensed_idx_; }
+  OB_INLINE int32_t get_condensed_cnt() { return condensed_cnt_; }
 
-public:
-  inline size_type capacity() const
+  OB_INLINE size_type capacity() const
   {
-    return num_bits_;
+    return capacity_;
   }
-  inline size_type size() const
+  OB_INLINE size_type size() const
   {
-    return valid_bits_;
+    return valid_bytes_;
   }
-  inline uint64_t popcnt() const
-  {
-    return popcnt_;
-  }
-  inline bool is_all_false() const
-  {
-    return popcnt_ == 0;
-  }
-  inline bool is_all_true() const
-  {
-    return popcnt_ == valid_bits_;
-  }
-  inline bool is_inited() const
+  OB_INLINE bool is_inited() const
   {
     return is_inited_;
   }
-  inline int init(const size_type valid_bits, const bool is_all_true = false);
+  OB_INLINE uint8_t *get_data() const
+  {
+    return data_;
+  }
+  int set_bitmap_batch(const int64_t offset, const int64_t count, const bool value);
+  int from_bits_mask(
+      const int64_t from,
+      const int64_t to,
+      uint8_t* bits);
+  int to_bits_mask(
+      const int64_t from,
+      const int64_t to,
+      const bool need_flip,
+      uint8_t* bits) const;
+  static void filter(
+      const bool has_null,
+      const uint8_t *nulls,
+      const uint64_t *data,
+      const int64_t size,
+      uint8_t *skip);
+
+  TO_STRING_KV(K_(is_inited), K_(valid_bytes), K_(capacity), KP_(data));
 
 private:
-  struct MemBlock {
-    MemBlock* next_;
-    block_type bits_[BLOCKS_PER_MEM_BLOCK];
-    inline void clear_block_bits(const bool is_all_true)
-    {
-      if (is_all_true) {
-        MEMSET(static_cast<void*>(bits_), 255, MEM_BLOCK_BYTES);
-      } else {
-        MEMSET(static_cast<void*>(bits_), 0, MEM_BLOCK_BYTES);
-      }
+  OB_INLINE void set_(const size_type pos, const bool value = true);
+  OB_INLINE int is_valid(const size_type pos)
+  {
+    int ret = OB_SUCCESS;
+    if (OB_UNLIKELY(pos > valid_bytes_)) {
+      ret = OB_ERROR_OUT_OF_RANGE;
+      LIB_LOG(WARN, "Pos out of valid bytes", K(ret), K(pos), K_(valid_bytes));
     }
-  };
+    return ret;
+  }
 
 private:
-  inline static size_type block_index(size_type pos)
-  {
-    return pos >> BLOCK_MOD_BITS;
-  }
-  inline static size_type bit_index(size_type pos)
-  {
-    return static_cast<block_type>(pos & BLOCK_MOD_MASK);
-  }
-  inline static block_type bit_mask(size_type pos)
-  {
-    return static_cast<block_type>(1ULL << bit_index(pos));
-  }
-  inline static size_type round_up(size_type n, size_type align)
-  {
-    return (n + align - 1) & ~(align - 1);
-  }
-
-  int allocate_blocks(const size_type num_blocks, MemBlock*& head, MemBlock*& tail, const bool value = false);
-  MemBlock* find_block(const size_type pos, size_type& inner_pos) const;
-  int expand_block(const size_type pos, size_type& inner_pos, MemBlock*& mem_block);
-
-  DISALLOW_COPY_AND_ASSIGN(ObBitmap);
-
-private:
-  size_type valid_bits_;
-  size_type num_bits_;
-  size_type popcnt_;
-  MemBlock* header_;
-  MemBlock* tailer_;
-  ObIAllocator& allocator_;
   bool is_inited_;
+  int32_t valid_bytes_;
+  int32_t capacity_;
+  // Make sure that data_[i] can only be equal to 0x00 or 0x01 when i is from 0 to (valid_bytes_ - 1).
+  uint8_t *data_;
+  int32_t condensed_cnt_;
+  int32_t *condensed_idx_;
+  ObIAllocator &allocator_;
 };
 
-inline int ObBitmap::reserve(const size_type capacity)
+OB_INLINE bool ObBitmap::is_all_true() const
+{
+  return is_all_true(0, valid_bytes_ - 1);
+}
+
+OB_INLINE bool ObBitmap::is_all_false() const
+{
+  return is_all_false(0, valid_bytes_ - 1);
+}
+
+OB_INLINE void ObBitmap::destroy()
+{
+  if (nullptr != data_) {
+    allocator_.free(data_);
+    data_ = nullptr;
+  }
+  if (nullptr != condensed_idx_) {
+    allocator_.free(condensed_idx_);
+    condensed_idx_ = nullptr;
+  }
+  valid_bytes_ = 0;
+  capacity_ = 0;
+  condensed_cnt_ = -1;
+}
+
+OB_INLINE bool ObBitmap::empty() const
+{
+  return 0 == valid_bytes_;
+}
+
+OB_INLINE int ObBitmap::set(const size_type pos, const bool value)
 {
   int ret = OB_SUCCESS;
-  size_type inner_pos = 0;
-  if (capacity > num_bits_) {
-    MemBlock* new_block = NULL;
-    if (OB_FAIL(expand_block(capacity - 1, inner_pos, new_block))) {
-      LIB_LOG(WARN, "Failed to expand blocks", K(ret));
-    } else if (OB_ISNULL(new_block)) {
-      ret = OB_ALLOCATE_MEMORY_FAILED;
-      LIB_LOG(WARN, "Failed to expand MemBlock when reserve space for ObBitmap", K(capacity));
-    }
+  if (OB_FAIL(is_valid(pos))) {
+    LIB_LOG(WARN, "Faild to check valid", K(ret), K(pos), K_(valid_bytes));
+  } else {
+    data_[pos] = value;
   }
   return ret;
 }
 
-inline int ObBitmap::init(const size_type valid_bits, const bool is_all_true)
+OB_INLINE void ObBitmap::set_(const size_type pos, const bool value)
+{
+  data_[pos] = value;
+}
+
+OB_INLINE int ObBitmap::wipe(const size_type pos)
+{
+  return set(pos, false);
+}
+
+OB_INLINE int ObBitmap::flip(const size_type pos)
 {
   int ret = OB_SUCCESS;
-  if (IS_INIT) {
-    ret = OB_INIT_TWICE;
-    LIB_LOG(WARN, "ObBitmap init twice", K(ret));
+  if (OB_FAIL(is_valid(pos))) {
+    LIB_LOG(WARN, "Faild to check valid", K(ret), K(pos), K_(valid_bytes));
   } else {
-    num_bits_ = valid_bits;
-    if (num_bits_ < MEM_BLOCK_BITS) {
-      num_bits_ = MEM_BLOCK_BITS;
-    }
-    num_bits_ = round_up(num_bits_, BITS_PER_BLOCK);
-    size_type num_blocks = num_bits_ >> BLOCK_MOD_BITS;
-    if (OB_FAIL(allocate_blocks(num_blocks, header_, tailer_, is_all_true))) {
-      LIB_LOG(WARN, "Allocate blocks failed", K(ret), K(num_blocks));
-    } else if (OB_ISNULL(header_)) {
-      ret = OB_ERR_UNEXPECTED;
-      LIB_LOG(WARN, "Init ObBitmap failed: no mem block allocated", K(valid_bits));
-    } else {
-      if (is_all_true) {
-        popcnt_ = valid_bits;
-      } else {
-        popcnt_ = 0;
-      }
-      valid_bits_ = valid_bits;
-      is_inited_ = true;
-    }
-  }
-  if (IS_NOT_INIT) {
-    destroy();
+    data_[pos] = (data_[pos] == 0);
   }
   return ret;
 }
 
-inline void ObBitmap::destroy()
+OB_INLINE bool ObBitmap::test(const size_type pos) const
 {
-  if (OB_NOT_NULL(header_)) {
-    MemBlock* walk = header_;
-    MemBlock* next;
-    while (NULL != walk) {
-      next = walk->next_;
-      // deallocate block
-      walk->next_ = NULL;
-      allocator_.free(walk);
-      walk = next;
-    }
-  }
+  return data_[pos];
 }
 
-inline bool ObBitmap::empty() const
+OB_INLINE bool ObBitmap::operator[](const size_type pos) const
 {
-  return (NULL == header_ || 0 == num_bits_);
+  return test(pos);
 }
 
-inline int ObBitmap::set(const size_type pos, const bool value)
-{
-  int ret = OB_SUCCESS;
-  if (IS_NOT_INIT) {
-    ret = OB_NOT_INIT;
-    LIB_LOG(WARN, "Not inited", K(ret));
-  } else if (OB_UNLIKELY(pos >= valid_bits_)) {
-    ret = OB_ERROR_OUT_OF_RANGE;
-    LIB_LOG(WARN, "Pos out of valid bits", K(ret), K(pos), K(valid_bits_));
-  } else {
-    size_type inner_pos = pos;
-    MemBlock* mem_block = find_block(pos, inner_pos);
-    if (OB_NOT_NULL(mem_block)) {
-      if (value) {
-        if ((mem_block->bits_[block_index(inner_pos)] & bit_mask(inner_pos)) == 0) {
-          popcnt_++;
-        }
-        mem_block->bits_[block_index(inner_pos)] |= bit_mask(inner_pos);
-      } else {
-        if ((mem_block->bits_[block_index(inner_pos)] & bit_mask(inner_pos)) != 0) {
-          popcnt_--;
-        }
-        mem_block->bits_[block_index(inner_pos)] &= static_cast<block_type>(~bit_mask(inner_pos));
-      }
-    } else {
-      ret = OB_ERR_UNEXPECTED;
-      LIB_LOG(WARN, "Failed to find memblock or allocate memory Bitmap", K(ret), K(pos));
-    }
-  }
-  return ret;
-}
+} // namespace common
+} // namespace oceanbase
 
-inline int ObBitmap::wipe(const size_type pos)
-{
-  int ret = OB_SUCCESS;
-  if (OB_UNLIKELY(!is_inited_)) {
-    ret = OB_NOT_INIT;
-    LIB_LOG(WARN, "Not inited", K(ret));
-  } else {
-    size_type inner_pos = pos;
-    MemBlock* mem_block = find_block(pos, inner_pos);
-    if (OB_NOT_NULL(mem_block)) {
-      if (OB_LIKELY((mem_block->bits_[block_index(inner_pos)] & bit_mask(inner_pos)) != 0)) {
-        popcnt_--;
-      }
-      mem_block->bits_[block_index(inner_pos)] &= ~bit_mask(inner_pos);
-    } else {
-      ret = OB_ERR_UNEXPECTED;
-      LIB_LOG(WARN, "Failed to find Bitmap's memblock", K(ret), K(pos));
-    }
-  }
-  return ret;
-}
-
-inline void ObBitmap::reuse(const bool is_all_true)
-{
-  if (OB_NOT_NULL(header_)) {
-    MemBlock* walk = header_;
-    while (NULL != walk) {
-      walk->clear_block_bits(is_all_true);
-      walk = walk->next_;
-    }
-  }
-  if (is_all_true) {
-    popcnt_ = valid_bits_;
-  } else {
-    popcnt_ = 0;
-  }
-}
-
-inline int ObBitmap::expand_size(const size_type valid_bits)
-{
-  int ret = OB_SUCCESS;
-  valid_bits_ = valid_bits;
-  if (OB_FAIL(reserve(valid_bits))) {
-    LIB_LOG(WARN, "Failed to reserve bitmap with num_bits", K(ret), K(valid_bits));
-  }
-  return ret;
-}
-
-inline int ObBitmap::flip(const size_type pos)
-{
-  int ret = OB_SUCCESS;
-  if (OB_UNLIKELY(!is_inited_)) {
-    ret = OB_NOT_INIT;
-    LIB_LOG(WARN, "Not inited", K(ret));
-  } else {
-    size_type inner_pos = pos;
-    MemBlock* mem_block = find_block(pos, inner_pos);
-    if (OB_NOT_NULL(mem_block)) {
-      if ((mem_block->bits_[block_index(inner_pos)] & bit_mask(inner_pos)) != 0) {
-        popcnt_--;
-      } else {
-        popcnt_++;
-      }
-      mem_block->bits_[block_index(inner_pos)] ^= bit_mask(inner_pos);
-    } else {
-      ret = OB_ERR_UNEXPECTED;
-      LIB_LOG(WARN, "Failed to find Bitmap's memblock", K(ret), K(pos));
-    }
-  }
-  return ret;
-}
-
-inline int ObBitmap::test(const size_type pos, bool& result) const
-{
-  int ret = OB_SUCCESS;
-  if (OB_UNLIKELY(!is_inited_)) {
-    ret = OB_NOT_INIT;
-    LIB_LOG(WARN, "Not inited", K(ret));
-  } else {
-    size_type inner_pos = pos;
-    MemBlock* mem_block = find_block(pos, inner_pos);
-    if (OB_NOT_NULL(mem_block)) {
-      result = (mem_block->bits_[block_index(inner_pos)] & bit_mask(inner_pos)) != 0;
-    } else {
-      ret = OB_ERR_UNEXPECTED;
-      LIB_LOG(WARN, "Failed to find Bitmap's memblock", K(ret), K(pos));
-    }
-  }
-  return ret;
-}
-
-inline bool ObBitmap::test(const size_type pos) const
-{
-  bool result = false;
-  test(pos, result);
-  return result;
-}
-
-inline typename ObBitmap::block_type ObBitmap::get_block(const size_type pos) const
-{
-  ObBitmap::block_type result = static_cast<ObBitmap::block_type>(0);
-  if (OB_UNLIKELY(valid_bits_ < pos)) {
-    LIB_LOG(WARN, "Index out of range when getting block from bitmap", K_(valid_bits), K(pos));
-  } else {
-    size_type inner_pos = pos;
-    MemBlock* mem_block = find_block(pos, inner_pos);
-    if (OB_ISNULL(mem_block)) {
-      LIB_LOG(WARN, "Null pointer error when finding memblock", K(pos));
-    } else {
-      result = mem_block->bits_[block_index(inner_pos)];
-    }
-  }
-  return result;
-}
-
-}  // namespace common
-}  // namespace oceanbase
-
-#endif  // OCEANBASE_COMMON_OB_BITMAP_H_
+#endif // OCEANBASE_COMMON_OB_BITMAP_H_

@@ -16,30 +16,35 @@
 #include "lib/allocator/page_arena.h"  // ModuleArena
 #include "lib/lock/ob_spin_lock.h"     // ObSpinLock
 
-namespace oceanbase {
-namespace common {
-class ObSafeArena : public ObIAllocator {
+namespace oceanbase
+{
+namespace common
+{
+class ObSafeArena : public ObIAllocator
+{
 public:
-  ObSafeArena(const lib::ObLabel& label, const int64_t page_size = OB_MALLOC_NORMAL_BLOCK_SIZE)
-      : arena_alloc_(label, page_size), lock_()
+  ObSafeArena(const lib::ObLabel &label, const int64_t page_size = OB_MALLOC_NORMAL_BLOCK_SIZE,
+              int64_t tenant_id = OB_SERVER_TENANT_ID)
+      : arena_alloc_(label, page_size, tenant_id),
+        lock_(ObLatchIds::OB_AREAN_ALLOCATOR_LOCK)
   {}
 
-  virtual ~ObSafeArena()
-  {}
+  virtual ~ObSafeArena() {}
 
 public:
-  virtual void* alloc(const int64_t sz) override
+  virtual void *alloc(const int64_t sz) override
   {
-    return alloc(sz, default_memattr);
+    ObSpinLockGuard guard(lock_);
+    return arena_alloc_.alloc(sz);
   }
 
-  virtual void* alloc(const int64_t sz, const ObMemAttr& attr) override
+  virtual void* alloc(const int64_t sz, const ObMemAttr &attr) override
   {
     ObSpinLockGuard guard(lock_);
     return arena_alloc_.alloc(sz, attr);
   }
 
-  virtual void free(void* ptr) override
+  virtual void free(void *ptr) override
   {
     ObSpinLockGuard guard(lock_);
     arena_alloc_.free(ptr);
@@ -64,16 +69,12 @@ public:
   }
 
   int64_t used() const override
-  {
-    return arena_alloc_.used();
-  }
+  { return arena_alloc_.used(); }
 
   int64_t total() const override
-  {
-    return arena_alloc_.total();
-  }
+  { return arena_alloc_.total(); }
 
-  ModuleArena& get_arena()
+  ModuleArena &get_arena()
   {
     return arena_alloc_.get_arena();
   }
@@ -85,6 +86,6 @@ private:
 private:
   DISALLOW_COPY_AND_ASSIGN(ObSafeArena);
 };
-}  // namespace common
-}  // namespace oceanbase
+} // namespace common
+} // namespace oceanbase
 #endif /* OCEANBASE_COMMON_SAFE_ARENA_H__ */

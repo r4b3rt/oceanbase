@@ -19,19 +19,18 @@
 
 using namespace oceanbase;
 using namespace oceanbase::common;
-namespace oceanbase {
-namespace share {
+namespace oceanbase
+{
+namespace share
+{
 using namespace schema;
-class TestPrimaryZoneUtil : public ::testing::Test {
+class TestPrimaryZoneUtil : public ::testing::Test
+{
 public:
-  virtual void SetUp()
-  {}
-  virtual void TearDown()
-  {}
-  static void SetUpTestCase()
-  {}
-  static void TearDownTestCase()
-  {}
+  virtual void SetUp() {}
+  virtual void TearDown() {}
+  static void SetUpTestCase() {}
+  static void TearDownTestCase() {}
 };
 
 TEST_F(TestPrimaryZoneUtil, single_zone)
@@ -42,9 +41,9 @@ TEST_F(TestPrimaryZoneUtil, single_zone)
   ObPrimaryZoneUtil primary_zone_util(primary_zone);
   ASSERT_EQ(OB_SUCCESS, primary_zone_util.init());
   ASSERT_EQ(OB_SUCCESS, primary_zone_util.check_and_parse_primary_zone());
-  char pz_str[MAX_ZONE_LENGTH];
+  char pz_str[MAX_ZONE_LIST_LENGTH];
   int64_t pos = 0;
-  ASSERT_EQ(OB_SUCCESS, primary_zone_util.output_normalized_primary_zone(pz_str, MAX_ZONE_LENGTH, pos));
+  ASSERT_EQ(OB_SUCCESS, primary_zone_util.output_normalized_primary_zone(pz_str, MAX_ZONE_LIST_LENGTH, pos));
   ASSERT_TRUE(primary_zone == pz_str);
   ASSERT_EQ(1, primary_zone_util.full_zone_array_.count());
   ASSERT_TRUE(ObString("zone1") == primary_zone_util.full_zone_array_.at(0).zone_);
@@ -58,9 +57,9 @@ TEST_F(TestPrimaryZoneUtil, single_zone1)
   ObPrimaryZoneUtil primary_zone_util(primary_zone);
   ASSERT_EQ(OB_SUCCESS, primary_zone_util.init());
   ASSERT_EQ(OB_SUCCESS, primary_zone_util.check_and_parse_primary_zone());
-  char pz_str[MAX_ZONE_LENGTH];
+  char pz_str[MAX_ZONE_LIST_LENGTH];
   int64_t pos = 0;
-  ASSERT_EQ(OB_SUCCESS, primary_zone_util.output_normalized_primary_zone(pz_str, MAX_ZONE_LENGTH, pos));
+  ASSERT_EQ(OB_SUCCESS, primary_zone_util.output_normalized_primary_zone(pz_str, MAX_ZONE_LIST_LENGTH, pos));
   ASSERT_TRUE(ObZone("zone1") == pz_str);
   ASSERT_EQ(1, primary_zone_util.zone_array_.count());
   ASSERT_EQ(0, primary_zone_util.zone_array_.at(0).score_);
@@ -79,9 +78,9 @@ TEST_F(TestPrimaryZoneUtil, multiple_zone0)
   ObPrimaryZoneUtil primary_zone_util(primary_zone);
   ASSERT_EQ(OB_SUCCESS, primary_zone_util.init());
   ASSERT_EQ(OB_SUCCESS, primary_zone_util.check_and_parse_primary_zone());
-  char pz_str[MAX_ZONE_LENGTH];
+  char pz_str[MAX_ZONE_LIST_LENGTH];
   int64_t pos = 0;
-  ASSERT_EQ(OB_SUCCESS, primary_zone_util.output_normalized_primary_zone(pz_str, MAX_ZONE_LENGTH, pos));
+  ASSERT_EQ(OB_SUCCESS, primary_zone_util.output_normalized_primary_zone(pz_str, MAX_ZONE_LIST_LENGTH, pos));
   ASSERT_TRUE(ObZone("zone1,zone2,zone3") == pz_str);
   ASSERT_EQ(3, primary_zone_util.zone_array_.count());
   ASSERT_EQ(0, primary_zone_util.zone_array_.at(0).score_);
@@ -106,9 +105,9 @@ TEST_F(TestPrimaryZoneUtil, multiple_zone1)
   ObPrimaryZoneUtil primary_zone_util(primary_zone);
   ASSERT_EQ(OB_SUCCESS, primary_zone_util.init());
   ASSERT_EQ(OB_SUCCESS, primary_zone_util.check_and_parse_primary_zone());
-  char pz_str[MAX_ZONE_LENGTH];
+  char pz_str[MAX_ZONE_LIST_LENGTH];
   int64_t pos = 0;
-  ASSERT_EQ(OB_SUCCESS, primary_zone_util.output_normalized_primary_zone(pz_str, MAX_ZONE_LENGTH, pos));
+  ASSERT_EQ(OB_SUCCESS, primary_zone_util.output_normalized_primary_zone(pz_str, MAX_ZONE_LIST_LENGTH, pos));
   ASSERT_TRUE(ObZone("zone1,zone2,zone3") == pz_str);
   ASSERT_EQ(3, primary_zone_util.zone_array_.count());
   ASSERT_EQ(0, primary_zone_util.zone_array_.at(0).score_);
@@ -133,9 +132,9 @@ TEST_F(TestPrimaryZoneUtil, multiple_zone2)
   ObPrimaryZoneUtil primary_zone_util(primary_zone);
   ASSERT_EQ(OB_SUCCESS, primary_zone_util.init());
   ASSERT_EQ(OB_SUCCESS, primary_zone_util.check_and_parse_primary_zone());
-  char pz_str[MAX_ZONE_LENGTH];
+  char pz_str[MAX_ZONE_LIST_LENGTH];
   int64_t pos = 0;
-  ASSERT_EQ(OB_SUCCESS, primary_zone_util.output_normalized_primary_zone(pz_str, MAX_ZONE_LENGTH, pos));
+  ASSERT_EQ(OB_SUCCESS, primary_zone_util.output_normalized_primary_zone(pz_str, MAX_ZONE_LIST_LENGTH, pos));
   ASSERT_TRUE(ObZone("zone1;zone2;zone3") == pz_str);
   ASSERT_EQ(3, primary_zone_util.zone_array_.count());
   ASSERT_EQ(0, primary_zone_util.zone_array_.at(0).score_);
@@ -160,9 +159,9 @@ TEST_F(TestPrimaryZoneUtil, multiple_zone3)
   ObPrimaryZoneUtil primary_zone_util(primary_zone);
   ASSERT_EQ(OB_SUCCESS, primary_zone_util.init());
   ASSERT_EQ(OB_SUCCESS, primary_zone_util.check_and_parse_primary_zone());
-  char pz_str[MAX_ZONE_LENGTH];
+  char pz_str[MAX_ZONE_LIST_LENGTH];
   int64_t pos = 0;
-  ASSERT_EQ(OB_SUCCESS, primary_zone_util.output_normalized_primary_zone(pz_str, MAX_ZONE_LENGTH, pos));
+  ASSERT_EQ(OB_SUCCESS, primary_zone_util.output_normalized_primary_zone(pz_str, MAX_ZONE_LIST_LENGTH, pos));
   ASSERT_TRUE(ObZone("zone1;zone2;zone3") == pz_str);
   ASSERT_EQ(3, primary_zone_util.zone_array_.count());
   ASSERT_EQ(0, primary_zone_util.zone_array_.at(0).score_);
@@ -187,9 +186,9 @@ TEST_F(TestPrimaryZoneUtil, multiple_zone4)
   ObPrimaryZoneUtil primary_zone_util(primary_zone);
   ASSERT_EQ(OB_SUCCESS, primary_zone_util.init());
   ASSERT_EQ(OB_SUCCESS, primary_zone_util.check_and_parse_primary_zone());
-  char pz_str[MAX_ZONE_LENGTH];
+  char pz_str[MAX_ZONE_LIST_LENGTH];
   int64_t pos = 0;
-  ASSERT_EQ(OB_SUCCESS, primary_zone_util.output_normalized_primary_zone(pz_str, MAX_ZONE_LENGTH, pos));
+  ASSERT_EQ(OB_SUCCESS, primary_zone_util.output_normalized_primary_zone(pz_str, MAX_ZONE_LIST_LENGTH, pos));
   ASSERT_TRUE(ObZone("zone1,zone2;zone3") == pz_str);
   ASSERT_EQ(3, primary_zone_util.zone_array_.count());
   ASSERT_EQ(0, primary_zone_util.zone_array_.at(0).score_);
@@ -214,9 +213,9 @@ TEST_F(TestPrimaryZoneUtil, multiple_zone5)
   ObPrimaryZoneUtil primary_zone_util(primary_zone);
   ASSERT_EQ(OB_SUCCESS, primary_zone_util.init());
   ASSERT_EQ(OB_SUCCESS, primary_zone_util.check_and_parse_primary_zone());
-  char pz_str[MAX_ZONE_LENGTH];
+  char pz_str[MAX_ZONE_LIST_LENGTH];
   int64_t pos = 0;
-  ASSERT_EQ(OB_SUCCESS, primary_zone_util.output_normalized_primary_zone(pz_str, MAX_ZONE_LENGTH, pos));
+  ASSERT_EQ(OB_SUCCESS, primary_zone_util.output_normalized_primary_zone(pz_str, MAX_ZONE_LIST_LENGTH, pos));
   ASSERT_TRUE(ObZone("zone1;zone2,zone3") == pz_str);
   ASSERT_EQ(3, primary_zone_util.zone_array_.count());
   ASSERT_EQ(0, primary_zone_util.zone_array_.at(0).score_);
@@ -251,9 +250,9 @@ TEST_F(TestPrimaryZoneUtil, multiple_zone6)
   ObPrimaryZoneUtil primary_zone_util(primary_zone, &zone_region_list);
   ASSERT_EQ(OB_SUCCESS, primary_zone_util.init(zone_list));
   ASSERT_EQ(OB_SUCCESS, primary_zone_util.check_and_parse_primary_zone());
-  char pz_str[MAX_ZONE_LENGTH];
+  char pz_str[MAX_ZONE_LIST_LENGTH];
   int64_t pos = 0;
-  ASSERT_EQ(OB_SUCCESS, primary_zone_util.output_normalized_primary_zone(pz_str, MAX_ZONE_LENGTH, pos));
+  ASSERT_EQ(OB_SUCCESS, primary_zone_util.output_normalized_primary_zone(pz_str, MAX_ZONE_LIST_LENGTH, pos));
   ASSERT_TRUE(ObZone("zone1;zone2;zone3;zone4") == pz_str);
   ASSERT_EQ(3, primary_zone_util.zone_array_.count());
   ASSERT_EQ(0, primary_zone_util.zone_array_.at(0).score_);
@@ -289,9 +288,9 @@ TEST_F(TestPrimaryZoneUtil, multiple_zone7)
   ObPrimaryZoneUtil primary_zone_util(primary_zone, &zone_region_list);
   ASSERT_EQ(OB_SUCCESS, primary_zone_util.init(zone_list));
   ASSERT_EQ(OB_SUCCESS, primary_zone_util.check_and_parse_primary_zone());
-  char pz_str[MAX_ZONE_LENGTH];
+  char pz_str[MAX_ZONE_LIST_LENGTH];
   int64_t pos = 0;
-  ASSERT_EQ(OB_SUCCESS, primary_zone_util.output_normalized_primary_zone(pz_str, MAX_ZONE_LENGTH, pos));
+  ASSERT_EQ(OB_SUCCESS, primary_zone_util.output_normalized_primary_zone(pz_str, MAX_ZONE_LIST_LENGTH, pos));
   ASSERT_TRUE(ObZone("zone1;zone2;zone3;zone4") == pz_str);
   ASSERT_EQ(2, primary_zone_util.zone_array_.count());
   ASSERT_EQ(0, primary_zone_util.zone_array_.at(0).score_);
@@ -325,9 +324,9 @@ TEST_F(TestPrimaryZoneUtil, multiple_zone8)
   ObPrimaryZoneUtil primary_zone_util(primary_zone, &zone_region_list);
   ASSERT_EQ(OB_SUCCESS, primary_zone_util.init(zone_list));
   ASSERT_EQ(OB_SUCCESS, primary_zone_util.check_and_parse_primary_zone());
-  char pz_str[MAX_ZONE_LENGTH];
+  char pz_str[MAX_ZONE_LIST_LENGTH];
   int64_t pos = 0;
-  ASSERT_EQ(OB_SUCCESS, primary_zone_util.output_normalized_primary_zone(pz_str, MAX_ZONE_LENGTH, pos));
+  ASSERT_EQ(OB_SUCCESS, primary_zone_util.output_normalized_primary_zone(pz_str, MAX_ZONE_LIST_LENGTH, pos));
   ASSERT_TRUE(ObZone("zone1,zone3;zone2,zone4") == pz_str);
   ASSERT_EQ(2, primary_zone_util.zone_array_.count());
   ASSERT_EQ(0, primary_zone_util.zone_array_.at(0).score_);
@@ -361,9 +360,9 @@ TEST_F(TestPrimaryZoneUtil, multiple_zone9)
   ObPrimaryZoneUtil primary_zone_util(primary_zone, &zone_region_list);
   ASSERT_EQ(OB_SUCCESS, primary_zone_util.init(zone_list));
   ASSERT_EQ(OB_SUCCESS, primary_zone_util.check_and_parse_primary_zone());
-  char pz_str[MAX_ZONE_LENGTH];
+  char pz_str[MAX_ZONE_LIST_LENGTH];
   int64_t pos = 0;
-  ASSERT_EQ(OB_SUCCESS, primary_zone_util.output_normalized_primary_zone(pz_str, MAX_ZONE_LENGTH, pos));
+  ASSERT_EQ(OB_SUCCESS, primary_zone_util.output_normalized_primary_zone(pz_str, MAX_ZONE_LIST_LENGTH, pos));
   ASSERT_TRUE(ObZone("zone1;zone2;zone3;zone4;zone5") == pz_str);
   ASSERT_EQ(3, primary_zone_util.zone_array_.count());
   ASSERT_EQ(0, primary_zone_util.zone_array_.at(0).score_);
@@ -400,9 +399,9 @@ TEST_F(TestPrimaryZoneUtil, multiple_zone10)
   ObPrimaryZoneUtil primary_zone_util(primary_zone, &zone_region_list);
   ASSERT_EQ(OB_SUCCESS, primary_zone_util.init(zone_list));
   ASSERT_EQ(OB_SUCCESS, primary_zone_util.check_and_parse_primary_zone());
-  char pz_str[MAX_ZONE_LENGTH];
+  char pz_str[MAX_ZONE_LIST_LENGTH];
   int64_t pos = 0;
-  ASSERT_EQ(OB_SUCCESS, primary_zone_util.output_normalized_primary_zone(pz_str, MAX_ZONE_LENGTH, pos));
+  ASSERT_EQ(OB_SUCCESS, primary_zone_util.output_normalized_primary_zone(pz_str, MAX_ZONE_LIST_LENGTH, pos));
   ASSERT_TRUE(ObZone("zone1;zone2;zone3,zone4") == pz_str);
   ASSERT_EQ(3, primary_zone_util.zone_array_.count());
   ASSERT_EQ(0, primary_zone_util.zone_array_.at(0).score_);
@@ -438,9 +437,9 @@ TEST_F(TestPrimaryZoneUtil, multiple_zone11)
   ObPrimaryZoneUtil primary_zone_util(primary_zone, &zone_region_list);
   ASSERT_EQ(OB_SUCCESS, primary_zone_util.init(zone_list));
   ASSERT_EQ(OB_SUCCESS, primary_zone_util.check_and_parse_primary_zone());
-  char pz_str[MAX_ZONE_LENGTH];
+  char pz_str[MAX_ZONE_LIST_LENGTH];
   int64_t pos = 0;
-  ASSERT_EQ(OB_SUCCESS, primary_zone_util.output_normalized_primary_zone(pz_str, MAX_ZONE_LENGTH, pos));
+  ASSERT_EQ(OB_SUCCESS, primary_zone_util.output_normalized_primary_zone(pz_str, MAX_ZONE_LIST_LENGTH, pos));
   ASSERT_TRUE(ObZone("zone1,zone2;zone4;zone3") == pz_str);
   ASSERT_EQ(3, primary_zone_util.zone_array_.count());
   ASSERT_EQ(0, primary_zone_util.zone_array_.at(0).score_);
@@ -455,14 +454,14 @@ TEST_F(TestPrimaryZoneUtil, multiple_zone11)
   ASSERT_TRUE(ObString("zone4") == primary_zone_util.full_zone_array_.at(2).zone_);
   ASSERT_TRUE(ObString("zone3") == primary_zone_util.full_zone_array_.at(3).zone_);
 }
-}  // namespace share
-}  // namespace oceanbase
+}
+}
 
-int main(int argc, char** argv)
+int main(int argc, char **argv)
 {
   int ret = EXIT_SUCCESS;
   system("rm -f test_primary_zone_util.log");
-  ObLogger& logger = ObLogger::get_logger();
+  ObLogger &logger = ObLogger::get_logger();
   logger.set_file_name("test_primary_zone_util.log", true);
   logger.set_log_level(OB_LOG_LEVEL_INFO);
 

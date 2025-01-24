@@ -1,1 +1,2 @@
-ob_unittest(test_client_feedback)
+storage_unittest(test_client_feedback)
+storage_unittest(test_ob_feedback_proxy_utils)

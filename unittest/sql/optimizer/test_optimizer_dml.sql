@@ -64,7 +64,7 @@ update t1 set c1 = 1 + 1 where c1 = 2;
 
 #case 17 partition by key
 #update t5 set c1 = 1 where c2 = 3 and c3 = 4;
-#UPDATE __all_root_table SET sql_port = 51997, zone = 'test', partition_cnt = 1, role = 0, row_count = 0, data_size = 0, data_version = 1, data_checksum = 0, row_checksum = 0, column_checksum = '' WHERE tenant_id = 1 AND table_id = 2 AND partition_id = 0 AND ip = '10.232.36.175' AND port = 51951;
+#UPDATE __all_root_table SET sql_port = 51997, zone = 'test', partition_cnt = 1, role = 0, row_count = 0, data_size = 0, data_version = 1, data_checksum = 0, row_checksum = 0, column_checksum = '' WHERE tenant_id = 1 AND table_id = 2 AND partition_id = 0 AND ip = '127.0.0.1' AND port = 51951;
 
 #test for partition selection in dml_stmt
 insert into t1 partition (p3, p0) values(3, 2);
@@ -81,7 +81,7 @@ update t7 set c1=1 where c1 in (select c1 from t8 where t7.c2=c2);
 update t7 set c1=(select c1 from t8);
 update t7 set c1=(select c1 from t8 where t7.c2=c2);
 
-##elimilation of orderby in delete_stmt and update_stmt
+##bug:
 delete from t7 where abs(c1) > 0 order by c1 limit 1;
 update t7 set c1 = 1 where abs(c2) > 0 order by c1 limit 1;
 
@@ -134,6 +134,8 @@ insert into t_u values(1);
 insert into t_u values(2);
 #part p1
 insert into t_u values(9223372036854775807);
+#part p1 这里和MySQL不同,因为该值对应的int64_t为-9223372036854775808(INT64_MIN),在OB内部会先转成INT64_MAX;
+#MySQL是先做%part取余，然后负值取反.OB先负值取反,再取余,INT64_MIN就需要先转成INT64_MAX
 insert into t_u values(9223372036854775808);
 #part p1
 insert into t_u values(9223372036854775809);

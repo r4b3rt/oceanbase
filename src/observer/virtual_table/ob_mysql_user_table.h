@@ -15,12 +15,16 @@
 
 #include "share/ob_virtual_table_scanner_iterator.h"
 
-namespace oceanbase {
-namespace sql {
+namespace oceanbase
+{
+namespace sql
+{
 class ObSQLSessionInfo;
 }
-namespace observer {
-class ObMySQLUserTable : public common::ObVirtualTableScannerIterator {
+namespace observer
+{
+class ObMySQLUserTable : public common::ObVirtualTableScannerIterator
+{
 private:
   enum MySQLUserTableColumns {
     HOST = 16,
@@ -37,7 +41,7 @@ private:
     PROCESS_PRIV,
     FILE_PRIV,
     GRANT_PRIV,
-    REFERENCE_PRIV,
+    REFERENCES_PRIV,
     INDEX_PRIV,
     ALTER_PRIV,
     SHOW_DB_PRIV,
@@ -66,26 +70,26 @@ private:
     PLUGIN,
     AUTHENTICATION_STRING,
     PASSWORD_EXPIRED,
+    ACCOUNT_LOCKED,
+    DROP_DATABASE_LINK_PRIV,
+    CREATE_DATABASE_LINK_PRIV,
+    CREATE_ROLE_PRIV,
+    DROP_ROLE_PRIV,
   };
-
 public:
   ObMySQLUserTable();
   virtual ~ObMySQLUserTable();
 
-  virtual int inner_get_next_row(common::ObNewRow*& row);
+  virtual int inner_get_next_row(common::ObNewRow *&row);
   virtual void reset();
 
-  inline void set_tenant_id(const uint64_t tenant_id)
-  {
-    tenant_id_ = tenant_id;
-  }
+  inline void set_tenant_id(const uint64_t tenant_id) { tenant_id_ = tenant_id; }
 
 private:
   uint64_t tenant_id_;
-
 private:
   DISALLOW_COPY_AND_ASSIGN(ObMySQLUserTable);
 };
-}  // namespace observer
-}  // namespace oceanbase
-#endif  // OCEANBASE_OBSERVER_VIRTUAL_TABLE_OB_MYSQL_USER_TABLE_
+}
+}
+#endif // OCEANBASE_OBSERVER_VIRTUAL_TABLE_OB_MYSQL_USER_TABLE_

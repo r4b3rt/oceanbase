@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2021 OceanBase
+ * Copyright (c) 2021, 2022 OceanBase
  * OceanBase CE is licensed under Mulan PubL v2.
  * You can use this software according to the terms and conditions of the Mulan PubL v2.
  * You may obtain a copy of Mulan PubL v2 at:
@@ -9,16 +9,27 @@
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PubL v2 for more details.
  */
+
 #ifndef COND_H
 #define COND_H
 #include "lib/time/Time.h"
 #include "lib/ob_define.h"
 #include "lib/oblog/ob_log.h"
+#include "lib/wait_event/ob_wait_event.h"
+#include "lib/stat/ob_diagnose_info.h"
+
 namespace obutil
 {
 template<class T> class ObMonitor;
-class Mutex;
 
+/**
+ * A wrapper class of pthread condition that implements a condition variable.
+ * @note The condition variable itself is not thread safe and should be protected
+ * by a mutex.
+ * See also ObThreadCond which is suitable for most situations.
+ */
+class ObUtilMutex;
+typedef ObUtilMutex Mutex;
 class Cond
 {
 public:
@@ -63,6 +74,7 @@ private:
   template <typename M> bool timed_wait_impl(const M&, const ObSysTime&) const;
 
   mutable pthread_cond_t _cond;
+  mutable pthread_condattr_t _attr;
 };
 
 template <typename M> inline bool
@@ -73,7 +85,9 @@ Cond::wait_impl(const M& mutex) const
 
   LockState state;
   mutex.unlock(state);
-  const int rc = pthread_cond_wait(&_cond, state.mutex);
+  oceanbase::common::ObWaitEventGuard
+      wait_guard(oceanbase::common::ObWaitEventIds::DEFAULT_COND_WAIT, 0, reinterpret_cast<uint64_t>(this));
+  const int rc = ob_pthread_cond_wait(&_cond, state.mutex);
   mutex.lock(state);
 
   if ( 0 != rc ) {
@@ -96,7 +110,7 @@ Cond::timed_wait_impl(const M& mutex, const ObSysTime& timeout) const
     LockState state;
     mutex.unlock(state);
 
-    timeval tv = ObSysTime::now(ObSysTime::Realtime) + timeout;
+    timeval tv = ObSysTime::now(ObSysTime::Monotonic) + timeout;
     timespec ts;
     ts.tv_sec = tv.tv_sec;
     ts.tv_nsec = tv.tv_usec * 1000;
@@ -104,7 +118,9 @@ Cond::timed_wait_impl(const M& mutex, const ObSysTime& timeout) const
     timespec ts;
     ts.tv_sec  = tv.tv_sec + timeout/1000;
     ts.tv_nsec = tv.tv_usec * 1000 + ( timeout % 1000 ) * 1000000;*/
-    const int rc = pthread_cond_timedwait(&_cond, state.mutex, &ts);
+    oceanbase::common::ObWaitEventGuard
+        wait_guard(oceanbase::common::ObWaitEventIds::DEFAULT_COND_WAIT, timeout.toMicroSeconds(), reinterpret_cast<uint64_t>(this));
+    const int rc = ob_pthread_cond_timedwait(&_cond, state.mutex, &ts);
     mutex.lock(state);
 
     if (rc != 0) {

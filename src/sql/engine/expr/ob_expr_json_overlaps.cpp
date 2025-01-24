@@ -8,9 +8,9 @@
  * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PubL v2 for more details.
+ * This file contains implementation for json_overlaps.
  */
 
-// This file contains implementation for json_overlaps.
 #define USING_LOG_PREFIX SQL_ENG
 #include "ob_expr_json_overlaps.h"
 #include "ob_expr_json_func_helper.h"
@@ -24,7 +24,7 @@ namespace sql
 {
 
 ObExprJsonOverlaps::ObExprJsonOverlaps(ObIAllocator &alloc)
-    : ObFuncExprOperator(alloc, T_FUN_SYS_JSON_OVERLAPS, N_JSON_OVERLAPS, 2, NOT_ROW_DIMENSION)
+    : ObFuncExprOperator(alloc, T_FUN_SYS_JSON_OVERLAPS, N_JSON_OVERLAPS, 2, VALID_FOR_GENERATED_COL, NOT_ROW_DIMENSION)
 {
 }
 
@@ -39,57 +39,23 @@ int ObExprJsonOverlaps::calc_result_type2(ObExprResType &type,
 {
   UNUSED(type_ctx); 
   int ret = OB_SUCCESS;
+  bool is_strict = false;
 
   type.set_int32();
   type.set_precision(DEFAULT_PRECISION_FOR_BOOL);
   type.set_scale(ObAccuracy::DDL_DEFAULT_ACCURACY[ObIntType].scale_);
-  
-  if (OB_FAIL(ObJsonExprHelper::is_valid_for_json(type1, 1, N_JSON_OVERLAPS))) {
+
+  if (!ob_is_string_type(type1.get_type())) {
+  } else if (OB_FAIL(ObJsonExprHelper::is_valid_for_json(type1, 1, N_JSON_OVERLAPS))) {
     LOG_WARN("wrong type for json doc.", K(ret), K(type1.get_type()));
+  }
+
+  if (OB_FAIL(ret))  {
+  } else if (!ob_is_string_type(type2.get_type())) {
   } else if (OB_FAIL(ObJsonExprHelper::is_valid_for_json(type2, 2, N_JSON_OVERLAPS))) {
     LOG_WARN("wrong type for json doc.", K(ret), K(type2.get_type()));
   }
-  return ret;
-}
-
-int ObExprJsonOverlaps::calc_result2(common::ObObj &result,
-                                     const common::ObObj &obj1,
-                                     const common::ObObj &obj2,
-                                     common::ObExprCtx &expr_ctx) const
-{
-  INIT_SUCC(ret);
-  ObIAllocator *allocator = expr_ctx.calc_buf_;
-
-  if (OB_ISNULL(allocator)) { // check allocator
-    ret = OB_NOT_INIT;
-    LOG_WARN("varchar buffer not init", K(ret));
-  } else {
-    ObIJsonBase *json_a = NULL;
-    ObIJsonBase *json_b = NULL;
-    bool is_null_result = false;
-    if (OB_FAIL(ObJsonExprHelper::get_json_doc(&obj1, allocator, 0,
-                                               json_a, is_null_result, false))) {
-      LOG_WARN("get_json_doc failed", K(ret));
-    } else if (OB_FAIL(ObJsonExprHelper::get_json_doc(&obj2, allocator, 0,
-                                               json_b, is_null_result, false))) {
-      LOG_WARN("get_json_doc failed", K(ret));
-    } else {
-      bool is_overlaps = false;
-      if (!is_null_result) {
-        if (OB_FAIL(json_overlaps(json_a, json_b, &is_overlaps))) {
-          LOG_WARN("json_overlaps in sub_json_targets failed", K(ret));
-        }
-      }
-      // set result
-      if (OB_FAIL(ret)) {
-        LOG_WARN("json_overlaps failed", K(ret));
-      } else if (is_null_result) {
-        result.set_null();
-      } else {
-        result.set_int(static_cast<int64_t>(is_overlaps));
-      }
-    }
-  }
+  
   return ret;
 }
 
@@ -99,8 +65,17 @@ int ObExprJsonOverlaps::eval_json_overlaps(const ObExpr &expr, ObEvalCtx &ctx, O
   ObIJsonBase *json_a = NULL;
   ObIJsonBase *json_b = NULL;
   bool is_null_result = false;
-  common::ObArenaAllocator &temp_allocator = ctx.get_reset_tmp_alloc();
-  if (OB_FAIL(ObJsonExprHelper::get_json_doc(expr, ctx, temp_allocator, 0, json_a, is_null_result, false))) {
+  ObEvalCtx::TempAllocGuard tmp_alloc_g(ctx);
+  uint64_t tenant_id = ObMultiModeExprHelper::get_tenant_id(ctx.exec_ctx_.get_my_session());
+  MultimodeAlloctor temp_allocator(tmp_alloc_g.get_allocator(), expr.type_, tenant_id, ret);
+
+  if (!ObJsonExprHelper::is_convertible_to_json(expr.args_[0]->datum_meta_.type_)) {
+    ret = OB_ERR_INVALID_TYPE_FOR_JSON;
+    LOG_USER_ERROR(OB_ERR_INVALID_TYPE_FOR_JSON, 1, N_JSON_OVERLAPS);
+  } else if (!ObJsonExprHelper::is_convertible_to_json(expr.args_[1]->datum_meta_.type_)) {
+    ret = OB_ERR_INVALID_TYPE_FOR_JSON;
+    LOG_USER_ERROR(OB_ERR_INVALID_TYPE_FOR_JSON, 2, N_JSON_OVERLAPS);
+  } else if (OB_FAIL(ObJsonExprHelper::get_json_doc(expr, ctx, temp_allocator, 0, json_a, is_null_result, false))) {
     LOG_WARN("get_json_doc failed", K(ret));
   } else if (OB_FAIL(ObJsonExprHelper::get_json_doc(expr, ctx, temp_allocator, 1, json_b, is_null_result, false))) {
     LOG_WARN("get_json_doc failed", K(ret));

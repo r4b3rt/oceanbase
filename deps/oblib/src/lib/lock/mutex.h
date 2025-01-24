@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2021 OceanBase
+ * Copyright (c) 2021, 2022 OceanBase
  * OceanBase CE is licensed under Mulan PubL v2.
  * You can use this software according to the terms and conditions of the Mulan PubL v2.
  * You may obtain a copy of Mulan PubL v2 at:
@@ -9,6 +9,7 @@
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PubL v2 for more details.
  */
+
 #ifndef MUTEX_H
 #define MUTEX_H
 
@@ -17,15 +18,22 @@
 
 namespace obutil
 {
-class Mutex
+
+/**
+ * A wrapper class of pthread mutex.
+ * This class is intended to be used in other low level construct only.
+ * In most situations, you should use ObLatch or ObMutex.
+ *
+ */
+class ObUtilMutex
 {
 public:
 
-  typedef ObLockT<Mutex> Lock;
-  typedef ObTryLockT<Mutex> TryLock;
+  typedef ObLockT<ObUtilMutex> Lock;
+  typedef ObTryLockT<ObUtilMutex> TryLock;
 
-  Mutex();
-  ~Mutex();
+  ObUtilMutex();
+  ~ObUtilMutex();
 
   void lock() const;
   bool trylock() const;
@@ -34,8 +42,8 @@ public:
 
 private:
 
-  Mutex(const Mutex&);
-  Mutex& operator=(const Mutex&);
+  ObUtilMutex(const ObUtilMutex&);
+  ObUtilMutex& operator=(const ObUtilMutex&);
 
   struct LockState
   {
@@ -48,5 +56,6 @@ private:
 
   friend class Cond;
 };
+typedef ObUtilMutex Mutex;
 }//end namespace
 #endif

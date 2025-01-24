@@ -8,9 +8,9 @@
  * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PubL v2 for more details.
+ * This file contains implementation for json_member_of.
  */
 
-// This file contains implementation for json_member_of.
 #define USING_LOG_PREFIX SQL_ENG
 #include "ob_expr_json_func_helper.h"
 #include "ob_expr_json_member_of.h"
@@ -24,7 +24,7 @@ namespace sql
 {
 
 ObExprJsonMemberOf::ObExprJsonMemberOf(ObIAllocator &alloc)
-    : ObFuncExprOperator(alloc, T_FUN_SYS_JSON_MEMBER_OF, N_JSON_MEMBER_OF, 2, NOT_ROW_DIMENSION)
+    : ObFuncExprOperator(alloc, T_FUN_SYS_JSON_MEMBER_OF, N_JSON_MEMBER_OF, 2, VALID_FOR_GENERATED_COL, NOT_ROW_DIMENSION)
 {
 }
 
@@ -89,16 +89,21 @@ int ObExprJsonMemberOf::eval_json_member_of(const ObExpr &expr, ObEvalCtx &ctx, 
   INIT_SUCC(ret);
   ObIJsonBase *json_a = NULL;
   ObIJsonBase *json_b = NULL;
-  common::ObArenaAllocator &temp_allocator = ctx.get_reset_tmp_alloc();
+  ObEvalCtx::TempAllocGuard tmp_alloc_g(ctx);
+  uint64_t tenant_id = ObMultiModeExprHelper::get_tenant_id(ctx.exec_ctx_.get_my_session());
+  MultimodeAlloctor temp_allocator(tmp_alloc_g.get_allocator(), expr.type_, tenant_id, ret);
+  lib::ObMallocHookAttrGuard malloc_guard(lib::ObMemAttr(tenant_id, "JSONModule"));
   bool is_null_result = (expr.args_[0]->datum_meta_.type_ == ObNullType);
   if (!is_null_result) {
     ObDatum *json_datum = NULL;
     ObExpr *json_arg = expr.args_[0];
     ObObjType type2 = expr.args_[1]->datum_meta_.type_;
-    if (OB_FAIL(json_arg->eval(ctx, json_datum))) {
+    if (OB_FAIL(temp_allocator.eval_arg(json_arg, ctx, json_datum))) {
       LOG_WARN("eval json arg failed", K(ret));
     } else if (json_datum->is_null()) {
       is_null_result = true; 
+    } else if (OB_FAIL(temp_allocator.add_baseline_size(json_datum,  json_arg->obj_meta_.has_lob_header()))) {
+      LOG_WARN("failed to add baselien size", K(ret));
     } else if (OB_FAIL(ObJsonExprHelper::get_json_val(expr, ctx, &temp_allocator, 0, json_a))) {
       LOG_WARN("get_json_value failed", K(ret));
     } else if (!ObJsonExprHelper::is_convertible_to_json(type2)) {
@@ -135,63 +140,6 @@ int ObExprJsonMemberOf::eval_json_member_of(const ObExpr &expr, ObEvalCtx &ctx, 
     res.set_int(static_cast<int64_t>(is_member_of));
   }
 
-  return ret;
-}
-
-int ObExprJsonMemberOf::calc_result2(common::ObObj &result,
-                                     const common::ObObj &obj1,
-                                     const common::ObObj &obj2,
-                                     common::ObExprCtx &expr_ctx) const
-{
-  INIT_SUCC(ret);
-  ObIAllocator *allocator = expr_ctx.calc_buf_;
-  
-  if (OB_ISNULL(allocator)) { // check allocator
-    ret = OB_NOT_INIT;
-    LOG_WARN("varchar buffer not init", K(ret));
-  } else {
-    ObIJsonBase *json_a = NULL;
-    ObIJsonBase *json_b = NULL;
-    bool is_null_result = (obj1.get_type() == ObNullType);
-    ObObjType type2 = obj2.get_type();
-    bool is_bool = false;
-    if (OB_FAIL(get_param_is_boolean(expr_ctx, obj1, is_bool))) {
-      LOG_WARN("get_param_is_boolean failed", K(ret));
-    } else if (!is_null_result && OB_FAIL(ObJsonExprHelper::get_json_val(obj1, expr_ctx, is_bool,
-                                                                         allocator, json_a))) {
-      LOG_WARN("get_json_val failed", K(ret));
-    } else if (!ObJsonExprHelper::is_convertible_to_json(type2)) {
-      ret = OB_ERR_INVALID_TYPE_FOR_JSON;
-      LOG_USER_ERROR(OB_ERR_INVALID_TYPE_FOR_JSON, 2, N_JSON_MEMBER_OF);
-    } else if (!is_null_result && OB_FAIL(ObJsonExprHelper::get_json_doc(&obj2, allocator, 0,
-                                                                         json_b, is_null_result))) {
-      LOG_WARN("get_json_doc failed", K(ret));
-    }
-
-    bool is_member_of = false;
-    if (!is_null_result && OB_SUCC(ret)) {
-      // make sura json_b is J_ARRAY type
-      if (json_b->json_type() != ObJsonNodeType::J_ARRAY) {
-        int result = -1;
-        if (OB_FAIL(json_b->compare(*json_a, result))) {
-          LOG_WARN("json compare failed", K(ret));
-        } else {
-          is_member_of = (result == 0);
-        }
-      } else if (OB_FAIL(check_json_member_of_array(json_a, json_b, is_member_of))) {
-        LOG_WARN("check_json_member_of_array failed", K(ret));
-      }
-    }
-
-    // set result
-    if (OB_FAIL(ret)) {
-      LOG_WARN("json_member_of failed", K(ret));
-    } else if (is_null_result) {
-      result.set_null();
-    } else {
-      result.set_int(static_cast<int64_t>(is_member_of));
-    } 
-  }
   return ret;
 }
 

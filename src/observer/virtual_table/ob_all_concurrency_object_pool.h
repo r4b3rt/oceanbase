@@ -13,32 +13,22 @@
 #ifndef SRC_OBSERVER_VIRTUAL_TABLE_OB_ALL_CONCURRENCY_OBJECT_POOL_H_
 #define SRC_OBSERVER_VIRTUAL_TABLE_OB_ALL_CONCURRENCY_OBJECT_POOL_H_
 
-#include "lib/objectpool/ob_concurrency_objpool.h"
-#include "lib/container/ob_vector.h"
-#include "lib/net/ob_addr.h"
 #include "share/ob_virtual_table_scanner_iterator.h"
 
-namespace oceanbase {
-namespace observer {
-class ObAllConcurrencyObjectPool : public common::ObVirtualTableScannerIterator {
+namespace oceanbase
+{
+namespace observer
+{
+class ObAllConcurrencyObjectPool : public common::ObVirtualTableScannerIterator
+{
 public:
-  ObAllConcurrencyObjectPool();
-  virtual ~ObAllConcurrencyObjectPool();
-  virtual int inner_get_next_row(common::ObNewRow*& row);
-  virtual void reset();
-  inline void set_addr(common::ObAddr& addr)
-  {
-    addr_ = &addr;
-  }
-
+  ObAllConcurrencyObjectPool() {}
+  virtual ~ObAllConcurrencyObjectPool() {}
+  virtual int inner_get_next_row(common::ObNewRow *&row) override;
 private:
   DISALLOW_COPY_AND_ASSIGN(ObAllConcurrencyObjectPool);
-  common::ObAddr* addr_;
-  common::ObVector<common::ObObjFreeList*> flls_;
-  common::ObObjFreeList* fl_;
-  int64_t idx_;
 };
-}  // namespace observer
-}  // namespace oceanbase
+}
+}
 
 #endif /* SRC_OBSERVER_VIRTUAL_TABLE_OB_ALL_CONCURRENCY_OBJECT_POOL_H_ */

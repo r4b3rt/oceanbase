@@ -8,9 +8,9 @@
  * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PubL v2 for more details.
+ * This file contains implementation for json_contains_path.
  */
 
-// This file contains implementation for json_contains_path.
 #define USING_LOG_PREFIX SQL_ENG
 #include "ob_expr_json_contains_path.h"
 #include "sql/engine/expr/ob_expr_json_func_helper.h"
@@ -24,7 +24,7 @@ namespace sql
 {
 
 ObExprJsonContainsPath::ObExprJsonContainsPath(ObIAllocator &alloc)
-    : ObFuncExprOperator(alloc, T_FUN_SYS_JSON_CONTAINS_PATH, N_JSON_CONTAINS_PATH, MORE_THAN_TWO, NOT_ROW_DIMENSION)
+    : ObFuncExprOperator(alloc, T_FUN_SYS_JSON_CONTAINS_PATH, N_JSON_CONTAINS_PATH, MORE_THAN_TWO, VALID_FOR_GENERATED_COL, NOT_ROW_DIMENSION)
 {
 }
 
@@ -78,22 +78,26 @@ int ObExprJsonContainsPath::eval_json_contains_path(const ObExpr &expr,
   int ret = OB_SUCCESS;
   ObIJsonBase *json_target = NULL;
   bool is_null_result = false;
-  common::ObArenaAllocator &temp_allocator = ctx.get_reset_tmp_alloc();
+  ObEvalCtx::TempAllocGuard tmp_alloc_g(ctx);
+  uint64_t tenant_id = ObMultiModeExprHelper::get_tenant_id(ctx.exec_ctx_.get_my_session());
+  MultimodeAlloctor temp_allocator(tmp_alloc_g.get_allocator(), expr.type_, tenant_id, ret);
   if (OB_FAIL(ObJsonExprHelper::get_json_doc(expr, ctx, temp_allocator, 0, json_target, is_null_result, false))) {
     LOG_WARN("get_json_doc failed", K(ret));
   } else {
     // get one_or_all flag
-    bool one_flag = false;
+    bool one_flag;
     ObDatum *json_datum = NULL;
     ObExpr *json_arg = expr.args_[1];
     ObObjType val_type = json_arg->datum_meta_.type_;
-    if (OB_FAIL(json_arg->eval(ctx, json_datum))) {
+    if (OB_FAIL(temp_allocator.eval_arg(json_arg, ctx, json_datum))) {
       LOG_WARN("eval json arg failed", K(ret));
     } else if (val_type == ObNullType || json_datum->is_null()) {
       is_null_result = true;
     } else {
       ObString target_str = json_datum->get_string();
-      if (0 == target_str.case_compare("one")) {
+      if (OB_FAIL(ObJsonExprHelper::get_json_or_str_data(json_arg, ctx, temp_allocator, target_str, is_null_result))) {
+        LOG_WARN("fail to get real data.", K(ret), K(target_str));
+      } else if (0 == target_str.case_compare("one")) {
         one_flag = true;
       } else if (0 == target_str.case_compare("all")) {
         one_flag = false;
@@ -110,16 +114,18 @@ int ObExprJsonContainsPath::eval_json_contains_path(const ObExpr &expr,
       path_cache = ((path_cache != NULL) ? path_cache : &ctx_cache);
 
       for (int64_t i = 2; OB_SUCC(ret) && i < expr.arg_cnt_ && !is_null_result; i++) {
-        ObJsonBaseVector hit;
+        ObJsonSeekResult hit;
         ObDatum *path_data = NULL;
-        if (OB_FAIL(expr.args_[i]->eval(ctx, path_data))) {
+        if (OB_FAIL(temp_allocator.eval_arg(expr.args_[i], ctx, path_data))) {
           LOG_WARN("eval json path datum failed", K(ret));
         } else if (expr.args_[i]->datum_meta_.type_ == ObNullType || path_data->is_null()) {
           is_null_result = true;
         } else {
           ObString path_val = path_data->get_string();
           ObJsonPath *json_path;
-          if (OB_FAIL(ObJsonExprHelper::find_and_add_cache(path_cache, json_path, path_val, i, true))) {
+          if (OB_FAIL(ObJsonExprHelper::get_json_or_str_data(expr.args_[i], ctx, temp_allocator, path_val, is_null_result))) {
+            LOG_WARN("fail to get real data.", K(ret), K(path_val));
+          } else if (OB_FAIL(ObJsonExprHelper::find_and_add_cache(path_cache, json_path, path_val, i, true))) {
             LOG_WARN("failed: parse path", K(path_data->get_string()), K(ret));
           } else if (OB_FAIL(json_target->seek(*json_path, json_path->path_node_cnt(),
                                                true, false, hit))) {
@@ -152,91 +158,6 @@ int ObExprJsonContainsPath::eval_json_contains_path(const ObExpr &expr,
 
   }
 
-  return ret;
-}
-
-int ObExprJsonContainsPath::calc_resultN(common::ObObj &result,
-                                         const common::ObObj *params,
-                                         int64_t param_num,
-                                         common::ObExprCtx &expr_ctx) const
-{
-  INIT_SUCC(ret);
-  ObIAllocator *allocator = expr_ctx.calc_buf_;
-  
-  if (OB_ISNULL(allocator)) { // check allocator
-    ret = OB_NOT_INIT;
-    LOG_WARN("varchar buffer not init", K(ret));
-  } else {
-    ObIJsonBase *json_target = NULL;
-    bool is_null_result = false;
-    // get json_doc
-    if (OB_FAIL(ObJsonExprHelper::get_json_doc(params, allocator, 0,
-                                               json_target, is_null_result))) {
-      LOG_WARN("get_json_doc failed", K(ret));
-    } else {
-      // get one_or_all flag
-      bool one_flag = false;
-      ObObjType val_type = params[1].get_type();
-      if (val_type == ObNullType || params[1].is_null()) {
-        is_null_result = true;
-      } else {
-        ObString target_str = params[1].get_string();
-        if (0 == target_str.case_compare("one")) {
-          one_flag = true;
-        } else if (0 == target_str.case_compare("all")) {
-          one_flag = false;
-        } else {
-          ret = OB_ERR_JSON_BAD_ONE_OR_ALL_ARG;
-          LOG_USER_ERROR(OB_ERR_JSON_BAD_ONE_OR_ALL_ARG);
-        }
-      }
-
-      ObJsonPathCache ctx_cache(allocator);
-      ObJsonPathCache* path_cache = &ctx_cache;
-
-      bool is_contains = false;
-      if ((OB_SUCC(ret)) && !is_null_result) {
-        for (int64_t i = 2; OB_SUCC(ret) && i < param_num; i++) {
-          ObJsonBaseVector hit;
-          if (params[i].get_type() == ObNullType || params[i].is_null()) {
-            is_null_result = true;
-            break;
-          } else {
-            ObString path_val = params[i].get_string();
-            ObJsonPath *json_path;
-            if (OB_FAIL(ObJsonExprHelper::find_and_add_cache(path_cache, json_path, path_val, i, true))) {
-              ret = OB_ERR_INVALID_JSON_PATH;
-              LOG_USER_ERROR(OB_ERR_INVALID_JSON_PATH);
-            } else if (OB_FAIL(json_target->seek(*json_path, json_path->path_node_cnt(), true, false, hit))) {
-              LOG_WARN("json seek failed", K(path_val), K(ret));
-            } else {
-            }
-            
-            if (hit.size() == 0) {
-              if (!one_flag) {
-                is_contains = false;
-                break;
-              }
-            } else {
-              is_contains = true;
-              if (one_flag) {
-                break;
-              }
-            }
-          }
-        }
-      }
-
-      // set result
-      if (OB_FAIL(ret)) {
-        LOG_WARN("json_contains_path failed", K(ret));
-      } else if (is_null_result) {
-        result.set_null();
-      } else {
-        result.set_int(static_cast<int64_t>(is_contains));
-      }
-    }
-  }
   return ret;
 }
 
