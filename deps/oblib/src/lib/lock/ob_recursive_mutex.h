@@ -14,31 +14,36 @@
 #define OB_RECURSIVE_MUTEX_H_
 
 #include "lib/lock/ob_latch.h"
+#include "lib/lock/ob_lock_guard.h"
 
-namespace oceanbase {
-namespace common {
-class ObRecursiveMutex {
+namespace oceanbase
+{
+namespace common
+{
+class ObRecursiveMutex
+{
 public:
-  explicit ObRecursiveMutex(const uint32_t latch_id = ObLatchIds::DEFAULT_RECURSIVE_MUTEX);
+  explicit ObRecursiveMutex(const uint32_t latch_id);
   ~ObRecursiveMutex();
   int lock();
   int unlock();
   int trylock();
-
 private:
   ObLatch latch_;
   uint32_t latch_id_;
   uint32_t lock_cnt_;
-
 private:
   DISALLOW_COPY_AND_ASSIGN(ObRecursiveMutex);
 };
 
-inline ObRecursiveMutex::ObRecursiveMutex(const uint32_t latch_id) : latch_(), latch_id_(latch_id), lock_cnt_(0)
-{}
+inline ObRecursiveMutex::ObRecursiveMutex(const uint32_t latch_id)
+  : latch_(), latch_id_(latch_id), lock_cnt_(0)
+{
+}
 
 inline ObRecursiveMutex::~ObRecursiveMutex()
-{}
+{
+}
 
 inline int ObRecursiveMutex::lock()
 {
@@ -58,10 +63,7 @@ inline int ObRecursiveMutex::lock()
 inline int ObRecursiveMutex::unlock()
 {
   int ret = OB_SUCCESS;
-  if (OB_UNLIKELY(!latch_.is_wrlocked_by())) {
-    ret = OB_ERR_UNEXPECTED;
-    COMMON_LOG(WARN, "The ObRecursiveMutex is not locked, ", K_(latch_id), K(ret));
-  } else if (0 == --lock_cnt_) {
+  if (0 == --lock_cnt_) {
     if (OB_FAIL(latch_.unlock())) {
       COMMON_LOG(WARN, "Fail to unlock the ObRecursiveMutex, ", K_(latch_id), K(ret));
     }
@@ -86,7 +88,7 @@ inline int ObRecursiveMutex::trylock()
   return ret;
 }
 
-typedef ObLockGuard<ObRecursiveMutex> ObRecursiveMutexGuard;
-}  // namespace common
-}  // namespace oceanbase
+typedef lib::ObLockGuard<ObRecursiveMutex> ObRecursiveMutexGuard;
+}
+}
 #endif

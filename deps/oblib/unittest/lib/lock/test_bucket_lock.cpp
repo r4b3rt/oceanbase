@@ -10,14 +10,14 @@
  * See the Mulan PubL v2 for more details.
  */
 
-#include <pthread.h>
-#include "lib/utility/ob_template_utils.h"
 #include "gtest/gtest.h"
 #define private public
 #include "lib/lock/ob_bucket_lock.h"
 
-namespace oceanbase {
-namespace common {
+namespace oceanbase
+{
+namespace common
+{
 
 TEST(ObBucketLock, succeed_wrlock_all)
 {
@@ -130,7 +130,7 @@ TEST(ObBucketLock, wlock_multi_buckets)
   lock.init(1024);
 
   {
-    ObMultiBucketLockGuard guard(lock, true /*is_write_lock*/);
+    ObMultiBucketLockGuard guard(lock, true/*is_write_lock*/);
     ObArray<uint64_t> hash_array;
     ASSERT_EQ(OB_SUCCESS, hash_array.push_back(1));
     ASSERT_EQ(OB_SUCCESS, bucket_array.push_back(1 % lock.get_bucket_count()));
@@ -141,7 +141,7 @@ TEST(ObBucketLock, wlock_multi_buckets)
     ASSERT_EQ(OB_SUCCESS, hash_array.push_back(301));
     ASSERT_EQ(OB_SUCCESS, bucket_array.push_back(301 % lock.get_bucket_count()));
     ASSERT_EQ(OB_SUCCESS, guard.lock_multi_buckets(hash_array));
-    for (int64_t i = 0; i < bucket_array.count(); ++i) {
+    for (int64_t i = 0; i <  bucket_array.count(); ++i) {
       ASSERT_EQ(OB_EAGAIN, lock.try_rdlock(bucket_array.at(i)));
     }
   }
@@ -161,7 +161,7 @@ TEST(ObBucketLock, rlock_multi_buckets)
   lock.init(1024);
 
   {
-    ObMultiBucketLockGuard guard(lock, false /*is_write_lock*/);
+    ObMultiBucketLockGuard guard(lock, false/*is_write_lock*/);
     ObArray<uint64_t> hash_array;
     ASSERT_EQ(OB_SUCCESS, hash_array.push_back(1));
     ASSERT_EQ(OB_SUCCESS, bucket_array.push_back(1 % lock.get_bucket_count()));
@@ -172,10 +172,10 @@ TEST(ObBucketLock, rlock_multi_buckets)
     ASSERT_EQ(OB_SUCCESS, hash_array.push_back(301));
     ASSERT_EQ(OB_SUCCESS, bucket_array.push_back(301 % lock.get_bucket_count()));
     ASSERT_EQ(OB_SUCCESS, guard.lock_multi_buckets(hash_array));
-    for (int64_t i = 0; i < bucket_array.count(); ++i) {
+    for (int64_t i = 0; i <  bucket_array.count(); ++i) {
       ASSERT_EQ(OB_EAGAIN, lock.try_wrlock(bucket_array.at(i)));
     }
-    for (int64_t i = 0; i < bucket_array.count(); ++i) {
+    for (int64_t i = 0; i <  bucket_array.count(); ++i) {
       ASSERT_EQ(OB_SUCCESS, lock.try_rdlock(bucket_array.at(i)));
       ASSERT_EQ(OB_SUCCESS, lock.unlock(bucket_array.at(i)));
     }
@@ -187,6 +187,7 @@ TEST(ObBucketLock, rlock_multi_buckets)
     ASSERT_EQ(OB_SUCCESS, lock.unlock(i));
   }
 }
+
 
 TEST(ObBucketLock, hash_rlock)
 {
@@ -206,6 +207,7 @@ TEST(ObBucketLock, hash_rlock)
   }
 }
 
+
 TEST(ObBucketLock, hash_wlock)
 {
   ObBucketLock lock;
@@ -223,10 +225,10 @@ TEST(ObBucketLock, hash_wlock)
   }
 }
 
-}  // namespace common
-}  // namespace oceanbase
+}
+}
 
-int main(int argc, char** argv)
+int main(int argc, char **argv)
 {
   oceanbase::common::ObLogger::get_logger().set_log_level("INFO");
   testing::InitGoogleTest(&argc, argv);

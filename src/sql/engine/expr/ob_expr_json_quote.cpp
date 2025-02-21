@@ -8,9 +8,9 @@
  * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PubL v2 for more details.
+ * This file is for implementation of func json_quote
  */
 
-// This file is for implementation of func json_quote
 #define USING_LOG_PREFIX SQL_ENG
 #include "ob_expr_json_quote.h"
 #include "sql/engine/expr/ob_expr_json_func_helper.h"
@@ -26,7 +26,7 @@ ObExprJsonQuote::ObExprJsonQuote(ObIAllocator &alloc)
     : ObFuncExprOperator(alloc,
       T_FUN_SYS_JSON_QUOTE,
       N_JSON_QUOTE, 
-      1, NOT_ROW_DIMENSION)
+      1, VALID_FOR_GENERATED_COL, NOT_ROW_DIMENSION)
 {
 }
 
@@ -43,6 +43,7 @@ int ObExprJsonQuote::calc_result_type1(ObExprResType &type,
   type.set_type(ObLongTextType);
   type.set_collation_type(CS_TYPE_UTF8MB4_BIN);
   type.set_collation_level(CS_LEVEL_IMPLICIT);
+  type.set_accuracy(ObAccuracy::DDL_DEFAULT_ACCURACY[ObLongTextType]);
 
   if (type1.get_type() == ObNullType || type1.get_type() == ObDoubleType
       || type1.get_type() == ObIntType) {
@@ -57,12 +58,12 @@ int ObExprJsonQuote::calc_result_type1(ObExprResType &type,
 }
 
 
-template <typename T>
-int ObExprJsonQuote::calc(const T &data, ObObjType type, ObCollationType cs_type, 
-                          ObJsonBuffer &j_buf, bool &is_null)
+int ObExprJsonQuote::calc(ObEvalCtx &ctx, MultimodeAlloctor &temp_allocator, const ObDatum &data,
+                          ObDatumMeta meta, bool has_lob_header, ObJsonBuffer &j_buf, bool &is_null)
 {
   INIT_SUCC(ret);
-
+  ObObjType type = meta.type_;
+  ObCollationType cs_type = meta.cs_type_;
   if (type == ObIntType || type == ObDoubleType) {
     // special for mathematical function, consistent with mysql
     if (data.is_null()) {
@@ -81,44 +82,15 @@ int ObExprJsonQuote::calc(const T &data, ObObjType type, ObCollationType cs_type
     LOG_WARN("fail to ensure collation", K(ret), K(type), K(cs_type));
   } else { // string type
     ObString json_val = data.get_string();
-    size_t len = json_val.length();
-    if (len == 0) {
+    if (OB_FAIL(ObTextStringHelper::read_real_string_data(temp_allocator, data, meta, has_lob_header, json_val))) {
+      LOG_WARN("fail to get real data.", K(ret), K(json_val));
+    } else if (json_val.length() == 0) {
       if (OB_FAIL(j_buf.append("\"\"", 2))) {
         LOG_WARN("failed: jbuf append", K(ret));        
       }
+    } else if (OB_FALSE_IT(temp_allocator.add_baseline_size(j_buf.length()))) {
     } else if (OB_FAIL(ObJsonPathUtil::double_quote(json_val, &j_buf))) {
       LOG_WARN("failed: add double quote", K(ret), K(json_val));
-    }
-  }
-
-  return ret;
-}
-
-// for old sql engine
-int ObExprJsonQuote::calc_result1(common::ObObj &result, const common::ObObj &obj,
-                                  common::ObExprCtx &expr_ctx) const
-{ 
-  INIT_SUCC(ret);
-  ObIAllocator *allocator = expr_ctx.calc_buf_;
-  ObJsonBuffer j_buf(allocator);
-  bool is_null= false;
-
-  if (OB_ISNULL(allocator)) { // check allocator
-    ret = OB_NOT_INIT;
-    LOG_WARN("allcator not init", K(ret));
-  } else if (OB_FAIL(calc(obj, obj.get_type(), obj.get_collation_type(), j_buf, is_null))) {
-    LOG_WARN("fail to calc json quote result in old engine", K(ret), K(obj.get_type()));
-  } else if (is_null) {
-    result.set_null();
-  } else {
-    char *buf = static_cast<char*>(allocator->alloc(j_buf.length()));
-    if (OB_ISNULL(buf)) {
-      ret = OB_ALLOCATE_MEMORY_FAILED;
-      LOG_WARN("fail to alloc memory for json quote result", K(ret), K(j_buf.length()));
-    } else {
-      MEMCPY(buf, j_buf.ptr(), j_buf.length());
-      result.set_collation_type(result_type_.get_collation_type());
-      result.set_string(ObLongTextType, buf, j_buf.length());
     }
   }
 
@@ -128,29 +100,24 @@ int ObExprJsonQuote::calc_result1(common::ObObj &result, const common::ObObj &ob
 int ObExprJsonQuote::eval_json_quote(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &res)
 {
   INIT_SUCC(ret);
-  common::ObArenaAllocator &temp_allocator = ctx.get_reset_tmp_alloc();
+  ObEvalCtx::TempAllocGuard tmp_alloc_g(ctx);
+  uint64_t tenant_id = ObMultiModeExprHelper::get_tenant_id(ctx.exec_ctx_.get_my_session());
+  MultimodeAlloctor temp_allocator(tmp_alloc_g.get_allocator(), expr.type_, tenant_id, ret);
+  lib::ObMallocHookAttrGuard malloc_guard(lib::ObMemAttr(tenant_id, "JSONModule"));
   ObJsonBuffer j_buf(&temp_allocator);
   ObExpr *arg = expr.args_[0];
-  ObObjType type = arg->datum_meta_.type_;
-  ObCollationType cs_type = arg->datum_meta_.cs_type_;
   ObDatum* json_datum = NULL;
   bool is_null = false;
 
-  if (OB_FAIL(arg->eval(ctx, json_datum))) {
+  if (OB_FAIL(temp_allocator.eval_arg(arg, ctx, json_datum))) {
     LOG_WARN("failed: eval json args datum.", K(ret));
-  } else if (OB_FAIL(calc(*json_datum, type, cs_type, j_buf, is_null))) {
-    LOG_WARN("fail to calc json quote result in new engine", K(ret), K(type));
+  } else if (OB_FAIL(calc(ctx, temp_allocator, *json_datum, arg->datum_meta_,
+                          arg->obj_meta_.has_lob_header(), j_buf, is_null))) {
+    LOG_WARN("fail to calc json quote result in new engine", K(ret), K(arg->datum_meta_));
   } else if (is_null) {
     res.set_null();
-  } else {
-    char *buf = expr.get_str_res_mem(ctx, j_buf.length());
-    if (OB_ISNULL(buf)) {
-      ret = OB_ALLOCATE_MEMORY_FAILED;
-      LOG_WARN("fail to alloc memory for json quote result", K(ret), K(j_buf.length()));
-    } else {
-      MEMCPY(buf, j_buf.ptr(), j_buf.length());
-      res.set_string(buf, j_buf.length());
-    }
+  } else if (OB_FAIL(ObJsonExprHelper::pack_json_str_res(expr, ctx, res, j_buf))) {
+    LOG_WARN("fail to pack json result", K(ret));
   }
 
   return ret;

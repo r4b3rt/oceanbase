@@ -10,9 +10,6 @@
  * See the Mulan PubL v2 for more details.
  */
 
-#include "lib/utility/utility.h"
-#include "lib/ob_define.h"
-#include "lib/utility/ob_print_utils.h"
 #include "lib/metrics/ob_accumulator.h"
 #include <gtest/gtest.h>
 using namespace oceanbase::common;
@@ -39,8 +36,10 @@ TEST(ObAccumulator, full_test)
   ASSERT_EQ(500, acc.get_value());
 }
 
-int main(int argc, char** argv)
+
+int main(int argc, char **argv)
 {
-  ::testing::InitGoogleTest(&argc, argv);
+  ::testing::InitGoogleTest(&argc,argv);
   return RUN_ALL_TESTS();
 }
+

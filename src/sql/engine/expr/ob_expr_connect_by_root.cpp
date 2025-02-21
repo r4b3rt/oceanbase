@@ -12,14 +12,12 @@
 
 #define USING_LOG_PREFIX SQL_ENG
 #include "sql/engine/expr/ob_expr_connect_by_root.h"
-#include "sql/engine/expr/ob_expr_result_type_util.h"
-#include "share/ob_i_sql_expression.h"
 
 using namespace oceanbase::sql;
 using namespace oceanbase::common;
-ObExprConnectByRoot::ObExprConnectByRoot(common::ObIAllocator& alloc)
-    : ObExprOperator(alloc, T_OP_CONNECT_BY_ROOT, N_CONNECT_BY_ROOT, 1, NOT_ROW_DIMENSION){};
-int ObExprConnectByRoot::calc_result_type1(ObExprResType& type, ObExprResType& type1, ObExprTypeCtx& type_ctx) const
+ObExprConnectByRoot::ObExprConnectByRoot(common::ObIAllocator &alloc)
+  : ObExprOperator(alloc, T_OP_CONNECT_BY_ROOT, N_CONNECT_BY_ROOT, 1, VALID_FOR_GENERATED_COL, NOT_ROW_DIMENSION, INTERNAL_IN_MYSQL_MODE) {};
+int ObExprConnectByRoot::calc_result_type1(ObExprResType &type, ObExprResType &type1, ObExprTypeCtx &type_ctx) const
 {
   int ret = OB_SUCCESS;
   type = type1;
@@ -27,15 +25,8 @@ int ObExprConnectByRoot::calc_result_type1(ObExprResType& type, ObExprResType& t
   return ret;
 }
 
-int ObExprConnectByRoot::calc_result1(ObObj& result, const ObObj& obj, ObExprCtx& expr_ctx) const
-{
-  int ret = OB_SUCCESS;
-  result = obj;
-  UNUSED(expr_ctx);
-  return ret;
-}
 
-int ObExprConnectByRoot::cg_expr(ObExprCGCtx&, const ObRawExpr&, ObExpr& rt_expr) const
+int ObExprConnectByRoot::cg_expr(ObExprCGCtx &, const ObRawExpr &, ObExpr &rt_expr) const
 {
   int ret = OB_SUCCESS;
   CK(1 == rt_expr.arg_cnt_);
@@ -43,10 +34,12 @@ int ObExprConnectByRoot::cg_expr(ObExprCGCtx&, const ObRawExpr&, ObExpr& rt_expr
   return ret;
 }
 
-int ObExprConnectByRoot::eval_connect_by_root(const ObExpr& expr, ObEvalCtx& ctx, ObDatum& expr_datum)
+int ObExprConnectByRoot::eval_connect_by_root(const ObExpr &expr,
+                                              ObEvalCtx &ctx,
+                                              ObDatum &expr_datum)
 {
   int ret = OB_SUCCESS;
-  ObDatum* arg = NULL;
+  ObDatum *arg = NULL;
   if (OB_FAIL(expr.eval_param_value(ctx, arg))) {
     LOG_WARN("expression evaluate parameters failed", K(ret));
   } else {

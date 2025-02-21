@@ -14,16 +14,15 @@
 
 #include "os_errno.h"
 #include <string.h>
-#include <cstdio>
 using namespace oceanbase::common;
 
-static const char* OS_ERRNO_NAME[OS_MAX_ERROR_CODE];
-static const char* OS_ERRNO_MSG[OS_MAX_ERROR_CODE];
+static const char *OS_ERRNO_NAME[OS_MAX_ERROR_CODE];
+static const char *OS_ERRNO_MSG[OS_MAX_ERROR_CODE];
 static int OS_ERRNO[OS_MAX_ERROR_CODE];
 
-static struct OSStrErrorInit {
-  OSStrErrorInit()
-  {
+static struct OSStrErrorInit
+{
+  OSStrErrorInit() {
     memset(OS_ERRNO_NAME, 0, sizeof(OS_ERRNO_NAME));
     memset(OS_ERRNO_MSG, 0, sizeof(OS_ERRNO_MSG));
     memset(OS_ERRNO, 0, sizeof(OS_ERRNO));
@@ -421,32 +420,35 @@ static struct OSStrErrorInit {
     OS_ERRNO_NAME[-OS_EHWPOISON] = "OS_EHWPOISON";
     OS_ERRNO_MSG[-OS_EHWPOISON] = "Memory page has hardware error";
     OS_ERRNO[-OS_EHWPOISON] = 133;
+
   }
 } local_init;
 
 namespace oceanbase {
 namespace common {
-const char* str_os_error_name(const int err)
+const char *str_os_error_name(const int err)
 {
-  const char* ret = "Unknown error";
+  const char *ret = "Unknown error";
   if (0 == err) {
     ret = "OB_SUCCESS";
   } else if (0 > err && err > -OS_MAX_ERROR_CODE) {
     ret = OS_ERRNO_NAME[-err];
-    if (NULL == ret || '\0' == ret[0]) {
+    if (NULL == ret || '\0' == ret[0])
+    {
       ret = "Unknown Error";
     }
   }
   return ret;
 }
-const char* str_os_error_msg(const int err)
+const char *str_os_error_msg(const int err)
 {
-  const char* ret = NULL;
+  const char *ret = NULL;
   if (0 == err) {
     ret = NULL;
   } else if (0 > err && err > -OS_MAX_ERROR_CODE) {
     ret = OS_ERRNO_MSG[-err];
-    if (NULL == ret || '\0' == ret[0]) {
+    if (NULL == ret || '\0' == ret[0])
+    {
       ret = NULL;
     }
   }
@@ -460,5 +462,5 @@ int os_errno(const int err)
   }
   return ret;
 }
-}  // end namespace common
-}  // end namespace oceanbase
+} // end namespace common
+} // end namespace oceanbase

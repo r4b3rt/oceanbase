@@ -10,7 +10,7 @@
  * See the Mulan PubL v2 for more details.
  */
 
-#include "lib/time/ob_tsc_timestamp.h"
+#include "ob_tsc_timestamp.h"
 #include "lib/oblog/ob_log.h"
 
 using namespace oceanbase;
@@ -67,57 +67,34 @@ int ObTscTimestamp::init()
 int64_t ObTscTimestamp::current_time()
 {
   int ret = OB_SUCCESS;
+  // init failed, use system call.
+  struct timeval tv;
+  if (gettimeofday(&tv, NULL) < 0) {
+    ret = OB_ERR_UNEXPECTED;
+    LIB_LOG(WARN, "sys gettimeofday unexpected", K(ret));
+  }
+  return (static_cast<int64_t>(tv.tv_sec) * static_cast<int64_t>(1000000) + static_cast<int64_t>(tv.tv_usec));
+}
+
+int64_t ObTscTimestamp::fast_current_time()
+{
   int64_t result_time = 0;
   if (OB_UNLIKELY(!is_init_)) {
-    // init failed, use system call.
-    struct timeval tv;
-    if (gettimeofday(&tv, NULL) < 0) {
-      ret = OB_ERR_UNEXPECTED;
-      LIB_LOG(WARN, "sys gettimeofday unexpected", K(ret));
-    }
-    result_time = (static_cast<int64_t>(tv.tv_sec) * static_cast<int64_t>(1000000) + static_cast<int64_t>(tv.tv_usec));
+    result_time = current_time();
   } else {
     const uint64_t current_tsc = rdtsc();
-    result_time = ((current_tsc - tsc_count_) * scale_ >> 20) + start_us_;
+    result_time = current_tsc * scale_ >> 20;
   }
   return result_time;
 }
 
-int64_t ObTscTimestamp::current_monotonic_time()
-{
-  int ret = OB_SUCCESS;
-  int64_t result_time = 0;
-  if (OB_UNLIKELY(!is_init_)) {
-    // init failed, use system call.
-    struct timeval tv;
-    if (gettimeofday(&tv, NULL) < 0) {
-      ret = OB_ERR_UNEXPECTED;
-      LIB_LOG(WARN, "sys gettimeofday unexpected", K(ret));
-    }
-    result_time = (static_cast<int64_t>(tv.tv_sec) * static_cast<int64_t>(1000000) + static_cast<int64_t>(tv.tv_usec));
-  } else {
-    uint64_t cpuid = 0;
-    const uint64_t current_tsc = rdtscp_id(cpuid);
-    if (base_per_cpu_[cpuid].is_valid()) {
-      const int64_t tsc_count = base_per_cpu_[cpuid].tsc_count_;
-      const int64_t start_us = base_per_cpu_[cpuid].start_us_;
-      result_time = ((current_tsc - tsc_count) * scale_ >> 20) + start_us;
-    } else {
-      ObTscBase cur_base;
-      cur_base.init(current_tsc);
-      base_per_cpu_[cpuid] = cur_base;
-      result_time = cur_base.start_us_;
-    }
-  }
-  return result_time;
-}
 
 #if defined(__x86_64__)
 uint64_t ObTscTimestamp::get_cpufreq_khz_()
 {
   int ret = OB_SUCCESS;
   char line[256];
-  FILE* stream = NULL;
+  FILE *stream = NULL;
   double freq_mhz = 0.0;
   uint64_t freq_khz = 0;
   stream = fopen("/proc/cpuinfo", "r");
@@ -126,6 +103,10 @@ uint64_t ObTscTimestamp::get_cpufreq_khz_()
     LIB_LOG(WARN, "/proc/cpuinfo not exist", K(ret));
   } else {
     while (fgets(line, sizeof(line), stream)) {
+      // FIXME: TSC frequency is not easy to retrieve from user-space
+      // see: https://stackoverflow.com/questions/35123379/getting-tsc-rate-from-x86-kernel/57835630#57835630
+      // cpu MHz was not stable and not equals to TSC frequency
+      // don't depends on to calculate and then comapre to real clock time
       if (sscanf(line, "cpu MHz\t: %lf", &freq_mhz) == 1) {
         freq_khz = (uint64_t)(freq_mhz * 1000UL);
         break;
@@ -152,7 +133,7 @@ bool ObTscTimestamp::is_support_invariant_tsc_()
   if (ret) {
     cpu_info[3] = 0;
     getcpuid(cpu_info, 0x80000001);
-    if (cpu_info[3] & (1 << 27)) {
+    if (cpu_info[3] & (1<<27)) {
       // RDTSCP is supported
     } else {
       ret = false;
@@ -166,9 +147,9 @@ bool ObTscTimestamp::is_support_invariant_tsc_()
 uint64_t ObTscTimestamp::get_cpufreq_khz_(void)
 {
   uint64_t timer_frequency = 0;
-  asm volatile("mrs %0, cntfrq_el0" : "=r"(timer_frequency));
-  LIB_LOG(INFO, "TSC freq : ", "freq", timer_frequency / 1000);
-  return timer_frequency / 1000;
+  asm volatile("mrs %0, cntfrq_el0":"=r"(timer_frequency));
+  LIB_LOG(INFO, "TSC freq : ", "freq", timer_frequency/1000);
+  return timer_frequency/1000;
 }
 
 #else

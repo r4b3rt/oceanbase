@@ -15,86 +15,179 @@
 
 #include "sql/engine/ob_operator.h"
 #include "sql/engine/basic/ob_chunk_datum_store.h"
+#include "sql/engine/px/ob_px_util.h"
+#include "sql/ob_sql_define.h"
 
-namespace oceanbase {
-namespace sql {
+namespace oceanbase
+{
+namespace sql
+{
+
+class DatumRow
+{
+public:
+  DatumRow() : elems_(NULL), cnt_(0) {}
+  ~DatumRow() {}
+  bool operator==(const DatumRow &other) const;
+  int hash(uint64_t &hash_val, uint64_t seed=0) const;
+  TO_STRING_KV(KP(elems_));
+  ObDatum *elems_;
+  int64_t cnt_;
+};
 
 // iterator subquery rows
-class ObSubQueryIterator {
+class ObSubQueryIterator
+{
 public:
-  explicit ObSubQueryIterator(ObOperator& op);
+  explicit ObSubQueryIterator(ObOperator &op);
   ~ObSubQueryIterator()
-  {}
-  void set_onetime_plan()
   {
-    onetime_plan_ = true;
+    if (hashmap_.created()) {
+      hashmap_.destroy();
+    }
+    if (nullptr != mem_entity_) {
+      DESTROY_CONTEXT(mem_entity_);
+      mem_entity_ = NULL;
+    }
   }
-  void set_init_plan()
+  enum RescanStatus
   {
-    init_plan_ = true;
-  }
+    INVALID_STATUS = 0,
+    SWITCH_BATCH,
+    NOT_SWITCH_BATCH,
+    NORMAL
+  };
+  void set_onetime_plan() { onetime_plan_ = true; }
+  void set_init_plan() { init_plan_ = true;}
 
-  const ExprFixedArray& get_output() const
-  {
-    return op_.get_spec().output_;
-  }
-  ObOperator& get_op() const
-  {
-    return op_;
-  }
+  const ExprFixedArray &get_output() const { return op_.get_spec().output_; }
+  ObOperator &get_op() const { return op_; }
 
-  // Call start() before get_next_row().
-  // We need this because the subquery() may be common subexpression, need be rewinded to the
-  // first row when iterate again.
-  int start();
   int get_next_row();
 
   int prepare_init_plan();
   void reuse();
-  void reset(bool reset_onetime_plan = false);
+  int rewind(bool reset_onetime_plan = false);
+  //int rescan_chlid(int64_t child_idx);
+  int init_mem_entity();
+  int init_hashmap(const int64_t param_num)
+  {
+    int64_t tenant_id = op_.get_exec_ctx().get_my_session()->get_effective_tenant_id();
+    return hashmap_.create(param_num * 2,
+                           ObMemAttr(tenant_id, "SqlSQIterBKT", ObCtxIds::DEFAULT_CTX_ID),
+                           ObMemAttr(tenant_id, "SqlSQIterND", ObCtxIds::DEFAULT_CTX_ID));
+  }
+  bool has_hashmap() const { return hashmap_.created(); }
+  int init_probe_row(const int64_t cnt);
+  int get_arena_allocator(common::ObIAllocator *&alloc);
+  //fill curr exec param into probe_row_
+  int get_curr_probe_row();
+  void set_iter_id(const int64_t id) { id_ = id; }
+  int64_t get_iter_id() const { return id_; }
+  //use curr probe_row_ to probe hashmap
+  int get_refactored(common::ObDatum &out);
+  //set row into hashmap
+  int set_refactored(const DatumRow &row, const ObDatum &result, const int64_t deep_copy_size);
+  void set_parent(const ObSubPlanFilterOp *filter) { parent_ = filter; }
+  int reset_hash_map();
+  int64_t cur_idx() const { return batch_row_pos_ - 1; }
+
+  bool check_can_insert(const int64_t deep_copy_size)
+  {
+    return deep_copy_size + memory_used_ < HASH_MAP_MEMORY_LIMIT;
+  }
+
+  ObEvalCtx &get_eval_ctx() { return eval_ctx_; }
+
+  //for vectorized
+  int get_next_batch(const int64_t max_row_cnt, const ObBatchRows *&batch_rows);
+  //for vectorized end
+  bool is_onetime_plan() const { return onetime_plan_; }
 
   TO_STRING_KV(K(onetime_plan_), K(init_plan_), K(inited_));
 
+  //a row cache for hash optimizer to use
+  DatumRow probe_row_;
+  //hard core, 1M limit for each hashmap
+  const static int HASH_MAP_MEMORY_LIMIT = 1024 * 1024;
+  void drain_exch();
+  int init_batch_rows_holder(const common::ObIArray<ObExpr *> &exprs, ObEvalCtx &eval_ctx);
 private:
-  ObOperator& op_;
+
+  int get_next_row_from_child();
+  int get_next_row_vecrorizely();
+  int cast_vector_format();
+  // for das batch spf
+  int alloc_das_batch_store();
+  // for das batch spf end
+  ObOperator &op_;
   bool onetime_plan_;
   bool init_plan_;
   bool inited_;
-  bool iterated_;
 
   ObChunkDatumStore store_;
   ObChunkDatumStore::Iterator store_it_;
+
+  //cache optimizer for spf, the same exec_param into queryref_expr will return directly
+  common::hash::ObHashMap<DatumRow, common::ObDatum, common::hash::NoPthreadDefendMode> hashmap_;
+  lib::MemoryContext mem_entity_;
+  int64_t id_; // curr op_id in spf
+  const ObSubPlanFilterOp *parent_; //needs to get exec_param_idxs_ from op
+  int64_t memory_used_;
+  ObEvalCtx &eval_ctx_;
+
+  // for vectorized
+  const ObBatchRows *iter_brs_;
+  int64_t batch_size_;
+  int64_t batch_row_pos_;
+  bool iter_end_;
+  ObBatchResultHolder brs_holder_;
+  // for vectorized end
+
+  common::ObArrayWrap<ObObjParam> das_batch_params_recovery_;
+  // for das batch spf end
 };
 
-class ObSubPlanFilterSpec : public ObOpSpec {
+class ObSubPlanFilterSpec : public ObOpSpec
+{
   OB_UNIS_VERSION_V(1);
-
 public:
-  ObSubPlanFilterSpec(common::ObIAllocator& alloc, const ObPhyOperatorType type);
+  ObSubPlanFilterSpec(common::ObIAllocator &alloc, const ObPhyOperatorType type);
 
   DECLARE_VIRTUAL_TO_STRING;
+    int init_px_batch_rescan_flags(int64_t count)
+  { return enable_px_batch_rescans_.init(count); }
 
-  // row from driver table is the rescan params
+  //在主表的每次迭代生成的行数据对于subquery来说都是驱动其进行数据迭代的参数
   common::ObFixedArray<ObDynamicParamSetter, common::ObIAllocator> rescan_params_;
-  // only compute once exprs
+  //只计算一次subquery条件
   common::ObFixedArray<ObDynamicParamSetter, common::ObIAllocator> onetime_exprs_;
-  // InitPlan idxs,InitPlan only compute once, need save result
+  //InitPlan idxs，InitPlan只算一次，需要存储结果
   common::ObBitSet<common::OB_DEFAULT_BITSET_SIZE, common::ModulePageAllocator> init_plan_idxs_;
-  // One-Time idxs,One-Time only compute once, no need save result
+  //One-Time idxs，One-Time只算一次，不用存储结果
   common::ObBitSet<common::OB_DEFAULT_BITSET_SIZE, common::ModulePageAllocator> one_time_idxs_;
 
   // update set (, ,) = (subquery)
   ExprFixedArray update_set_;
+  common::ObFixedArray<ObFixedArray<ObExpr *, common::ObIAllocator>, common::ObIAllocator> exec_param_array_;
+  bool exec_param_idxs_inited_;
+  // 标记每个子查询是否可以做px batch rescan
+  common::ObFixedArray<bool, common::ObIAllocator> enable_px_batch_rescans_;
+  bool enable_das_group_rescan_;
+  ExprFixedArray filter_exprs_;
+  ExprFixedArray output_exprs_;
+  common::ObFixedArray<ObDynamicParamSetter, common::ObIAllocator> left_rescan_params_;
+  common::ObFixedArray<ObDynamicParamSetter, common::ObIAllocator> right_rescan_params_;
 };
 
-class ObSubPlanFilterOp : public ObOperator {
+class ObSubPlanFilterOp : public ObOperator
+{
 public:
   typedef ObSubQueryIterator Iterator;
 
-  ObSubPlanFilterOp(ObExecContext& exec_ctx, const ObOpSpec& spec, ObOpInput* input);
+  ObSubPlanFilterOp(ObExecContext &exec_ctx, const ObOpSpec &spec, ObOpInput *input);
   virtual ~ObSubPlanFilterOp();
 
-  virtual int open() override;
   virtual int inner_open() override;
   virtual int rescan() override;
   virtual int switch_iterator() override;
@@ -104,14 +197,41 @@ public:
 
   virtual void destroy() override;
 
-  const common::ObIArray<Iterator*>& get_subplan_iters() const
+  const common::ObIArray<Iterator *> &get_subplan_iters() const { return subplan_iters_; }
+  int reset_batch_rescan_param()
   {
-    return subplan_iters_;
+    rescan_batch_params_.reset();
+    return common::OB_SUCCESS;
   }
+  int handle_next_row();
+  bool enable_px_batch_rescan() { return enable_left_px_batch_; }
+  //for vectorized
+  virtual int inner_get_next_batch(const int64_t max_row_cnt);
+  // for vectorized end
 
+  int init_left_cur_row(const int64_t column_cnt, ObExecContext &ctx);
+  int fill_cur_row_rescan_param();
+
+  //for DAS batch SPF
+  int fill_cur_row_das_batch_param(ObEvalCtx& eval_ctx, uint64_t current_group) const;
+  int bind_das_batch_params_to_store() const;
+  virtual void get_current_group(uint64_t& current_group) const;
+  virtual void get_current_batch_cnt(int64_t& current_batch_cnt) const { current_batch_cnt = group_rescan_cnt_; }
+  bool enable_left_das_batch() const {return MY_SPEC.enable_das_group_rescan_;}
+  //for DAS batch SPF end
+
+  const ObSubPlanFilterSpec &get_spec() const
+  { return static_cast<const ObSubPlanFilterSpec &>(spec_); }
+
+public:
+  ObBatchRescanCtl &get_batch_rescan_ctl() { return batch_rescan_ctl_; }
+  int handle_next_batch_with_px_rescan(const int64_t op_max_batch_size);
+  int handle_next_batch_with_group_rescan(const int64_t op_max_batch_size);
+  virtual const GroupParamArray *get_rescan_params_info() const { return &rescan_params_info_; }
 private:
-  int set_param_null();
+  void set_param_null() { set_pushdown_param_null(MY_SPEC.rescan_params_); };
   void destroy_subplan_iters();
+  void destroy_px_batch_rescan_status();
   void destroy_update_set_mem()
   {
     if (NULL != update_set_mem_) {
@@ -120,16 +240,62 @@ private:
     }
   }
 
-  int prepare_rescan_params();
+  int prepare_rescan_params(bool save, int64_t &params_size);
   int prepare_onetime_exprs();
+  int prepare_onetime_exprs_inner();
   int handle_update_set();
+  bool continue_fetching(uint64_t left_rows_total_cnt, bool stop, bool use_group = false)
+  {
+    return use_group?
+            (!stop && (left_rows_total_cnt < max_group_size_))
+           :(!stop && (left_rows_total_cnt < PX_RESCAN_BATCH_ROW_COUNT));
+  }
+
+  // for das batch spf
+  int alloc_das_batch_params(uint64_t group_size);
+  int init_das_batch_params();
+  int deep_copy_dynamic_obj();
+  // for das batch spf end
+
+protected:
+  common::ObSEArray<Iterator *, 16> subplan_iters_;
+  bool iter_end_;
+  uint64_t max_group_size_; //Das batch rescan size;
 
 private:
-  common::ObSEArray<Iterator*, 16> subplan_iters_;
   lib::MemoryContext update_set_mem_;
+  // for px batch rescan
+  bool enable_left_px_batch_;
+  // for px batch rescan end
+  // for das batch rescan
+  uint64_t current_group_;  //The group id in this time right iter rescan;
+
+  common::ObArrayWrap<ObSqlArrayObj> das_batch_params_;
+  // for das batch rescan end
+  ObChunkDatumStore left_rows_;
+  ObChunkDatumStore::Iterator left_rows_iter_;
+  ObChunkDatumStore::ShadowStoredRow last_store_row_;
+  bool save_last_row_;
+  bool is_left_end_;
+  ObBatchRescanParams rescan_batch_params_;
+  int64_t left_row_idx_;
+  ObBatchRescanCtl batch_rescan_ctl_;
+  sql::ObTMArray<common::ObObjParam> cur_params_;
+  common::ObSArray<int64_t> cur_param_idxs_;
+  common::ObSArray<int64_t> cur_param_expr_idxs_;
+  common::ObSEArray<Iterator*, 8> subplan_iters_to_check_;
+  lib::MemoryContext last_store_row_mem_;
+  ObBatchResultHolder brs_holder_;
+public:
+  static const int64_t MAX_PX_RESCAN_PARAMS_SIZE = 4 << 20; // 4M
+  static const int64_t MAX_DUMP_SIZE = 16 << 20; // 16M
+public:
+  // Count of reals rescan initiated by the spf operator; for batch rescan, it was plus one for each batch;
+  // For normal rescan, it was plus one  for each rescan
+  int64_t group_rescan_cnt_;
+  GroupParamArray rescan_params_info_;
 };
+} // end namespace sql
+} // end namespace oceanbase
 
-}  // end namespace sql
-}  // end namespace oceanbase
-
-#endif  // OCEANBASE_SUBQUERY_OB_SUBPLAN_FILTER_OP_H_
+#endif // OCEANBASE_SUBQUERY_OB_SUBPLAN_FILTER_OP_H_

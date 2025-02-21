@@ -15,9 +15,13 @@
 
 #include "lib/string/ob_fixed_length_string.h"
 
-namespace oceanbase {
-namespace common {
+namespace oceanbase
+{
+namespace common
+{
 typedef ObFixedLengthString<MAX_ZONE_LENGTH> ObZone;
-}  // end namespace common
-}  // end namespace oceanbase
-#endif  // OCEANBASE_COMMON_OB_ZONE_H_
+typedef ObFixedLengthString<MAX_ZONE_LIST_LENGTH> ObPriZone;
+}//end namespace common
+}//end namespace oceanbase
+#endif //OCEANBASE_COMMON_OB_ZONE_H_
+

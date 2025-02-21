@@ -12,38 +12,42 @@
 
 #define USING_LOG_PREFIX SHARE_SCHEMA
 #include "ob_outline_mgr.h"
-#include "lib/allocator/ob_mod_define.h"
-#include "lib/oblog/ob_log.h"
-#include "lib/oblog/ob_log_module.h"
 #include "share/schema/ob_schema_utils.h"
 
-namespace oceanbase {
-namespace share {
-namespace schema {
+namespace oceanbase
+{
+namespace share
+{
+namespace schema
+{
 using namespace std;
 using namespace common;
 using namespace common::hash;
 
-ObSimpleOutlineSchema::ObSimpleOutlineSchema() : ObSchema()
+ObSimpleOutlineSchema::ObSimpleOutlineSchema()
+  : ObSchema()
 {
   reset();
 }
 
-ObSimpleOutlineSchema::ObSimpleOutlineSchema(ObIAllocator* allocator) : ObSchema(allocator)
+ObSimpleOutlineSchema::ObSimpleOutlineSchema(ObIAllocator *allocator)
+  : ObSchema(allocator)
 {
   reset();
 }
 
-ObSimpleOutlineSchema::ObSimpleOutlineSchema(const ObSimpleOutlineSchema& other) : ObSchema()
+ObSimpleOutlineSchema::ObSimpleOutlineSchema(const ObSimpleOutlineSchema &other)
+  : ObSchema()
 {
   reset();
   *this = other;
 }
 
 ObSimpleOutlineSchema::~ObSimpleOutlineSchema()
-{}
+{
+}
 
-ObSimpleOutlineSchema& ObSimpleOutlineSchema::operator=(const ObSimpleOutlineSchema& other)
+ObSimpleOutlineSchema &ObSimpleOutlineSchema::operator =(const ObSimpleOutlineSchema &other)
 {
   if (this != &other) {
     reset();
@@ -53,11 +57,14 @@ ObSimpleOutlineSchema& ObSimpleOutlineSchema::operator=(const ObSimpleOutlineSch
     outline_id_ = other.outline_id_;
     schema_version_ = other.schema_version_;
     database_id_ = other.database_id_;
+    format_outline_ = other.format_outline_;
     if (OB_FAIL(deep_copy_str(other.name_, name_))) {
       LOG_WARN("Fail to deep copy outline name", K(ret));
     } else if (OB_FAIL(deep_copy_str(other.signature_, signature_))) {
       LOG_WARN("Fail to deep copy signature", K(ret));
     } else if (OB_FAIL(deep_copy_str(other.sql_id_, sql_id_))) {
+      LOG_WARN("Fail to deep copy sql_id", K(ret));
+    } else if (OB_FAIL(deep_copy_str(other.format_sql_id_, format_sql_id_))) {
       LOG_WARN("Fail to deep copy sql_id", K(ret));
     }
 
@@ -69,12 +76,18 @@ ObSimpleOutlineSchema& ObSimpleOutlineSchema::operator=(const ObSimpleOutlineSch
   return *this;
 }
 
-bool ObSimpleOutlineSchema::operator==(const ObSimpleOutlineSchema& other) const
+bool ObSimpleOutlineSchema::operator ==(const ObSimpleOutlineSchema &other) const
 {
   bool ret = false;
 
-  if (tenant_id_ == other.tenant_id_ && outline_id_ == other.outline_id_ && schema_version_ == other.schema_version_ &&
-      database_id_ == other.database_id_ && name_ == other.name_ && signature_ == other.signature_ &&
+  if (tenant_id_ == other.tenant_id_ &&
+      outline_id_ == other.outline_id_ &&
+      schema_version_ == other.schema_version_ &&
+      database_id_ == other.database_id_ &&
+      name_ == other.name_ &&
+      signature_ == other.signature_ &&
+      format_outline_ == other.format_outline_ &&
+      format_sql_id_ == other.format_sql_id_ &&
       sql_id_ == other.sql_id_) {
     ret = true;
   }
@@ -84,21 +97,28 @@ bool ObSimpleOutlineSchema::operator==(const ObSimpleOutlineSchema& other) const
 
 void ObSimpleOutlineSchema::reset()
 {
+  ObSchema::reset();
   tenant_id_ = OB_INVALID_ID;
   outline_id_ = OB_INVALID_ID;
   schema_version_ = OB_INVALID_VERSION;
   database_id_ = OB_INVALID_ID;
+  format_outline_ = false;
   name_.reset();
   signature_.reset();
   sql_id_.reset();
-  ObSchema::reset();
+  format_sql_id_.reset();
 }
 
 bool ObSimpleOutlineSchema::is_valid() const
 {
   bool ret = true;
-  if (OB_INVALID_ID == tenant_id_ || OB_INVALID_ID == outline_id_ || schema_version_ < 0 ||
-      OB_INVALID_ID == database_id_ || name_.empty() || (signature_.empty() && sql_id_.empty())) {
+  if (OB_INVALID_ID == tenant_id_ ||
+      OB_INVALID_ID == outline_id_ ||
+      schema_version_ < 0 ||
+      OB_INVALID_ID == database_id_ ||
+      name_.empty() ||
+      (!is_format() && signature_.empty() && sql_id_.empty()) ||
+      (is_format() && signature_.empty() && format_sql_id_.empty())) {
     ret = false;
   }
   return ret;
@@ -112,32 +132,36 @@ int64_t ObSimpleOutlineSchema::get_convert_size() const
   convert_size += name_.length() + 1;
   convert_size += signature_.length() + 1;
   convert_size += sql_id_.length() + 1;
+  convert_size += format_sql_id_.length() + 1;
 
   return convert_size;
 }
 
 ObOutlineMgr::ObOutlineMgr()
-    : local_allocator_(ObModIds::OB_SCHEMA_GETTER_GUARD),
+    : local_allocator_(SET_USE_500(ObModIds::OB_SCHEMA_GETTER_GUARD, ObCtxIds::SCHEMA_SERVICE)),
       allocator_(local_allocator_),
-      outline_infos_(0, NULL, ObModIds::OB_SCHEMA_OUTLINE_INFO_VECTOR),
-      outline_id_map_(ObModIds::OB_SCHEMA_OUTLINE_ID_MAP),
-      outline_name_map_(ObModIds::OB_SCHEMA_OUTLINE_NAME_MAP),
-      signature_map_(ObModIds::OB_SCHEMA_OUTLINE_SQL_MAP),
-      sql_id_map_(ObModIds::OB_SCHEMA_OUTLINE_SQL_MAP)
-{}
+      outline_infos_(0, NULL, SET_USE_500(ObModIds::OB_SCHEMA_OUTLINE_INFO_VECTOR, ObCtxIds::SCHEMA_SERVICE)),
+      outline_id_map_(SET_USE_500(ObModIds::OB_SCHEMA_OUTLINE_ID_MAP, ObCtxIds::SCHEMA_SERVICE)),
+      outline_name_map_(SET_USE_500(ObModIds::OB_SCHEMA_OUTLINE_NAME_MAP, ObCtxIds::SCHEMA_SERVICE)),
+      signature_map_(SET_USE_500(ObModIds::OB_SCHEMA_OUTLINE_SQL_MAP, ObCtxIds::SCHEMA_SERVICE)),
+      sql_id_map_(SET_USE_500(ObModIds::OB_SCHEMA_OUTLINE_SQL_MAP, ObCtxIds::SCHEMA_SERVICE))
+{
+}
 
-ObOutlineMgr::ObOutlineMgr(ObIAllocator& allocator)
-    : local_allocator_(ObModIds::OB_SCHEMA_GETTER_GUARD),
+ObOutlineMgr::ObOutlineMgr(ObIAllocator &allocator)
+    : local_allocator_(SET_USE_500(ObModIds::OB_SCHEMA_GETTER_GUARD, ObCtxIds::SCHEMA_SERVICE)),
       allocator_(allocator),
-      outline_infos_(0, NULL, ObModIds::OB_SCHEMA_OUTLINE_INFO_VECTOR),
-      outline_id_map_(ObModIds::OB_SCHEMA_OUTLINE_ID_MAP),
-      outline_name_map_(ObModIds::OB_SCHEMA_OUTLINE_NAME_MAP),
-      signature_map_(ObModIds::OB_SCHEMA_OUTLINE_SQL_MAP),
-      sql_id_map_(ObModIds::OB_SCHEMA_OUTLINE_SQL_MAP)
-{}
+      outline_infos_(0, NULL, SET_USE_500(ObModIds::OB_SCHEMA_OUTLINE_INFO_VECTOR, ObCtxIds::SCHEMA_SERVICE)),
+      outline_id_map_(SET_USE_500(ObModIds::OB_SCHEMA_OUTLINE_ID_MAP, ObCtxIds::SCHEMA_SERVICE)),
+      outline_name_map_(SET_USE_500(ObModIds::OB_SCHEMA_OUTLINE_NAME_MAP, ObCtxIds::SCHEMA_SERVICE)),
+      signature_map_(SET_USE_500(ObModIds::OB_SCHEMA_OUTLINE_SQL_MAP, ObCtxIds::SCHEMA_SERVICE)),
+      sql_id_map_(SET_USE_500(ObModIds::OB_SCHEMA_OUTLINE_SQL_MAP, ObCtxIds::SCHEMA_SERVICE))
+{
+}
 
 ObOutlineMgr::~ObOutlineMgr()
-{}
+{
+}
 
 int ObOutlineMgr::init()
 {
@@ -152,6 +176,7 @@ int ObOutlineMgr::init()
   } else if (OB_FAIL(sql_id_map_.init())) {
     LOG_WARN("init signature map failed", K(ret));
   }
+
 
   return ret;
 }
@@ -174,7 +199,7 @@ void ObOutlineMgr::reset()
   }
 }
 
-ObOutlineMgr& ObOutlineMgr::operator=(const ObOutlineMgr& other)
+ObOutlineMgr &ObOutlineMgr::operator =(const ObOutlineMgr &other)
 {
   int ret = OB_SUCCESS;
   if (!check_inner_stat()) {
@@ -187,7 +212,7 @@ ObOutlineMgr& ObOutlineMgr::operator=(const ObOutlineMgr& other)
   return *this;
 }
 
-int ObOutlineMgr::assign(const ObOutlineMgr& other)
+int ObOutlineMgr::assign(const ObOutlineMgr &other)
 {
   int ret = OB_SUCCESS;
 
@@ -196,24 +221,24 @@ int ObOutlineMgr::assign(const ObOutlineMgr& other)
     LOG_WARN("not init", K(ret));
   } else if (this != &other) {
     reset();
-#define ASSIGN_FIELD(x)                        \
-  if (OB_SUCC(ret)) {                          \
-    if (OB_FAIL(x.assign(other.x))) {          \
-      LOG_WARN("assign " #x "failed", K(ret)); \
-    }                                          \
-  }
+    #define ASSIGN_FIELD(x)                        \
+      if (OB_SUCC(ret)) {                          \
+        if (OB_FAIL(x.assign(other.x))) {          \
+          LOG_WARN("assign " #x "failed", K(ret)); \
+        }                                          \
+      }
     ASSIGN_FIELD(outline_infos_);
     ASSIGN_FIELD(outline_id_map_);
     ASSIGN_FIELD(outline_name_map_);
     ASSIGN_FIELD(signature_map_);
     ASSIGN_FIELD(sql_id_map_);
-#undef ASSIGN_FIELD
+    #undef ASSIGN_FIELD
   }
 
   return ret;
 }
 
-int ObOutlineMgr::deep_copy(const ObOutlineMgr& other)
+int ObOutlineMgr::deep_copy(const ObOutlineMgr &other)
 {
   int ret = OB_SUCCESS;
 
@@ -222,8 +247,9 @@ int ObOutlineMgr::deep_copy(const ObOutlineMgr& other)
     LOG_WARN("not init", K(ret));
   } else if (this != &other) {
     reset();
-    for (OutlineIter iter = other.outline_infos_.begin(); OB_SUCC(ret) && iter != other.outline_infos_.end(); iter++) {
-      ObSimpleOutlineSchema* outline = *iter;
+    for (OutlineIter iter = other.outline_infos_.begin();
+       OB_SUCC(ret) && iter != other.outline_infos_.end(); iter++) {
+      ObSimpleOutlineSchema *outline = *iter;
       if (OB_ISNULL(outline)) {
         ret = OB_ERR_UNEXPECTED;
         LOG_WARN("NULL ptr", K(outline), K(ret));
@@ -242,29 +268,30 @@ bool ObOutlineMgr::check_inner_stat() const
   return ret;
 }
 
-bool ObOutlineMgr::compare_outline(const ObSimpleOutlineSchema* lhs, const ObSimpleOutlineSchema* rhs)
+bool ObOutlineMgr::compare_outline(const ObSimpleOutlineSchema *lhs, const ObSimpleOutlineSchema *rhs)
 {
   return lhs->get_tenant_outline_id() < rhs->get_tenant_outline_id();
 }
 
-bool ObOutlineMgr::equal_outline(const ObSimpleOutlineSchema* lhs, const ObSimpleOutlineSchema* rhs)
+bool ObOutlineMgr::equal_outline(const ObSimpleOutlineSchema *lhs,
+                                const ObSimpleOutlineSchema *rhs)
 {
   return lhs->get_tenant_outline_id() == rhs->get_tenant_outline_id();
 }
 
-bool ObOutlineMgr::compare_with_tenant_outline_id(
-    const ObSimpleOutlineSchema* lhs, const ObTenantOutlineId& tenant_outline_id)
+bool ObOutlineMgr::compare_with_tenant_outline_id(const ObSimpleOutlineSchema *lhs,
+                                                 const ObTenantOutlineId &tenant_outline_id)
 {
   return NULL != lhs ? (lhs->get_tenant_outline_id() < tenant_outline_id) : false;
 }
 
-bool ObOutlineMgr::equal_with_tenant_outline_id(
-    const ObSimpleOutlineSchema* lhs, const ObTenantOutlineId& tenant_outline_id)
+bool ObOutlineMgr::equal_with_tenant_outline_id(const ObSimpleOutlineSchema *lhs,
+                                               const ObTenantOutlineId &tenant_outline_id)
 {
   return NULL != lhs ? (lhs->get_tenant_outline_id() == tenant_outline_id) : false;
 }
 
-int ObOutlineMgr::add_outlines(const ObIArray<ObSimpleOutlineSchema>& outline_schemas)
+int ObOutlineMgr::add_outlines(const ObIArray<ObSimpleOutlineSchema> &outline_schemas)
 {
   int ret = OB_SUCCESS;
 
@@ -272,10 +299,10 @@ int ObOutlineMgr::add_outlines(const ObIArray<ObSimpleOutlineSchema>& outline_sc
     ret = OB_NOT_INIT;
     LOG_WARN("not init", K(ret));
   } else {
-    FOREACH_CNT_X(outline_schema, outline_schemas, OB_SUCC(ret))
-    {
+    FOREACH_CNT_X(outline_schema, outline_schemas, OB_SUCC(ret)) {
       if (OB_FAIL(add_outline(*outline_schema))) {
-        LOG_WARN("add outline failed", K(ret), "outline_schema", *outline_schema);
+        LOG_WARN("add outline failed", K(ret),
+                 "outline_schema", *outline_schema);
       }
     }
   }
@@ -283,7 +310,7 @@ int ObOutlineMgr::add_outlines(const ObIArray<ObSimpleOutlineSchema>& outline_sc
   return ret;
 }
 
-int ObOutlineMgr::del_outlines(const ObIArray<ObTenantOutlineId>& outlines)
+int ObOutlineMgr::del_outlines(const ObIArray<ObTenantOutlineId> &outlines)
 {
   int ret = OB_SUCCESS;
 
@@ -291,10 +318,11 @@ int ObOutlineMgr::del_outlines(const ObIArray<ObTenantOutlineId>& outlines)
     ret = OB_NOT_INIT;
     LOG_WARN("not init", K(ret));
   } else {
-    FOREACH_CNT_X(outline, outlines, OB_SUCC(ret))
-    {
+    FOREACH_CNT_X(outline, outlines, OB_SUCC(ret)) {
       if (OB_FAIL(del_outline(*outline))) {
-        LOG_WARN("del outline failed", K(ret), "tenant_id", outline->tenant_id_, "outline_id", outline->outline_id_);
+        LOG_WARN("del outline failed", K(ret),
+                 "tenant_id", outline->tenant_id_,
+                 "outline_id", outline->outline_id_);
       }
     }
   }
@@ -302,13 +330,13 @@ int ObOutlineMgr::del_outlines(const ObIArray<ObTenantOutlineId>& outlines)
   return ret;
 }
 
-int ObOutlineMgr::add_outline(const ObSimpleOutlineSchema& outline_schema)
+int ObOutlineMgr::add_outline(const ObSimpleOutlineSchema &outline_schema)
 {
   int ret = OB_SUCCESS;
 
-  ObSimpleOutlineSchema* new_outline_schema = NULL;
+  ObSimpleOutlineSchema *new_outline_schema = NULL;
   OutlineIter iter = NULL;
-  ObSimpleOutlineSchema* replaced_outline = NULL;
+  ObSimpleOutlineSchema *replaced_outline = NULL;
   if (!check_inner_stat()) {
     ret = OB_NOT_INIT;
     LOG_WARN("not init", K(ret));
@@ -320,63 +348,65 @@ int ObOutlineMgr::add_outline(const ObSimpleOutlineSchema& outline_schema)
   } else if (OB_ISNULL(new_outline_schema)) {
     ret = OB_ERR_UNEXPECTED;
     LOG_WARN("NULL ptr", K(ret), K(new_outline_schema));
-  } else if (OB_FAIL(
-                 outline_infos_.replace(new_outline_schema, iter, compare_outline, equal_outline, replaced_outline))) {
+  } else if (OB_FAIL(outline_infos_.replace(new_outline_schema,
+                                           iter,
+                                           compare_outline,
+                                           equal_outline,
+                                           replaced_outline))) {
     LOG_WARN("failed to add outline schema", K(ret));
   } else {
     int over_write = 1;
-    int hash_ret = outline_id_map_.set_refactored(new_outline_schema->get_outline_id(), new_outline_schema, over_write);
+    int hash_ret = outline_id_map_.set_refactored(new_outline_schema->get_outline_id(),
+                                                  new_outline_schema,
+                                                  over_write);
     if (OB_SUCCESS != hash_ret && OB_HASH_EXIST != hash_ret) {
       ret = OB_ERR_UNEXPECTED;
-      LOG_WARN(
-          "build outline id hashmap failed", K(ret), K(hash_ret), "outline_id", new_outline_schema->get_outline_id());
+      LOG_WARN("build outline id hashmap failed", K(ret), K(hash_ret),
+               "outline_id", new_outline_schema->get_outline_id());
     }
     if (OB_SUCC(ret)) {
       ObOutlineNameHashWrapper name_wrapper(new_outline_schema->get_tenant_id(),
-          new_outline_schema->get_database_id(),
-          new_outline_schema->get_name_str());
-      hash_ret = outline_name_map_.set_refactored(name_wrapper, new_outline_schema, over_write);
+                                                    new_outline_schema->get_database_id(),
+                                                    new_outline_schema->get_name_str(),
+                                                    new_outline_schema->is_format());
+      hash_ret = outline_name_map_.set_refactored(name_wrapper, new_outline_schema,
+                                                  over_write);
       if (OB_SUCCESS != hash_ret && OB_HASH_EXIST != hash_ret) {
         ret = OB_ERR_UNEXPECTED;
-        LOG_WARN("build outline name hashmap failed",
-            K(ret),
-            K(hash_ret),
-            "outline_id",
-            new_outline_schema->get_outline_id(),
-            "name",
-            new_outline_schema->get_name());
+        LOG_WARN("build outline name hashmap failed", K(ret), K(hash_ret),
+                 "outline_id", new_outline_schema->get_outline_id(),
+                 "name", new_outline_schema->get_name());
       }
     }
     if (OB_SUCC(ret)) {
       if (0 != new_outline_schema->get_signature_str().length()) {
         ObOutlineSignatureHashWrapper outline_signature_wrapper(new_outline_schema->get_tenant_id(),
-            new_outline_schema->get_database_id(),
-            new_outline_schema->get_signature_str());
-        hash_ret = signature_map_.set_refactored(outline_signature_wrapper, new_outline_schema, over_write);
+                                                                new_outline_schema->get_database_id(),
+                                                                new_outline_schema->get_signature_str(),
+                                                                new_outline_schema->is_format());
+        hash_ret = signature_map_.set_refactored(outline_signature_wrapper,
+                                                 new_outline_schema, over_write);
         if (OB_SUCCESS != hash_ret && OB_HASH_EXIST != hash_ret) {
           ret = OB_ERR_UNEXPECTED;
-          LOG_WARN("build outline signature hashmap failed",
-              K(ret),
-              K(hash_ret),
-              "outline_id",
-              new_outline_schema->get_outline_id(),
-              "outline_signature",
-              new_outline_schema->get_signature());
+          LOG_WARN("build outline signature hashmap failed", K(ret), K(hash_ret),
+                   "outline_id", new_outline_schema->get_outline_id(),
+                   "outline_signature", new_outline_schema->get_signature());
         }
       } else {
         ObOutlineSqlIdHashWrapper outline_sql_id_wrapper(new_outline_schema->get_tenant_id(),
-            new_outline_schema->get_database_id(),
-            new_outline_schema->get_sql_id_str());
-        hash_ret = sql_id_map_.set_refactored(outline_sql_id_wrapper, new_outline_schema, over_write);
+                                                                new_outline_schema->get_database_id(),
+                                                                new_outline_schema->is_format() ? new_outline_schema->get_format_sql_id_str()
+                                                                                                : new_outline_schema->get_sql_id_str(),
+                                                                new_outline_schema->is_format());
+        hash_ret = sql_id_map_.set_refactored(outline_sql_id_wrapper,
+                                                 new_outline_schema, over_write);
         if (OB_SUCCESS != hash_ret && OB_HASH_EXIST != hash_ret) {
           ret = OB_ERR_UNEXPECTED;
-          LOG_WARN("build outline signature hashmap failed",
-              K(ret),
-              K(hash_ret),
-              "outline_id",
-              new_outline_schema->get_outline_id(),
-              "outline_sql_id",
-              new_outline_schema->get_sql_id_str());
+          LOG_WARN("build outline signature hashmap failed", K(ret), K(hash_ret),
+                   "outline_id", new_outline_schema->get_outline_id(),
+                   "outline_sql_id", new_outline_schema->get_sql_id_str(),
+                   "format outline", new_outline_schema->get_format_sql_id_str(),
+                   "is_format", new_outline_schema->is_format());
         }
       }
     }
@@ -386,22 +416,22 @@ int ObOutlineMgr::add_outline(const ObSimpleOutlineSchema& outline_schema)
       outline_infos_.count() != outline_name_map_.item_count() ||
       outline_infos_.count() != (signature_map_.item_count() + sql_id_map_.item_count())) {
     LOG_WARN("outline info is non-consistent",
-        "outline_infos_count",
-        outline_infos_.count(),
-        "outline_id_map_item_count",
-        outline_id_map_.item_count(),
-        "outline_name_map_item_count",
-        outline_name_map_.item_count(),
-        "signature_map_item_count",
-        signature_map_.item_count(),
-        "sql_id_map_item_count",
-        sql_id_map_.item_count(),
-        "outline_id",
-        outline_schema.get_outline_id(),
-        "name",
-        outline_schema.get_name());
+             "outline_infos_count",
+             outline_infos_.count(),
+             "outline_id_map_item_count",
+             outline_id_map_.item_count(),
+             "outline_name_map_item_count",
+             outline_name_map_.item_count(),
+             "signature_map_item_count",
+             signature_map_.item_count(),
+             "sql_id_map_item_count",
+             sql_id_map_.item_count(),
+             "outline_id",
+             outline_schema.get_outline_id(),
+             "name",
+             outline_schema.get_name());
     int tmp_ret = OB_SUCCESS;
-    if (OB_SUCCESS != (tmp_ret = rebuild_outline_hashmap())) {
+    if (OB_SUCCESS != (tmp_ret = rebuild_outline_hashmap())){
       LOG_WARN("rebuild outline hashmap failed", K(tmp_ret));
     }
   }
@@ -409,92 +439,94 @@ int ObOutlineMgr::add_outline(const ObSimpleOutlineSchema& outline_schema)
   return ret;
 }
 
-int ObOutlineMgr::del_outline(const ObTenantOutlineId& outline)
+int ObOutlineMgr::del_outline(const ObTenantOutlineId &outline)
 {
   int ret = OB_SUCCESS;
 
-  ObSimpleOutlineSchema* schema_to_del = NULL;
+  ObSimpleOutlineSchema *schema_to_del = NULL;
   if (!check_inner_stat()) {
     ret = OB_NOT_INIT;
     LOG_WARN("not init", K(ret));
   } else if (!outline.is_valid()) {
     ret = OB_INVALID_ARGUMENT;
     LOG_WARN("invalid argument", K(ret), K(outline));
-  } else if (OB_FAIL(outline_infos_.remove_if(
-                 outline, compare_with_tenant_outline_id, equal_with_tenant_outline_id, schema_to_del))) {
+  } else if (OB_FAIL(outline_infos_.remove_if(outline,
+                                              compare_with_tenant_outline_id,
+                                              equal_with_tenant_outline_id,
+                                              schema_to_del))) {
     LOG_WARN("failed to remove outline schema, ",
-        "tenant_id",
-        outline.tenant_id_,
-        "outline_id",
-        outline.outline_id_,
-        K(ret));
+             "tenant_id",
+             outline.tenant_id_,
+             "outline_id",
+             outline.outline_id_,
+             K(ret));
   } else if (OB_ISNULL(schema_to_del)) {
     ret = OB_ERR_UNEXPECTED;
     LOG_WARN("removed outline schema return NULL, ",
-        "tenant_id",
-        outline.tenant_id_,
-        "outline_id",
-        outline.outline_id_,
-        K(ret));
+             "tenant_id",
+             outline.tenant_id_,
+             "outline_id",
+             outline.outline_id_,
+             K(ret));
   } else {
     int hash_ret = outline_id_map_.erase_refactored(schema_to_del->get_outline_id());
     if (OB_SUCCESS != hash_ret) {
       ret = OB_ERR_UNEXPECTED;
       LOG_WARN("failed delete outline from outline id hashmap, ",
-          "hash_ret",
-          hash_ret,
-          "outline_id",
-          schema_to_del->get_outline_id());
+               "hash_ret", hash_ret,
+               "outline_id", schema_to_del->get_outline_id());
     }
     if (OB_SUCC(ret)) {
-      ObOutlineNameHashWrapper name_wrapper(
-          schema_to_del->get_tenant_id(), schema_to_del->get_database_id(), schema_to_del->get_name_str());
+      ObOutlineNameHashWrapper name_wrapper(schema_to_del->get_tenant_id(),
+                                            schema_to_del->get_database_id(),
+                                            schema_to_del->get_name_str(),
+                                            schema_to_del->is_format());
       hash_ret = outline_name_map_.erase_refactored(name_wrapper);
       if (OB_SUCCESS != hash_ret) {
         ret = OB_ERR_UNEXPECTED;
         LOG_WARN("failed delete outline from outline name hashmap, ",
-            K(ret),
-            K(hash_ret),
-            "tenant_id",
-            schema_to_del->get_tenant_id(),
-            "database_id",
-            schema_to_del->get_database_id(),
-            "name",
-            schema_to_del->get_name());
+                 K(ret),
+                 K(hash_ret),
+                 "tenant_id", schema_to_del->get_tenant_id(),
+                 "database_id", schema_to_del->get_database_id(),
+                 "name", schema_to_del->get_name(),
+                 "is format", schema_to_del->is_format());
       }
     }
     if (OB_SUCC(ret)) {
       if (0 != schema_to_del->get_signature_str().length()) {
-        ObOutlineSignatureHashWrapper outline_signature_wrapper(
-            schema_to_del->get_tenant_id(), schema_to_del->get_database_id(), schema_to_del->get_signature_str());
+        ObOutlineSignatureHashWrapper outline_signature_wrapper(schema_to_del->get_tenant_id(),
+                                                                schema_to_del->get_database_id(),
+                                                                schema_to_del->get_signature_str(),
+                                                                schema_to_del->is_format());
         hash_ret = signature_map_.erase_refactored(outline_signature_wrapper);
         if (OB_SUCCESS != hash_ret) {
           ret = OB_ERR_UNEXPECTED;
           LOG_WARN("failed delete outline from signature hashmap, ",
-              K(ret),
-              K(hash_ret),
-              "tenant_id",
-              schema_to_del->get_tenant_id(),
-              "database_id",
-              schema_to_del->get_database_id(),
-              "signature",
-              schema_to_del->get_signature());
+                   K(ret),
+                   K(hash_ret),
+                   "tenant_id", schema_to_del->get_tenant_id(),
+                   "database_id", schema_to_del->get_database_id(),
+                   "signature", schema_to_del->get_signature(),
+                   "is format", schema_to_del->is_format());
         }
       } else {
-        ObOutlineSqlIdHashWrapper outline_sql_id_wrapper(
-            schema_to_del->get_tenant_id(), schema_to_del->get_database_id(), schema_to_del->get_sql_id_str());
+        ObOutlineSqlIdHashWrapper outline_sql_id_wrapper(schema_to_del->get_tenant_id(),
+                                                         schema_to_del->get_database_id(),
+                                                         schema_to_del->is_format() ? schema_to_del->get_format_sql_id_str()
+                                                                                    : schema_to_del->get_sql_id_str(),
+                                                         schema_to_del->is_format());
         hash_ret = sql_id_map_.erase_refactored(outline_sql_id_wrapper);
         if (OB_SUCCESS != hash_ret) {
           ret = OB_ERR_UNEXPECTED;
           LOG_WARN("failed delete outline from signature hashmap, ",
-              K(ret),
-              K(hash_ret),
-              "tenant_id",
-              schema_to_del->get_tenant_id(),
-              "database_id",
-              schema_to_del->get_database_id(),
-              "sql_id",
-              schema_to_del->get_sql_id_str());
+                   K(ret),
+                   K(hash_ret),
+                   "tenant_id", schema_to_del->get_tenant_id(),
+                   "database_id", schema_to_del->get_database_id(),
+                   "sql_id", schema_to_del->get_sql_id_str(),
+                   "format outline", schema_to_del->get_format_sql_id_str(),
+                   "is format", schema_to_del->is_format());
         }
       }
     }
@@ -504,20 +536,20 @@ int ObOutlineMgr::del_outline(const ObTenantOutlineId& outline)
       outline_infos_.count() != outline_name_map_.item_count() ||
       outline_infos_.count() != (signature_map_.item_count() + sql_id_map_.item_count())) {
     LOG_WARN("outline info is non-consistent",
-        "outline_infos_count",
-        outline_infos_.count(),
-        "outline_id_map_item_count",
-        outline_id_map_.item_count(),
-        "outline_name_map_item_count",
-        outline_name_map_.item_count(),
-        "signature_map_item_count",
-        signature_map_.item_count(),
-        "sql_id_map_item_count",
-        sql_id_map_.item_count(),
-        "outline_id",
-        outline.outline_id_);
+             "outline_infos_count",
+             outline_infos_.count(),
+             "outline_id_map_item_count",
+             outline_id_map_.item_count(),
+             "outline_name_map_item_count",
+             outline_name_map_.item_count(),
+             "signature_map_item_count",
+             signature_map_.item_count(),
+             "sql_id_map_item_count",
+             sql_id_map_.item_count(),
+             "outline_id",
+             outline.outline_id_);
     int tmp_ret = OB_SUCCESS;
-    if (OB_SUCCESS != (tmp_ret = rebuild_outline_hashmap())) {
+    if (OB_SUCCESS != (tmp_ret = rebuild_outline_hashmap())){
       LOG_WARN("rebuild outline hashmap failed", K(tmp_ret));
     }
   }
@@ -525,7 +557,8 @@ int ObOutlineMgr::del_outline(const ObTenantOutlineId& outline)
   return ret;
 }
 
-int ObOutlineMgr::get_outline_schema(const uint64_t outline_id, const ObSimpleOutlineSchema*& outline_schema) const
+int ObOutlineMgr::get_outline_schema(const uint64_t outline_id,
+                                     const ObSimpleOutlineSchema *&outline_schema) const
 {
   int ret = OB_SUCCESS;
   outline_schema = NULL;
@@ -537,7 +570,7 @@ int ObOutlineMgr::get_outline_schema(const uint64_t outline_id, const ObSimpleOu
     ret = OB_INVALID_ARGUMENT;
     LOG_WARN("invalid argument", K(ret), K(outline_id));
   } else {
-    ObSimpleOutlineSchema* tmp_schema = NULL;
+    ObSimpleOutlineSchema *tmp_schema = NULL;
     int hash_ret = outline_id_map_.get_refactored(outline_id, tmp_schema);
     if (OB_SUCCESS == hash_ret) {
       if (OB_ISNULL(tmp_schema)) {
@@ -552,8 +585,12 @@ int ObOutlineMgr::get_outline_schema(const uint64_t outline_id, const ObSimpleOu
   return ret;
 }
 
-int ObOutlineMgr::get_outline_schema_with_name(const uint64_t tenant_id, const uint64_t database_id,
-    const ObString& name, const ObSimpleOutlineSchema*& outline_schema) const
+int ObOutlineMgr::get_outline_schema_with_name(
+  const uint64_t tenant_id,
+  const uint64_t database_id,
+  const ObString &name,
+  const bool is_format,
+  const ObSimpleOutlineSchema *&outline_schema) const
 {
   int ret = OB_SUCCESS;
   outline_schema = NULL;
@@ -561,12 +598,14 @@ int ObOutlineMgr::get_outline_schema_with_name(const uint64_t tenant_id, const u
   if (!check_inner_stat()) {
     ret = OB_NOT_INIT;
     LOG_WARN("not init", K(ret));
-  } else if (OB_INVALID_ID == tenant_id || OB_INVALID_ID == database_id || name.empty()) {
+  } else if (OB_INVALID_ID == tenant_id ||
+             OB_INVALID_ID == database_id ||
+             name.empty()) {
     ret = OB_INVALID_ARGUMENT;
     LOG_WARN("invalid argument", K(ret), K(tenant_id), K(database_id), K(name));
   } else {
-    ObSimpleOutlineSchema* tmp_schema = NULL;
-    const ObOutlineNameHashWrapper name_wrapper(tenant_id, database_id, name);
+    ObSimpleOutlineSchema *tmp_schema = NULL;
+    const ObOutlineNameHashWrapper name_wrapper(tenant_id, database_id, name, is_format);
     int hash_ret = outline_name_map_.get_refactored(name_wrapper, tmp_schema);
     if (OB_SUCCESS == hash_ret) {
       if (OB_ISNULL(tmp_schema)) {
@@ -581,8 +620,12 @@ int ObOutlineMgr::get_outline_schema_with_name(const uint64_t tenant_id, const u
   return ret;
 }
 
-int ObOutlineMgr::get_outline_schema_with_signature(const uint64_t tenant_id, const uint64_t database_id,
-    const ObString& signature, const ObSimpleOutlineSchema*& outline_schema) const
+int ObOutlineMgr::get_outline_schema_with_signature(
+  const uint64_t tenant_id,
+  const uint64_t database_id,
+  const ObString &signature,
+  const bool is_format,
+  const ObSimpleOutlineSchema *&outline_schema) const
 {
   int ret = OB_SUCCESS;
   outline_schema = NULL;
@@ -590,12 +633,15 @@ int ObOutlineMgr::get_outline_schema_with_signature(const uint64_t tenant_id, co
   if (!check_inner_stat()) {
     ret = OB_NOT_INIT;
     LOG_WARN("not init", K(ret));
-  } else if (OB_INVALID_ID == tenant_id || OB_INVALID_ID == database_id || signature.empty()) {
+  } else if (OB_INVALID_ID == tenant_id ||
+             OB_INVALID_ID == database_id ||
+             signature.empty()) {
     ret = OB_INVALID_ARGUMENT;
     LOG_WARN("invalid argument", K(ret), K(tenant_id), K(database_id), K(signature));
   } else {
-    ObSimpleOutlineSchema* tmp_schema = NULL;
-    const ObOutlineSignatureHashWrapper outline_signature_wrapper(tenant_id, database_id, signature);
+    ObSimpleOutlineSchema *tmp_schema = NULL;
+    const ObOutlineSignatureHashWrapper outline_signature_wrapper(tenant_id, database_id,
+                                                                  signature, is_format);
     int hash_ret = signature_map_.get_refactored(outline_signature_wrapper, tmp_schema);
     if (OB_SUCCESS == hash_ret) {
       if (OB_ISNULL(tmp_schema)) {
@@ -610,8 +656,12 @@ int ObOutlineMgr::get_outline_schema_with_signature(const uint64_t tenant_id, co
   return ret;
 }
 
-int ObOutlineMgr::get_outline_schema_with_sql_id(const uint64_t tenant_id, const uint64_t database_id,
-    const ObString& sql_id, const ObSimpleOutlineSchema*& outline_schema) const
+int ObOutlineMgr::get_outline_schema_with_sql_id(
+  const uint64_t tenant_id,
+  const uint64_t database_id,
+  const ObString &sql_id,
+  const bool is_format,
+  const ObSimpleOutlineSchema *&outline_schema) const
 {
   int ret = OB_SUCCESS;
   outline_schema = NULL;
@@ -619,12 +669,15 @@ int ObOutlineMgr::get_outline_schema_with_sql_id(const uint64_t tenant_id, const
   if (!check_inner_stat()) {
     ret = OB_NOT_INIT;
     LOG_WARN("not init", K(ret));
-  } else if (OB_INVALID_ID == tenant_id || OB_INVALID_ID == database_id || sql_id.empty()) {
+  } else if (OB_INVALID_ID == tenant_id ||
+             OB_INVALID_ID == database_id ||
+             sql_id.empty()) {
     ret = OB_INVALID_ARGUMENT;
     LOG_WARN("invalid argument", K(ret), K(tenant_id), K(database_id), K(sql_id));
   } else {
-    ObSimpleOutlineSchema* tmp_schema = NULL;
-    const ObOutlineSqlIdHashWrapper outline_sql_id_wrapper(tenant_id, database_id, sql_id);
+    ObSimpleOutlineSchema *tmp_schema = NULL;
+    const ObOutlineSqlIdHashWrapper outline_sql_id_wrapper(tenant_id, database_id,
+                                                          sql_id, is_format);
     int hash_ret = sql_id_map_.get_refactored(outline_sql_id_wrapper, tmp_schema);
     if (OB_SUCCESS == hash_ret) {
       if (OB_ISNULL(tmp_schema)) {
@@ -639,8 +692,8 @@ int ObOutlineMgr::get_outline_schema_with_sql_id(const uint64_t tenant_id, const
   return ret;
 }
 
-int ObOutlineMgr::get_outline_schemas_in_tenant(
-    const uint64_t tenant_id, ObIArray<const ObSimpleOutlineSchema*>& outline_schemas) const
+int ObOutlineMgr::get_outline_schemas_in_tenant(const uint64_t tenant_id,
+    ObIArray<const ObSimpleOutlineSchema *> &outline_schemas) const
 {
   int ret = OB_SUCCESS;
   outline_schemas.reset();
@@ -649,8 +702,9 @@ int ObOutlineMgr::get_outline_schemas_in_tenant(
   ConstOutlineIter tenant_outline_begin =
       outline_infos_.lower_bound(tenant_outine_id_lower, compare_with_tenant_outline_id);
   bool is_stop = false;
-  for (ConstOutlineIter iter = tenant_outline_begin; OB_SUCC(ret) && iter != outline_infos_.end() && !is_stop; ++iter) {
-    const ObSimpleOutlineSchema* outline = NULL;
+  for (ConstOutlineIter iter = tenant_outline_begin;
+      OB_SUCC(ret) && iter != outline_infos_.end() && !is_stop; ++iter) {
+    const ObSimpleOutlineSchema *outline = NULL;
     if (OB_ISNULL(outline = *iter)) {
       ret = OB_ERR_UNEXPECTED;
       LOG_WARN("NULL ptr", K(ret), K(outline));
@@ -664,8 +718,8 @@ int ObOutlineMgr::get_outline_schemas_in_tenant(
   return ret;
 }
 
-int ObOutlineMgr::get_outline_schemas_in_database(
-    const uint64_t tenant_id, const uint64_t database_id, ObIArray<const ObSimpleOutlineSchema*>& outline_schemas) const
+int ObOutlineMgr::get_outline_schemas_in_database(const uint64_t tenant_id,
+    const uint64_t database_id, ObIArray<const ObSimpleOutlineSchema *> &outline_schemas) const
 {
   int ret = OB_SUCCESS;
   outline_schemas.reset();
@@ -674,8 +728,9 @@ int ObOutlineMgr::get_outline_schemas_in_database(
   ConstOutlineIter tenant_outline_begin =
       outline_infos_.lower_bound(tenant_outine_id_lower, compare_with_tenant_outline_id);
   bool is_stop = false;
-  for (ConstOutlineIter iter = tenant_outline_begin; OB_SUCC(ret) && iter != outline_infos_.end() && !is_stop; ++iter) {
-    const ObSimpleOutlineSchema* outline = NULL;
+  for (ConstOutlineIter iter = tenant_outline_begin;
+      OB_SUCC(ret) && iter != outline_infos_.end() && !is_stop; ++iter) {
+    const ObSimpleOutlineSchema *outline = NULL;
     if (OB_ISNULL(outline = *iter)) {
       ret = OB_ERR_UNEXPECTED;
       LOG_WARN("NULL ptr", K(ret), K(outline));
@@ -702,20 +757,18 @@ int ObOutlineMgr::del_schemas_in_tenant(const uint64_t tenant_id)
     ret = OB_INVALID_ARGUMENT;
     LOG_WARN("invalid argument", K(ret), K(tenant_id));
   } else {
-    ObArray<const ObSimpleOutlineSchema*> schemas;
+    ObArray<const ObSimpleOutlineSchema *> schemas;
     if (OB_FAIL(get_outline_schemas_in_tenant(tenant_id, schemas))) {
       LOG_WARN("get outline schemas failed", K(ret), K(tenant_id));
     } else {
-      FOREACH_CNT_X(schema, schemas, OB_SUCC(ret))
-      {
-        ObTenantOutlineId tenant_outline_id(tenant_id, (*schema)->get_outline_id());
+      FOREACH_CNT_X(schema, schemas, OB_SUCC(ret)) {
+        ObTenantOutlineId tenant_outline_id(tenant_id,
+          (*schema)->get_outline_id());
         if (OB_FAIL(del_outline(tenant_outline_id))) {
           LOG_WARN("del outlne failed",
-              "tenant_id",
-              tenant_outline_id.tenant_id_,
-              "outline_id",
-              tenant_outline_id.outline_id_,
-              K(ret));
+                   "tenant_id", tenant_outline_id.tenant_id_,
+                   "outline_id", tenant_outline_id.outline_id_,
+                   K(ret));
         }
       }
     }
@@ -724,7 +777,7 @@ int ObOutlineMgr::del_schemas_in_tenant(const uint64_t tenant_id)
   return ret;
 }
 
-int ObOutlineMgr::get_outline_schema_count(int64_t& outline_schema_count) const
+int ObOutlineMgr::get_outline_schema_count(int64_t &outline_schema_count) const
 {
   int ret = OB_SUCCESS;
   if (!check_inner_stat()) {
@@ -736,7 +789,7 @@ int ObOutlineMgr::get_outline_schema_count(int64_t& outline_schema_count) const
   return ret;
 }
 
-int ObOutlineMgr::get_schema_statistics(ObSchemaStatisticsInfo& schema_info) const
+int ObOutlineMgr::get_schema_statistics(ObSchemaStatisticsInfo &schema_info) const
 {
   int ret = OB_SUCCESS;
   schema_info.reset();
@@ -758,7 +811,7 @@ int ObOutlineMgr::get_schema_statistics(ObSchemaStatisticsInfo& schema_info) con
   return ret;
 }
 
-// TODO@: which case will cause in-consistent for outline?
+// TODO@xiyu: which case will cause in-consistent for outline?
 int ObOutlineMgr::rebuild_outline_hashmap()
 {
   int ret = OB_SUCCESS;
@@ -771,63 +824,64 @@ int ObOutlineMgr::rebuild_outline_hashmap()
     outline_name_map_.clear();
     signature_map_.clear();
     sql_id_map_.clear();
-    for (ConstOutlineIter iter = outline_infos_.begin(); iter != outline_infos_.end() && OB_SUCC(ret); ++iter) {
-      ObSimpleOutlineSchema* outline_schema = *iter;
+    for (ConstOutlineIter iter = outline_infos_.begin();
+        iter != outline_infos_.end() && OB_SUCC(ret); ++iter) {
+      ObSimpleOutlineSchema *outline_schema = *iter;
       if (OB_ISNULL(outline_schema)) {
         ret = OB_ERR_UNEXPECTED;
         LOG_WARN("outline_schema is NULL", K(ret), K(outline_schema));
       } else {
         int over_write = 1;
-        int hash_ret = outline_id_map_.set_refactored(outline_schema->get_outline_id(), outline_schema, over_write);
+        int hash_ret = outline_id_map_.set_refactored(outline_schema->get_outline_id(),
+                                                      outline_schema,
+                                                      over_write);
         if (OB_SUCCESS != hash_ret) {
           ret = OB_ERR_UNEXPECTED;
-          LOG_WARN(
-              "build outline id hashmap failed", K(ret), K(hash_ret), "outline_id", outline_schema->get_outline_id());
+          LOG_WARN("build outline id hashmap failed", K(ret), K(hash_ret),
+                   "outline_id", outline_schema->get_outline_id());
         }
         if (OB_SUCC(ret)) {
-          ObOutlineNameHashWrapper name_wrapper(
-              outline_schema->get_tenant_id(), outline_schema->get_database_id(), outline_schema->get_name_str());
-          hash_ret = outline_name_map_.set_refactored(name_wrapper, outline_schema, over_write);
+          ObOutlineNameHashWrapper name_wrapper(outline_schema->get_tenant_id(),
+                                                        outline_schema->get_database_id(),
+                                                        outline_schema->get_name_str(),
+                                                        outline_schema->is_format());
+          hash_ret = outline_name_map_.set_refactored(name_wrapper, outline_schema,
+                                                      over_write);
           if (OB_SUCCESS != hash_ret) {
             ret = OB_ERR_UNEXPECTED;
-            LOG_WARN("build outline name hashmap failed",
-                K(ret),
-                K(hash_ret),
-                "outline_id",
-                outline_schema->get_outline_id(),
-                "name",
-                outline_schema->get_name());
+            LOG_WARN("build outline name hashmap failed", K(ret), K(hash_ret),
+                     "outline_id", outline_schema->get_outline_id(),
+                     "name", outline_schema->get_name());
           }
         }
         if (OB_SUCC(ret)) {
           if (0 != outline_schema->get_signature_str().length()) {
             ObOutlineSignatureHashWrapper outline_signature_wrapper(outline_schema->get_tenant_id(),
-                outline_schema->get_database_id(),
-                outline_schema->get_signature_str());
-            hash_ret = signature_map_.set_refactored(outline_signature_wrapper, outline_schema, over_write);
+                                                                    outline_schema->get_database_id(),
+                                                                    outline_schema->get_signature_str(),
+                                                                    outline_schema->is_format());
+            hash_ret = signature_map_.set_refactored(outline_signature_wrapper,
+                                                     outline_schema, over_write);
             if (OB_SUCCESS != hash_ret) {
               ret = OB_ERR_UNEXPECTED;
-              LOG_WARN("build outline signature hashmap failed",
-                  K(ret),
-                  K(hash_ret),
-                  "outline_id",
-                  outline_schema->get_outline_id(),
-                  "signature",
-                  outline_schema->get_signature());
+              LOG_WARN("build outline signature hashmap failed", K(ret), K(hash_ret),
+                       "outline_id", outline_schema->get_outline_id(),
+                       "signature", outline_schema->get_signature());
             }
           } else {
-            ObOutlineSqlIdHashWrapper outline_signature_wrapper(
-                outline_schema->get_tenant_id(), outline_schema->get_database_id(), outline_schema->get_sql_id_str());
-            hash_ret = sql_id_map_.set_refactored(outline_signature_wrapper, outline_schema, over_write);
+
+            ObOutlineSqlIdHashWrapper outline_signature_wrapper(outline_schema->get_tenant_id(),
+                                                                    outline_schema->get_database_id(),
+                                                                    outline_schema->is_format() ? outline_schema->get_format_sql_id_str()
+                                                                                                : outline_schema->get_sql_id_str(),
+                                                                    outline_schema->is_format());
+            hash_ret = sql_id_map_.set_refactored(outline_signature_wrapper,
+                                                     outline_schema, over_write);
             if (OB_SUCCESS != hash_ret) {
               ret = OB_ERR_UNEXPECTED;
-              LOG_WARN("build outline signature hashmap failed",
-                  K(ret),
-                  K(hash_ret),
-                  "outline_id",
-                  outline_schema->get_outline_id(),
-                  "sql_id",
-                  outline_schema->get_sql_id_str());
+              LOG_WARN("build outline signature hashmap failed", K(ret), K(hash_ret),
+                       "outline_id", outline_schema->get_outline_id(),
+                       "sql_id", outline_schema->get_sql_id_str());
             }
           }
         }
@@ -838,6 +892,6 @@ int ObOutlineMgr::rebuild_outline_hashmap()
   return ret;
 }
 
-}  // end of namespace schema
-}  // end of namespace share
-}  // end of namespace oceanbase
+} //end of namespace schema
+} //end of namespace share
+} //end of namespace oceanbase

@@ -12,28 +12,18 @@
 
 #define USING_LOG_PREFIX SQL_ENG
 #include "sql/engine/expr/ob_expr_greater_than.h"
-#include <math.h>
-#include "common/object/ob_obj_compare.h"
-#include "sql/engine/expr/ob_expr_greater_equal.h"
-//#include "sql/engine/expr/ob_expr_promotion_util.h"
 
-namespace oceanbase {
+namespace oceanbase
+{
 using namespace common;
-namespace sql {
-
-ObExprGreaterThan::ObExprGreaterThan(ObIAllocator& alloc) : ObRelationalExprOperator(alloc, T_OP_GT, N_GREATER_THAN, 2)
-{}
-
-int ObExprGreaterThan::calc_result2(ObObj& result, const ObObj& obj1, const ObObj& obj2, ObExprCtx& expr_ctx) const
+namespace sql
 {
-  return ObRelationalExprOperator::calc_result2(result, obj1, obj2, expr_ctx, false, CO_GT);
+
+ObExprGreaterThan::ObExprGreaterThan(ObIAllocator &alloc)
+    : ObRelationalExprOperator(alloc, T_OP_GT, N_GREATER_THAN, 2)
+{
 }
 
-int ObExprGreaterThan::calc_resultN(
-    ObObj& result, const ObObj* objs_array, int64_t param_num, ObExprCtx& expr_ctx) const
-{
-  return ObRelationalExprOperator::calc_resultN(result, objs_array, param_num, expr_ctx, false, CO_GT);
+}
 }
 
-}  // namespace sql
-}  // namespace oceanbase

@@ -13,25 +13,22 @@
 #define USING_LOG_PREFIX SQL_ENG
 #include "sql/engine/cmd/ob_profile_cmd_executor.h"
 
-#include "lib/encrypt/ob_encrypted_helper.h"
-#include "lib/string/ob_sql_string.h"
-#include "share/schema/ob_schema_struct.h"
-#include "share/ob_rpc_struct.h"
-#include "share/ob_common_rpc_proxy.h"
 #include "sql/resolver/ddl/ob_create_profile_stmt.h"
 #include "sql/engine/ob_exec_context.h"
 
-namespace oceanbase {
+namespace oceanbase
+{
 using namespace common;
 using namespace obrpc;
 using namespace share::schema;
-namespace sql {
+namespace sql
+{
 
-int ObProfileDDLExecutor::execute(ObExecContext& ctx, ObUserProfileStmt& stmt)
+int ObProfileDDLExecutor::execute(ObExecContext &ctx, ObUserProfileStmt &stmt)
 {
   int ret = OB_SUCCESS;
-  ObTaskExecutorCtx* task_exec_ctx = NULL;
-  obrpc::ObCommonRpcProxy* common_rpc_proxy = NULL;
+  ObTaskExecutorCtx *task_exec_ctx = NULL;
+  obrpc::ObCommonRpcProxy *common_rpc_proxy = NULL;
 
   if (OB_ISNULL(task_exec_ctx = GET_TASK_EXECUTOR_CTX(ctx))) {
     ret = OB_NOT_INIT;
@@ -45,5 +42,5 @@ int ObProfileDDLExecutor::execute(ObExecContext& ctx, ObUserProfileStmt& stmt)
   return ret;
 }
 
-}  // namespace sql
-}  // namespace oceanbase
+}// ns sql
+}// ns oceanbase

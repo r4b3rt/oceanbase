@@ -1,4 +1,5 @@
 # 描述oceanbase各个版本升级依赖关系
+# 参考文档 release/ptw5y7
 
 # 对于每一个正式发布的ob版本，在下面的yaml文档中添加一项，包括如下属性：
 #  * version: 待升级的版本，或者升级过程中经过的版本；一般用A.B.C的版本号，如果是A.B.C-D的形式，表示build号必须大于等于D
@@ -16,16 +17,95 @@
 # 者。
 #
 
---- # oceanbase version dependencies
-- version: 3.1.1
+- version: 4.0.0.0
   can_be_upgraded_to:
-      - 3.1.2
-- version: 3.1.2
+      - 4.1.0.0
+
+- version: 4.1.0.0-100000192023032010   # 4.1 BETA版本 不能作为目标版本
   can_be_upgraded_to:
-      - 3.1.3
-- version: 3.1.3
+    - 4.1.0.0
+  deprecated: True
+
+- version: 4.1.0.0
   can_be_upgraded_to:
-      - 3.1.4
-- version: 3.1.4
+      - 4.1.0.1
+
+- version: 4.1.0.1
   can_be_upgraded_to:
-      - 3.1.5
+      - 4.1.0.2
+
+- version: 4.1.0.2
+  can_be_upgraded_to:
+      - 4.2.0.0
+  require_from_binary:
+    value: True
+    when_come_from: [4.0.0.0, 4.1.0.0-100000192023032010]
+
+- version: 4.2.0.0-100000152023080109   # 4.2 RC2版本 不能作为目标版本
+  can_be_upgraded_to:
+    - 4.2.0.0
+  deprecated: True
+
+- version: 4.2.0.0-100010022023081817   # 4.2 RC2 hotfix版本 不能作为目标版本
+  can_be_upgraded_to:
+    - 4.2.0.0
+  deprecated: True
+
+- version: 4.2.0.0
+  can_be_upgraded_to:
+      - 4.2.1.0
+
+# 4.2.1.x is barrier
+- version: 4.2.1.0
+  can_be_upgraded_to:
+      - 4.2.1.1
+
+- version: 4.2.1.1
+  can_be_upgraded_to:
+      - 4.2.1.2
+  require_from_binary:
+    value: True
+    when_come_from: [4.1.0.0, 4.1.0.1, 4.1.0.2, 4.2.0.0]
+
+# 4.3.0.x
+- version: 4.3.0.0
+  can_be_upgraded_to:
+      - 4.3.0.1
+
+- version: 4.3.0.1
+  can_be_upgraded_to:
+      - 4.3.1.0
+
+- version: 4.3.1.0
+  can_be_upgraded_to:
+      - 4.3.2.1
+
+- version: 4.3.2.0
+  can_be_upgraded_to:
+      - 4.3.3.0
+
+- version: 4.3.2.1
+  can_be_upgraded_to:
+      - 4.3.3.0
+
+- version: 4.3.3.0
+  can_be_upgraded_to:
+      - 4.3.4.0
+
+- version: 4.3.3.1
+  can_be_upgraded_to:
+      - 4.3.4.0
+
+- version: 4.3.4.0
+  can_be_upgraded_to:
+      - 4.3.4.1
+
+- version: 4.3.4.1
+  can_be_upgraded_to:
+      - 4.3.5.0
+
+- version: 4.3.5.0
+  can_be_upgraded_to:
+      - 4.3.5.1
+
+- version: 4.3.5.1

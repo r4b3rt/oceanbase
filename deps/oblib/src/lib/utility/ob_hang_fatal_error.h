@@ -15,12 +15,17 @@
 
 #include <exception>
 #include "lib/coro/co_var.h"
+
 namespace oceanbase
 {
 namespace common
 {
 extern void right_to_die_or_duty_to_live();
-extern RLOCAL(bool, in_try_stmt);
+int64_t get_fatal_error_thread_id();
+void set_fatal_error_thread_id(int64_t thread_id);
+
+
+RLOCAL_EXTERN(bool, in_try_stmt);
 
 struct OB_BASE_EXCEPTION : public std::exception
 {
@@ -34,7 +39,7 @@ struct OB_EXCEPTION : public OB_BASE_EXCEPTION
   virtual int get_errno() { return ERRNO; }
 };
 
-}  // namespace common
-}  // namespace oceanbase
+}
+}
 
 #endif /* SRC_LIB_UTILITY_OB_HANG_FATAL_ERROR_H_ */

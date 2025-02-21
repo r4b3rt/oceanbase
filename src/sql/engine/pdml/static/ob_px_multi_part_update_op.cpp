@@ -12,8 +12,7 @@
 
 #define USING_LOG_PREFIX SQL_ENG
 #include "ob_px_multi_part_update_op.h"
-#include "storage/ob_dml_param.h"
-#include "storage/ob_partition_service.h"
+#include "sql/engine/dml/ob_dml_service.h"
 
 using namespace oceanbase::common;
 using namespace oceanbase::sql;
@@ -22,34 +21,9 @@ using namespace oceanbase::common::serialization;
 
 OB_SERIALIZE_MEMBER((ObPxMultiPartUpdateOpInput, ObPxMultiPartModifyOpInput));
 
-OB_SERIALIZE_MEMBER((ObPxMultiPartUpdateSpec, ObTableModifySpec), row_desc_, table_desc_, updated_column_ids_,
-    updated_column_infos_, old_row_exprs_, new_row_exprs_);
-
-int ObPxMultiPartUpdateSpec::set_updated_column_info(
-    int64_t array_index, uint64_t column_id, uint64_t project_index, bool auto_filled_timestamp)
-{
-  int ret = OB_SUCCESS;
-  ColumnContent column;
-  column.projector_index_ = project_index;
-  column.auto_filled_timestamp_ = auto_filled_timestamp;
-  CK(array_index >= 0 && array_index < updated_column_ids_.count());
-  CK(array_index >= 0 && array_index < updated_column_infos_.count());
-  if (OB_SUCC(ret)) {
-    updated_column_ids_.at(array_index) = column_id;
-    updated_column_infos_.at(array_index) = column;
-  }
-  return ret;
-}
-
-int ObPxMultiPartUpdateSpec::init_updated_column_count(common::ObIAllocator& allocator, int64_t count)
-{
-  UNUSED(allocator);
-  int ret = common::OB_SUCCESS;
-  OZ(updated_column_infos_.prepare_allocate(count));
-  OZ(updated_column_ids_.prepare_allocate(count));
-
-  return ret;
-}
+OB_SERIALIZE_MEMBER((ObPxMultiPartUpdateSpec, ObTableModifySpec),
+                    row_desc_,
+                    upd_ctdef_);
 
 //////////////////////ObPxMultiPartInsertOp///////////////////
 int ObPxMultiPartUpdateOp::inner_open()
@@ -57,13 +31,19 @@ int ObPxMultiPartUpdateOp::inner_open()
   int ret = OB_SUCCESS;
   if (OB_FAIL(ObTableModifyOp::inner_open())) {
     LOG_WARN("failed to inner open", K(ret));
-  } else if (!(MY_SPEC.table_desc_.is_valid()) || !(MY_SPEC.row_desc_.is_valid())) {
+  } else if (!(MY_SPEC.row_desc_.is_valid())) {
     ret = OB_ERR_UNEXPECTED;
-    LOG_WARN("table or row desc is invalid", K(ret), K(MY_SPEC.table_desc_), K(MY_SPEC.row_desc_));
-  } else if (OB_FAIL(data_driver_.init(ctx_.get_allocator(), MY_SPEC.table_desc_, this, this))) {
+    LOG_WARN("table or row desc is invalid", K(ret), K(MY_SPEC.row_desc_));
+  } else if (OB_FAIL(data_driver_.init(get_spec(), ctx_.get_allocator(), upd_rtdef_, this, this, false))) {
     LOG_WARN("failed to init data driver", K(ret));
+  } else if (OB_FAIL(ObDMLService::init_upd_rtdef(dml_rtctx_,
+                                                  upd_rtdef_,
+                                                  MY_SPEC.upd_ctdef_,
+                                                  trigger_clear_exprs_,
+                                                  fk_checkers_))) {
+    LOG_WARN("init update rtdef failed", K(ret));
   }
-  LOG_TRACE("pdml static update op", K(ret), K_(MY_SPEC.table_desc), K_(MY_SPEC.row_desc));
+  LOG_TRACE("pdml static update op", K(ret), K_(MY_SPEC.row_desc));
   return ret;
 }
 
@@ -82,7 +62,8 @@ int ObPxMultiPartUpdateOp::inner_get_next_row()
       }
     } else {
       clear_evaluated_flag();
-      LOG_DEBUG("get one row for returning", "row", ROWEXPR2STR(*ctx_.get_eval_ctx(), MY_SPEC.output_));
+      LOG_DEBUG("get one row for returning",
+        "row", ROWEXPR2STR(get_eval_ctx(), MY_SPEC.output_));
     }
   } else {
     do {
@@ -94,7 +75,8 @@ int ObPxMultiPartUpdateOp::inner_get_next_row()
         }
       } else {
         clear_evaluated_flag();
-        LOG_DEBUG("get one row for update loop", "row", ROWEXPR2STR(*ctx_.get_eval_ctx(), child_->get_spec().output_));
+        LOG_DEBUG("get one row for update loop",
+          "row", ROWEXPR2STR(get_eval_ctx(), child_->get_spec().output_));
       }
     } while (OB_SUCC(ret));
   }
@@ -112,21 +94,34 @@ int ObPxMultiPartUpdateOp::inner_close()
   return ret;
 }
 
-int ObPxMultiPartUpdateOp::process_row()
+int ObPxMultiPartUpdateOp::update_row_to_das(const ObDASTabletLoc *tablet_loc)
 {
   int ret = OB_SUCCESS;
-  bool is_filtered = false;
-  OZ(check_row_null(MY_SPEC.new_row_exprs_, MY_SPEC.column_infos_));
-  OZ(filter_row_for_check_cst(MY_SPEC.check_constraint_exprs_, is_filtered));
-  OV(!is_filtered, OB_ERR_CHECK_CONSTRAINT_VIOLATED);
+  ObChunkDatumStore::StoredRow* stored_row = nullptr;
+  if (OB_FAIL(ObDMLService::check_row_whether_changed(MY_SPEC.upd_ctdef_, upd_rtdef_, eval_ctx_))) {
+    LOG_WARN("check row whether changed failed", K(ret));
+  } else if (OB_FAIL(ObDMLService::update_row(MY_SPEC.upd_ctdef_,
+                                              upd_rtdef_,
+                                              tablet_loc,
+                                              tablet_loc,
+                                              dml_rtctx_,
+                                              stored_row,
+                                              stored_row,
+                                              stored_row))) {
+    LOG_WARN("insert row with das failed", K(ret));
+  }
   return ret;
 }
 
 //////////// pdml data interface implementation: reader & writer ////////////
-int ObPxMultiPartUpdateOp::read_row(ObExecContext& ctx, const ObExprPtrIArray*& row, int64_t& part_id)
+int ObPxMultiPartUpdateOp::read_row(ObExecContext &ctx,
+                                    const ObExprPtrIArray *&row,
+                                    common::ObTabletID &tablet_id,
+                                    bool &is_skipped)
 {
+  // 从child中读取数据，数据存储在child的output exprs中
   int ret = OB_SUCCESS;
-  ObPhysicalPlanCtx* plan_ctx = NULL;
+  ObPhysicalPlanCtx *plan_ctx = NULL;
   if (OB_ISNULL(plan_ctx = ctx.get_physical_plan_ctx())) {
     ret = OB_ERR_UNEXPECTED;
     LOG_WARN("get physical plan context failed", K(ret));
@@ -138,156 +133,106 @@ int ObPxMultiPartUpdateOp::read_row(ObExecContext& ctx, const ObExprPtrIArray*& 
       LOG_WARN("fail get next row from child", K(ret));
     }
   } else {
+    op_monitor_info_.otherstat_2_value_++;
+    // 每一次从child节点获得新的数据都需要进行清除计算标记
     clear_evaluated_flag();
-    // Obtain the partition corresponding to the corresponding row through partition id expr
-    const int64_t part_id_idx = MY_SPEC.row_desc_.get_part_id_index();
-    row = &child_->get_spec().output_;
-    if (NO_PARTITION_ID_FLAG == part_id_idx) {
-      // default partition id 0
-      part_id = 0;
-    } else if (child_->get_spec().output_.count() > part_id_idx) {
-      ObExpr* expr = child_->get_spec().output_.at(part_id_idx);
-      ObDatum& expr_datum = expr->locate_expr_datum(*ctx_.get_eval_ctx());
-      part_id = expr_datum.get_int();
-      LOG_DEBUG("get the part id", K(ret), K(expr_datum));
-    }
-  }
-
-  if (!MY_SPEC.is_pdml_index_maintain_ && OB_SUCC(ret)) {
-    // only main table needs to check constraint
-    if (OB_FAIL(process_row())) {
-      LOG_WARN("fail process row", K(ret));
+    ++upd_rtdef_.cur_row_num_;
+    if (OB_FAIL(ObDMLService::process_update_row(MY_SPEC.upd_ctdef_, upd_rtdef_, is_skipped, *this))) {
+      LOG_WARN("process update row failed", K(ret));
+    } else if (!is_skipped) {
+      // 通过partition id expr获得对应行对应的分区
+      ++upd_rtdef_.found_rows_;
+      const int64_t part_id_idx = MY_SPEC.row_desc_.get_part_id_index();
+      // 返回的值是child的output exprs
+      row = &child_->get_spec().output_;
+      if (NO_PARTITION_ID_FLAG == part_id_idx) {
+        ObDASTableLoc *table_loc = upd_rtdef_.dupd_rtdef_.table_loc_;
+        if (OB_ISNULL(table_loc) || table_loc->get_tablet_locs().size() != 1) {
+          ret = OB_ERR_UNEXPECTED;
+          LOG_WARN("insert table location is invalid", K(ret), KPC(table_loc));
+        } else {
+          tablet_id = table_loc->get_first_tablet_loc()->tablet_id_;
+        }
+      } else if (child_->get_spec().output_.count() > part_id_idx) {
+        ObExpr *expr = child_->get_spec().output_.at(part_id_idx);
+        ObDatum &expr_datum = expr->locate_expr_datum(get_eval_ctx());
+        tablet_id = expr_datum.get_int();
+        LOG_DEBUG("get the part id", K(ret), K(expr_datum));
+      }
+    } else {
+      op_monitor_info_.otherstat_4_value_++;
     }
   }
   return ret;
 }
 
-int ObPxMultiPartUpdateOp::write_rows(ObExecContext& ctx, ObPartitionKey& pkey, ObPDMLOpRowIterator& dml_row_iter)
+
+int ObPxMultiPartUpdateOp::write_rows(ObExecContext &ctx,
+                                      const ObDASTabletLoc *tablet_loc,
+                                      ObPDMLOpRowIterator &dml_row_iter)
 {
   int ret = OB_SUCCESS;
-  storage::ObDMLBaseParam dml_param;
-  ObSQLSessionInfo* my_session = NULL;
-  ObTaskExecutorCtx* executor_ctx = NULL;
-  ObPartitionService* ps = NULL;
-  const ObPhysicalPlan* phy_plan = NULL;
-  ObPhysicalPlanCtx* plan_ctx = NULL;
-  if (OB_ISNULL(my_session = GET_MY_SESSION(ctx_))) {
-    ret = OB_ERR_UNEXPECTED;
-    LOG_WARN("fail to get my session", K(ret));
-  } else if (OB_ISNULL(executor_ctx = GET_TASK_EXECUTOR_CTX(ctx))) {
-    ret = OB_ERR_UNEXPECTED;
-    LOG_WARN("fail to get task executor ctx", K(ret));
-  } else if (OB_ISNULL(ps = executor_ctx->get_partition_service())) {
-    ret = OB_ERR_UNEXPECTED;
-    LOG_WARN("fail to get partition service", K(ret));
-  } else if (OB_ISNULL(plan_ctx = ctx_.get_physical_plan_ctx())) {
+  ObPhysicalPlanCtx *plan_ctx = NULL;
+
+  ObSQLSessionInfo *session = ctx_.get_my_session();
+  if (OB_ISNULL(plan_ctx = ctx_.get_physical_plan_ctx())) {
     ret = OB_ERR_NULL_VALUE;
     LOG_WARN("get physical plan context failed");
-  } else if (OB_ISNULL(phy_plan = plan_ctx->get_phy_plan())) {
-    ret = OB_ERR_UNEXPECTED;
-    LOG_WARN("fail to get phy_plan", K(ret));
-  } else if (OB_FAIL(
-                 fill_dml_base_param(MY_SPEC.table_desc_.index_tid_, *my_session, *phy_plan, *plan_ctx, dml_param))) {
-    LOG_WARN("failed to fill dml base param", K(ret));
   } else {
-    ObPDMLOpRowIteratorWrapper row_iter_wrapper(pkey, dml_param, dml_row_iter, *this);
-    int64_t affected_rows = 0;
-    if (OB_FAIL(ps->update_rows(my_session->get_trans_desc(),
-            dml_param,
-            pkey,
-            MY_SPEC.column_ids_,
-            MY_SPEC.updated_column_ids_,
-            &row_iter_wrapper,
-            affected_rows))) {
-      LOG_WARN(
-          "failed to write rows to storage layer", K(ret), K(MY_SPEC.is_returning_), K(MY_SPEC.index_tid_), K(pkey));
-    } else {
-      if (!(MY_SPEC.is_pdml_index_maintain_)) {
-        plan_ctx->add_row_matched_count(found_rows_);
-        plan_ctx->add_row_duplicated_count(changed_rows_);
-        plan_ctx->add_affected_rows(
-            my_session->get_capability().cap_flags_.OB_CLIENT_FOUND_ROWS ? found_rows_ : affected_rows_);
-        LOG_TRACE("pdml update ok",
-            K(pkey),
-            K(MY_SPEC.is_pdml_index_maintain_),
-            K(affected_rows),
-            K(affected_rows_),
-            K(found_rows_),
-            K(changed_rows_));
-        found_rows_ = 0;
-        changed_rows_ = 0;
-        affected_rows_ = 0;
+    while (OB_SUCC(ret)) {
+      clear_evaluated_flag();
+      if (OB_FAIL(try_check_status())) {
+        LOG_WARN("check status failed", K(ret));
+      } else if (OB_FAIL(dml_row_iter.get_next_row(child_->get_spec().output_))) {
+        if (OB_ITER_END != ret) {
+          LOG_WARN("fail to get next row", K(ret));
+        } else {
+          iter_end_ = true;
+        }
+      } else if (OB_FAIL(update_row_to_das(tablet_loc))) {
+        LOG_WARN("update row to das failed", K(ret));
+      } else if (OB_FAIL(discharge_das_write_buffer())) {
+        LOG_WARN("failed to submit all dml task when the buffer of das op is full", K(ret));
+      } else {
+        op_monitor_info_.otherstat_3_value_++;
       }
     }
-  }
-  return ret;
-}
 
-int ObPxMultiPartUpdateOp::fill_dml_base_param(uint64_t index_tid, ObSQLSessionInfo& my_session,
-    const ObPhysicalPlan& my_phy_plan, const ObPhysicalPlanCtx& my_plan_ctx, storage::ObDMLBaseParam& dml_param) const
-{
-  int ret = OB_SUCCESS;
-  int64_t schema_version = 0;
-  int64_t binlog_row_image = share::ObBinlogRowImage::FULL;
-  if (OB_FAIL(my_phy_plan.get_base_table_version(index_tid, schema_version))) {
-    LOG_WARN("failed to get base table version", K(ret));
-  } else if (OB_FAIL(my_session.get_binlog_row_image(binlog_row_image))) {
-    LOG_WARN("fail to get binlog row image", K(ret));
-  } else {
-    dml_param.schema_version_ = schema_version;
-    dml_param.is_total_quantity_log_ = (share::ObBinlogRowImage::FULL == binlog_row_image);
-    dml_param.timeout_ = my_plan_ctx.get_ps_timeout_timestamp();
-    dml_param.sql_mode_ = my_session.get_sql_mode();
-    dml_param.tz_info_ = TZ_INFO(&my_session);
-    dml_param.tenant_schema_version_ = my_plan_ctx.get_tenant_schema_version();
-  }
-  return ret;
-}
-
-int ObPxMultiPartUpdateOp::ObPDMLOpRowIteratorWrapper::get_next_row(common::ObNewRow*& row)
-{
-  return op_.get_next_row(pkey_, dml_param_, iter_, row);
-}
-
-// for row-multiplex: one_row => old_row + new_row
-int ObPxMultiPartUpdateOp::get_next_row(
-    ObPartitionKey& pkey, storage::ObDMLBaseParam& dml_param, ObPDMLOpRowIterator& iter, common::ObNewRow*& row)
-{
-  int ret = OB_SUCCESS;
-  if (has_got_old_row_) {
-    row = &new_row_;
-    has_got_old_row_ = false;
-    LOG_DEBUG("iter one update new row", K(ret), K(*row));
-  } else {
-    bool need_update = false;
-    do {
-      if (OB_FAIL(iter.get_next_row(child_->get_spec().output_))) {
-        if (OB_UNLIKELY(OB_ITER_END != ret)) {
-          LOG_WARN("fail get next row from child", K(ret));
-        }
+    if (OB_ITER_END == ret) {
+      if (OB_FAIL(submit_all_dml_task())) {
+        LOG_WARN("do insert rows post process failed", K(ret));
       } else {
-        if (OB_FAIL(project_row(MY_SPEC.old_row_exprs_, old_row_))) {
-          LOG_WARN("failed to project row for update iter", K(ret));
-        } else if (OB_FAIL(project_row(MY_SPEC.new_row_exprs_, new_row_))) {
-          LOG_WARN("failed to project row for update iter", K(ret));
-        } else if (OB_FAIL(check_updated_value(*this,
-                       MY_SPEC.get_assign_columns(),
-                       MY_SPEC.old_row_exprs_,
-                       MY_SPEC.new_row_exprs_,
-                       need_update))) {
-          LOG_WARN("fail check updated value", K_(old_row), K_(new_row), K(ret));
-        } else if (!need_update && OB_FAIL(lock_row(MY_SPEC.old_row_exprs_, dml_param, pkey))) {
-          if (OB_TRY_LOCK_ROW_CONFLICT != ret) {
-            LOG_WARN("fail lock row", K_(old_row), K(pkey), K(ret));
-          }
-        } else if (need_update) {
-          row = &old_row_;
-          has_got_old_row_ = true;
-          LOG_DEBUG("iter one update old row", K(ret), K(*row));
+        if (upd_rtdef_.ddel_rtdef_ != nullptr) {
+          //update rows across partitions, need to add das delete op's affected rows
+          op_monitor_info_.otherstat_5_value_ += upd_rtdef_.ddel_rtdef_->affected_rows_;
         }
-        clear_evaluated_flag();
+        if (upd_rtdef_.dlock_rtdef_ != nullptr) {
+          op_monitor_info_.otherstat_5_value_ += upd_rtdef_.dlock_rtdef_->affected_rows_;
+        }
+        op_monitor_info_.otherstat_5_value_ += upd_rtdef_.dupd_rtdef_.affected_rows_;
       }
-    } while (!need_update && OB_SUCC(ret));
+    }
+    if (!(MY_SPEC.is_pdml_index_maintain_)) {
+      int64_t found_rows = upd_rtdef_.found_rows_;
+      int64_t changed_rows = upd_rtdef_.dupd_rtdef_.affected_rows_;
+      plan_ctx->add_row_matched_count(found_rows);
+      plan_ctx->add_row_duplicated_count(changed_rows);
+      plan_ctx->add_affected_rows(session->get_capability().cap_flags_.OB_CLIENT_FOUND_ROWS ?
+                                  found_rows : changed_rows);
+    }
+    LOG_TRACE("pdml update ok", K(MY_SPEC.is_pdml_index_maintain_),
+              K(op_monitor_info_.otherstat_1_value_), K(op_monitor_info_.otherstat_2_value_),
+              K(op_monitor_info_.otherstat_3_value_), K(op_monitor_info_.otherstat_4_value_),
+              K(op_monitor_info_.otherstat_5_value_));
+    upd_rtdef_.found_rows_ = 0;
+    upd_rtdef_.dupd_rtdef_.affected_rows_ = 0;
+    if (upd_rtdef_.ddel_rtdef_ != nullptr) {
+      //update rows across partitions, need to add das delete op's affected rows
+      upd_rtdef_.ddel_rtdef_->affected_rows_ = 0;
+    }
+    if (upd_rtdef_.dlock_rtdef_ != nullptr) {
+      upd_rtdef_.dlock_rtdef_->affected_rows_ = 0;
+    }
   }
   return ret;
 }

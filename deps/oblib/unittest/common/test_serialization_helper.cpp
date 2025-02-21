@@ -11,50 +11,51 @@
  */
 
 #include <gtest/gtest.h>
-#include "lib/allocator/ob_malloc.h"
-#include "common/ob_role.h"
-#include "lib/container/ob_se_array.h"
 #include "lib/container/ob_array_serialization.h"
-#include "lib/utility/ob_serialization_helper.h"
 
 using namespace oceanbase;
 using namespace common;
 
 #define OK(value) ASSERT_EQ(OB_SUCCESS, (value))
 
-class ObSerialzationHelper : public ::testing::Test {
-public:
-  ObSerialzationHelper();
-  virtual ~ObSerialzationHelper();
-  virtual void SetUp();
-  virtual void TearDown();
-
-private:
-  // disallow copy
-  ObSerialzationHelper(const ObSerialzationHelper& other);
-  ObSerialzationHelper& operator=(const ObSerialzationHelper& other);
-
-protected:
-  // data members
+class ObSerialzationHelper: public ::testing::Test
+{
+  public:
+    ObSerialzationHelper();
+    virtual ~ObSerialzationHelper();
+    virtual void SetUp();
+    virtual void TearDown();
+  private:
+    // disallow copy
+    ObSerialzationHelper(const ObSerialzationHelper &other);
+    ObSerialzationHelper& operator=(const ObSerialzationHelper &other);
+  protected:
+    // data members
 };
 
 ObSerialzationHelper::ObSerialzationHelper()
-{}
+{
+}
 
 ObSerialzationHelper::~ObSerialzationHelper()
-{}
+{
+}
 
 void ObSerialzationHelper::SetUp()
-{}
+{
+}
 
 void ObSerialzationHelper::TearDown()
-{}
+{
+}
 
-enum TestEnum1 {
+enum TestEnum1
+{
   TestEnum1Value = 1024,
 };
 
-enum TestEnum2 {
+enum TestEnum2
+{
   TestEnum2Value = 1L << 33,
 };
 
@@ -83,8 +84,8 @@ TEST_F(ObSerialzationHelper, enum_type)
   // array2.deserialize(buf, 1024, pos);
 }
 
-int main(int argc, char** argv)
+int main(int argc, char **argv)
 {
-  ::testing::InitGoogleTest(&argc, argv);
+  ::testing::InitGoogleTest(&argc,argv);
   return RUN_ALL_TESTS();
 }

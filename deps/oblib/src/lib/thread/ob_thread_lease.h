@@ -15,8 +15,10 @@
 
 #include "lib/atomic/ob_atomic.h"
 
-namespace oceanbase {
-namespace common {
+namespace oceanbase
+{
+namespace common
+{
 
 /* state transfer: IDLE <------> HANDLING <------> READY
  *  - IDLE:     idle state, no thread handling
@@ -28,23 +30,17 @@ namespace common {
  *  3. READY -> HANDLING:                     thread fail to revoke lease as new data arrived
  *  4. HANDLING -> IDLE:                      thread succ to revoke lease
  **/
-class ObThreadLease {
+class ObThreadLease
+{
 public:
   typedef enum { IDLE = 0, READY = 1, HANDLING = 2 } StatusType;
 
 public:
-  ObThreadLease() : status_(IDLE)
-  {}
-  ~ObThreadLease()
-  {
-    status_ = IDLE;
-  }
+  ObThreadLease() : status_(IDLE) {}
+  ~ObThreadLease() { status_ = IDLE; }
 
   // for unittest
-  StatusType value() const
-  {
-    return status_;
-  }
+  StatusType value() const { return status_; }
 
   void reset()
   {
@@ -52,13 +48,17 @@ public:
   }
 
 public:
+  bool is_idle() const
+  {
+    return IDLE == ATOMIC_LOAD(&status_);
+  }
   bool acquire()
   {
     bool bool_ret = false;
     bool done = false;
     StatusType st = status_;
 
-    while (!done) {
+    while (! done) {
       switch (st) {
         case IDLE:
           // IDLE -> HANDLING
@@ -93,7 +93,7 @@ public:
     bool done = false;
     StatusType st = status_;
 
-    while (!done) {
+    while (! done) {
       switch (st) {
           // HANDLING -> IDLE
         case HANDLING:
@@ -121,6 +121,6 @@ private:
   StatusType status_;
 };
 
-}  // namespace common
-}  // namespace oceanbase
+} // namespace common
+} // namespace oceanbase
 #endif /* OCEANBASE_OB_THREAD_LEASE_H__ */

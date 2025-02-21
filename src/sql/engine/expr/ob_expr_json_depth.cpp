@@ -8,9 +8,9 @@
  * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PubL v2 for more details.
+ * This file contains implementation for json_depth.
  */
 
-// This file contains implementation for json_depth.
 #define USING_LOG_PREFIX SQL_ENG
 #include "ob_expr_json_func_helper.h"
 #include "ob_expr_json_depth.h"
@@ -23,7 +23,7 @@ namespace oceanbase
 namespace sql
 {
 ObExprJsonDepth::ObExprJsonDepth(ObIAllocator &alloc)
-    : ObFuncExprOperator(alloc, T_FUN_SYS_JSON_DEPTH, N_JSON_DEPTH, 1, NOT_ROW_DIMENSION)
+    : ObFuncExprOperator(alloc, T_FUN_SYS_JSON_DEPTH, N_JSON_DEPTH, 1, VALID_FOR_GENERATED_COL, NOT_ROW_DIMENSION)
 {
 }
 
@@ -48,42 +48,6 @@ int ObExprJsonDepth::calc_result_type1(ObExprResType &type,
   return ret;
 }
 
-// for old sql engine
-int ObExprJsonDepth::calc_result1(common::ObObj &result,
-                                  const common::ObObj &arg,
-                                  common::ObExprCtx &expr_ctx) const
-{
-  INIT_SUCC(ret);
-  bool is_null_result = false;
-  ObIJsonBase *json_doc = NULL;
-
-  ObIAllocator *allocator = expr_ctx.calc_buf_;
-  if (OB_ISNULL(allocator)) {
-    ret = OB_NOT_INIT;
-    LOG_WARN("allocator not init", K(ret));
-  } else {
-    if (arg.is_null() || arg.get_type() == ObNullType) {
-      is_null_result = true;
-    } else if (OB_FAIL(ObJsonExprHelper::get_json_doc(&arg, allocator, 0,
-                                                      json_doc, is_null_result))) {
-      LOG_WARN("get_json_doc failed", K(ret));
-    } else {
-      // do nothing
-    }
-  }
-
-  // set result
-  if (OB_FAIL(ret)) {
-    LOG_WARN("json_depth failed", K(ret));
-  } else if (is_null_result) {
-    result.set_null();
-  } else {
-    result.set_int32(json_doc->depth());
-  }
-
-  return ret;
-}
-
 int ObExprJsonDepth::eval_json_depth(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &res)
 {
   // get json doc
@@ -94,13 +58,15 @@ int ObExprJsonDepth::eval_json_depth(const ObExpr &expr, ObEvalCtx &ctx, ObDatum
   ObIJsonBase *json_doc = NULL;
   bool is_null_result = false;
 
-  common::ObArenaAllocator &temp_allocator = ctx.get_reset_tmp_alloc();
-  if (OB_FAIL(json_arg->eval(ctx, json_datum))) {
+  ObEvalCtx::TempAllocGuard tmp_alloc_g(ctx);
+  uint64_t tenant_id = ObMultiModeExprHelper::get_tenant_id(ctx.exec_ctx_.get_my_session());
+  MultimodeAlloctor temp_allocator(tmp_alloc_g.get_allocator(), expr.type_, tenant_id, ret);
+  if (OB_FAIL(temp_allocator.eval_arg(json_arg, ctx, json_datum))) {
     LOG_WARN("eval json arg failed", K(ret));
   } else if (val_type == ObNullType || json_datum->is_null()) {
     is_null_result = true;
   } else if (OB_FAIL(ObJsonExprHelper::get_json_doc(expr, ctx, temp_allocator, 0,
-                                                    json_doc, is_null_result))) {
+                                                    json_doc, is_null_result, false))) {
     LOG_WARN("get_json_doc failed", K(ret));
   } else {
     // do nothing

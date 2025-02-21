@@ -11,11 +11,12 @@
  */
 
 #include "ob_rpc_share.h"
+#include "deps/oblib/src/rpc/obrpc/ob_rpc_proxy.h"
 
 namespace oceanbase {
 namespace share {
 
-rpc::frame::ObReqTransport* g_obrpc_transport = nullptr;
+rpc::frame::ObReqTransport *g_obrpc_transport = nullptr;
 
-}  // namespace share
-}  // namespace oceanbase
+}  // share
+}  // oceanbase

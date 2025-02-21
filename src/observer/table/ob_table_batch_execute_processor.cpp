@@ -12,14 +12,8 @@
 
 #define USING_LOG_PREFIX SERVER
 #include "ob_table_batch_execute_processor.h"
-#include "ob_table_rpc_processor_util.h"
-#include "observer/ob_service.h"
-#include "storage/ob_partition_service.h"
-#include "ob_table_end_trans_cb.h"
-#include "sql/optimizer/ob_table_location.h"  // ObTableLocation
-#include "lib/stat/ob_diagnose_info.h"
-#include "lib/stat/ob_session_stat.h"
-#include "ob_htable_utils.h"
+#include "ob_table_move_response.h"
+
 using namespace oceanbase::observer;
 using namespace oceanbase::common;
 using namespace oceanbase::table;
@@ -27,10 +21,10 @@ using namespace oceanbase::share;
 using namespace oceanbase::sql;
 
 ObTableBatchExecuteP::ObTableBatchExecuteP(const ObGlobalContext &gctx)
-    :ObTableRpcProcessor(gctx),
-     allocator_(ObModIds::TABLE_PROC),
-     table_service_ctx_(allocator_),
-     need_rollback_trans_(false)
+    : ObTableRpcProcessor(gctx),
+      default_entity_factory_("TableBatchEntFac", MTL_ID()),
+      allocator_("TbBatExeP", OB_MALLOC_NORMAL_BLOCK_SIZE, MTL_ID()),
+      batch_ctx_(allocator_, audit_ctx_)
 {
 }
 
@@ -47,55 +41,68 @@ int ObTableBatchExecuteP::deserialize()
     {
       ObITableEntity *entity = nullptr;
       if (OB_FAIL(const_cast<ObTableOperation&>(arg_.batch_operation_.at(i)).get_entity(entity))) {
-        LOG_WARN("failed to get entity", K(ret), K(i));
+        LOG_WARN("fail to get entity", K(ret), K(i));
       } else if (OB_FAIL(ObTableRpcProcessorUtil::negate_htable_timestamp(*entity))) {
-        LOG_WARN("failed to negate timestamp value", K(ret));
+        LOG_WARN("fail to negate timestamp value", K(ret));
       }
     } // end for
   }
   return ret;
 }
 
+int ObTableBatchExecuteP::init_batch_ctx()
+{
+  int ret = OB_SUCCESS;
+
+  if (OB_FAIL(batch_ctx_.tablet_ids_.push_back(arg_.tablet_id_))) {
+    LOG_WARN("fail to push back tablet id", K(ret));
+  } else {
+    batch_ctx_.trans_param_ = &trans_param_;
+    batch_ctx_.is_atomic_ = arg_.batch_operation_as_atomic_;
+    batch_ctx_.is_readonly_ = arg_.batch_operation_.is_readonly();
+    batch_ctx_.is_same_type_ = arg_.batch_operation_.is_same_type();
+    batch_ctx_.is_same_properties_names_ = arg_.batch_operation_.is_same_properties_names();
+    batch_ctx_.use_put_ = arg_.use_put();
+    batch_ctx_.returning_affected_entity_ = arg_.returning_affected_entity();
+    batch_ctx_.returning_rowkey_ = arg_.returning_rowkey();
+    batch_ctx_.consistency_level_ = arg_.consistency_level_;
+    batch_ctx_.credential_ = &credential_;
+  }
+
+  return ret;
+}
+
+int ObTableBatchExecuteP::before_process()
+{
+  int ret = OB_SUCCESS;
+
+  if (OB_FAIL(ParentType::before_process())) {
+    LOG_WARN("before process failed", K(ret));
+  } else if (OB_FAIL(init_batch_ctx())) {
+    LOG_WARN("fail to init batch context", K(ret));
+  }
+
+  return ret;
+}
+
 int ObTableBatchExecuteP::check_arg()
 {
   int ret = OB_SUCCESS;
+  if (arg_.return_one_result()) {
+    if (arg_.returning_rowkey() || arg_.returning_affected_entity()) {
+      ret = OB_NOT_SUPPORTED;
+      LOG_USER_ERROR(OB_NOT_SUPPORTED, "can not return one result, when return rowkey or return affected entity");
+      LOG_WARN("can not return one result, when return rowkey or return affected entity.", K(ret));
+    }
+  }
   if (!(arg_.consistency_level_ == ObTableConsistencyLevel::STRONG ||
       arg_.consistency_level_ == ObTableConsistencyLevel::EVENTUAL)) {
     ret = OB_NOT_SUPPORTED;
+    LOG_USER_ERROR(OB_NOT_SUPPORTED, "invalid consistency level");
     LOG_WARN("some options not supported yet", K(ret),
              "consistency_level", arg_.consistency_level_);
   }
   return ret;
-}
-
-int ObTableBatchExecuteP::check_arg2() const
-{
-  int ret = OB_SUCCESS;
-  if (arg_.returning_rowkey_
-      || arg_.returning_affected_entity_) {
-    ret = OB_NOT_SUPPORTED;
-    LOG_WARN("some options not supported yet", K(ret),
-             "returning_rowkey", arg_.returning_rowkey_,
-             "returning_affected_entity", arg_.returning_affected_entity_);
-  }
-  return ret;
-}
-
-OB_INLINE bool is_errno_need_retry(int ret)
-{
-  return OB_TRY_LOCK_ROW_CONFLICT == ret
-      || OB_TRANSACTION_SET_VIOLATION == ret
-      || OB_SCHEMA_ERROR == ret;
-}
-
-void ObTableBatchExecuteP::audit_on_finish()
-{
-  audit_record_.consistency_level_ = ObTableConsistencyLevel::STRONG == arg_.consistency_level_ ?
-      ObConsistencyLevel::STRONG : ObConsistencyLevel::WEAK;
-  audit_record_.return_rows_ = arg_.returning_affected_rows_ ? result_.count() : 0;
-  audit_record_.table_scan_ = false;
-  audit_record_.affected_rows_ = result_.count();
-  audit_record_.try_cnt_ = retry_count_ + 1;
 }
 
 uint64_t ObTableBatchExecuteP::get_request_checksum()
@@ -105,7 +112,7 @@ uint64_t ObTableBatchExecuteP::get_request_checksum()
   const uint64_t op_checksum = arg_.batch_operation_.get_checksum();
   checksum = ob_crc64(checksum, &op_checksum, sizeof(op_checksum));
   checksum = ob_crc64(checksum, &arg_.consistency_level_, sizeof(arg_.consistency_level_));
-  checksum = ob_crc64(checksum, &arg_.returning_rowkey_, sizeof(arg_.returning_rowkey_));
+  checksum = ob_crc64(checksum, &arg_.option_flag_, sizeof(arg_.option_flag_));
   checksum = ob_crc64(checksum, &arg_.returning_affected_entity_, sizeof(arg_.returning_affected_entity_));
   checksum = ob_crc64(checksum, &arg_.returning_affected_rows_, sizeof(arg_.returning_affected_rows_));
   checksum = ob_crc64(checksum, &arg_.binlog_row_image_type_, sizeof(arg_.binlog_row_image_type_));
@@ -115,21 +122,35 @@ uint64_t ObTableBatchExecuteP::get_request_checksum()
 int ObTableBatchExecuteP::response(const int retcode)
 {
   int ret = OB_SUCCESS;
-  if (!need_retry_in_queue_ && !did_async_end_trans()) {
+  if (!need_retry_in_queue_ && !had_do_response()) {
     // For HKV table, modify the value of timetamp to be positive
-    if (OB_SUCC(ret) && ObTableEntityType::ET_HKV == arg_.entity_type_) {
+    if (ObTableEntityType::ET_HKV == arg_.entity_type_) {
       const int64_t N = result_.count();
       for (int64_t i = 0; OB_SUCCESS == ret && i < N; ++i)
       {
         ObITableEntity *entity = nullptr;
         if (OB_FAIL(result_.at(i).get_entity(entity))) {
-          LOG_WARN("failed to get entity", K(ret), K(i));
+          LOG_WARN("fail to get entity", K(ret), K(i));
         } else if (OB_FAIL(ObTableRpcProcessorUtil::negate_htable_timestamp(*entity))) {
-          LOG_WARN("failed to negate timestamp value", K(ret));
+          LOG_WARN("fail to negate timestamp value", K(ret));
         }
       } // end for
     }
-    if (OB_SUCC(ret)) {
+
+    // return the package even if negate_htable_timestamp fails
+    const obrpc::ObRpcPacket *rpc_pkt = &reinterpret_cast<const obrpc::ObRpcPacket&>(req_->get_packet());
+    if (ObTableRpcProcessorUtil::need_do_move_response(retcode, *rpc_pkt)) {
+      // response rerouting packet
+      ObTableMoveResponseSender sender(req_, retcode);
+      if (OB_FAIL(sender.init(arg_.table_id_, arg_.tablet_id_, *gctx_.schema_service_))) {
+        LOG_WARN("fail to init move response sender", K(ret), K_(arg));
+      } else if (OB_FAIL(sender.response())) {
+        LOG_WARN("fail to do move response", K(ret));
+      }
+      if (OB_FAIL(ret)) {
+        ret = ObRpcProcessor::response(retcode); // do common response when do move response failed
+      }
+    } else {
       ret = ObRpcProcessor::response(retcode);
     }
   }
@@ -138,575 +159,191 @@ int ObTableBatchExecuteP::response(const int retcode)
 
 void ObTableBatchExecuteP::reset_ctx()
 {
-  table_service_ctx_.reset_dml();
   need_retry_in_queue_ = false;
-  need_rollback_trans_ = false;
   result_.reset();
   ObTableApiProcessorBase::reset_ctx();
+  batch_ctx_.tb_ctx_.reset();
+  result_entity_.reset();
 }
 
+int ObTableBatchExecuteP::start_trans()
+{
+  int ret = OB_SUCCESS;
+
+  if (batch_ctx_.is_readonly_ && batch_ctx_.is_same_properties_names_) { // multi get
+    if (OB_FAIL(trans_param_.init(batch_ctx_.consistency_level_,
+                                  batch_ctx_.tb_ctx_.get_ls_id(),
+                                  get_timeout_ts(),
+                                  batch_ctx_.tb_ctx_.need_dist_das()))) {
+      LOG_WARN("fail to init trans param", K(ret));
+    } else if (OB_FAIL(ObTableTransUtils::init_read_trans(trans_param_))) {
+      LOG_WARN("fail to init read trans", K(ret));
+    }
+  } else { // other batch operation
+    if (OB_FAIL(ObTableApiProcessorBase::start_trans(batch_ctx_.is_readonly_,
+                                                     batch_ctx_.consistency_level_,
+                                                     batch_ctx_.tb_ctx_.get_ls_id(),
+                                                     get_timeout_ts(),
+                                                     batch_ctx_.tb_ctx_.need_dist_das()))) {
+      LOG_WARN("fail to start trans", K(ret));
+    }
+  }
+
+  return ret;
+}
+
+int ObTableBatchExecuteP::end_trans(bool is_rollback)
+{
+  int ret = OB_SUCCESS;
+
+  if (batch_ctx_.is_readonly_ && batch_ctx_.is_same_properties_names_) { // multi get
+    ObTableTransUtils::release_read_trans(trans_param_.trans_desc_);
+  } else { // other batch operation
+    ObTableBatchExecuteCreateCbFunctor functor;
+    if (OB_FAIL(functor.init(req_, &result_, arg_.batch_operation_.at(0).type()))) {
+      LOG_WARN("fail to init create batch execute callback functor", K(ret));
+    } else if (OB_FAIL(ObTableApiProcessorBase::end_trans(is_rollback, req_, &functor))) {
+      LOG_WARN("fail to end trans", K(ret), K(is_rollback));
+    }
+  }
+
+  return ret;
+}
 
 int ObTableBatchExecuteP::try_process()
 {
   int ret = OB_SUCCESS;
-  const ObTableBatchOperation &batch_operation = arg_.batch_operation_;
-  uint64_t table_id = arg_.table_id_;
-  bool is_index_supported = true;
-  if (batch_operation.count() <= 0) {
-    ret = OB_INVALID_ARGUMENT;
-    LOG_WARN("no operation in the batch", K(ret));
-  } else if (OB_FAIL(check_table_index_supported(table_id, is_index_supported))) {
-    LOG_WARN("fail to check index supported", K(ret), K(table_id));
-  } else if (OB_UNLIKELY(!is_index_supported)) {
-    ret = OB_NOT_SUPPORTED;
-    LOG_WARN("index type is not supported by table api", K(ret));
-  } else {
-    if (batch_operation.is_readonly()) {
-      if (batch_operation.is_same_properties_names()) {
-        stat_event_type_ = ObTableProccessType::TABLE_API_MULTI_GET;
-        ret = multi_get();
-      } else {
-        stat_event_type_ = ObTableProccessType::TABLE_API_BATCH_RETRIVE;
-        ret = batch_execute(true);
-      }
-    } else if (batch_operation.is_same_type()) {
-      switch(batch_operation.at(0).type()) {
-        case ObTableOperationType::INSERT:
-          stat_event_type_ = ObTableProccessType::TABLE_API_MULTI_INSERT;
-          ret = multi_insert();
-          break;
-        case ObTableOperationType::DEL:
-          if (ObTableEntityType::ET_HKV == arg_.entity_type_) {
-            stat_event_type_ = ObTableProccessType::TABLE_API_HBASE_DELETE;
-            ret = htable_delete();
-          } else {
-            stat_event_type_ = ObTableProccessType::TABLE_API_MULTI_DELETE;
-            ret = multi_delete();
-          }
-          break;
-        case ObTableOperationType::UPDATE:
-          stat_event_type_ = ObTableProccessType::TABLE_API_MULTI_UPDATE;
-          ret = multi_update();
-          break;
-        case ObTableOperationType::INSERT_OR_UPDATE:
-          if (ObTableEntityType::ET_HKV == arg_.entity_type_) {
-            stat_event_type_ = ObTableProccessType::TABLE_API_HBASE_PUT;
-            ret = htable_put();
-          } else {
-            stat_event_type_ = ObTableProccessType::TABLE_API_MULTI_INSERT_OR_UPDATE;
-            ret = multi_insert_or_update();
-          }
-          break;
-        case ObTableOperationType::REPLACE:
-          stat_event_type_ = ObTableProccessType::TABLE_API_MULTI_REPLACE;
-          ret = multi_replace();
-          break;
-        case ObTableOperationType::APPEND:
-          stat_event_type_ = ObTableProccessType::TABLE_API_MULTI_APPEND;
-          ret = batch_execute(false);
-          break;
-        case ObTableOperationType::INCREMENT:
-          stat_event_type_ = ObTableProccessType::TABLE_API_MULTI_INCREMENT;
-          ret = batch_execute(false);
-          break;
-        default:
-          ret = OB_ERR_UNEXPECTED;
-          LOG_ERROR("unexpected operation type", "type", batch_operation.at(0).type(), K(stat_event_type_));
-          break;
-      }
-    } else {
-      if (ObTableEntityType::ET_HKV == arg_.entity_type_) {
-        // HTable mutate_row(RowMutations)
-        stat_event_type_ = ObTableProccessType::TABLE_API_HBASE_HYBRID;
-        ret = htable_mutate_row();
-      } else {
-        // complex batch hybrid operation
-        stat_event_type_ = ObTableProccessType::TABLE_API_BATCH_HYBRID;
-        ret = batch_execute(false);
-      }
-    }
+  table_id_ = arg_.table_id_; // init move response need
+  const common::ObIArray<ObTableOperation> &ops = arg_.batch_operation_.get_table_operations();
+  stat_process_type_ = get_stat_process_type(arg_.batch_operation_.is_readonly(),
+                                             arg_.batch_operation_.is_same_type(),
+                                             arg_.batch_operation_.is_same_properties_names(),
+                                             ops.at(0).type());
+
+  if (OB_FAIL(init_schema_info(arg_.table_name_, table_id_))) {
+    LOG_WARN("fail to init schema info", K(ret), K(arg_.table_name_));
+  } else if (OB_FAIL(init_single_op_tb_ctx(batch_ctx_.tb_ctx_, ops.at(0)))) {
+    LOG_WARN("fail to init table ctx", K(ret));
+  } else if (OB_FAIL(start_trans())) {
+    LOG_WARN("fail to start trans", K(ret));
+  } else if (OB_FAIL(batch_ctx_.tb_ctx_.init_trans(get_trans_desc(), get_tx_snapshot()))) {
+    LOG_WARN("fail to init trans", K(ret));
+  } else if (OB_FAIL(ObTableBatchService::prepare_results(ops, default_entity_factory_, result_))) {
+    LOG_WARN("fail to prepare results", K(ret), K(ops));
+  } else if (OB_FAIL(ObTableBatchService::execute(batch_ctx_, ops, result_))) {
+    LOG_WARN("fail to execute batch operation", K(ret));
+  } else if (OB_FAIL(arg_.return_one_result()) && OB_FAIL(ObTableBatchService::aggregate_one_result(result_))) {
+    LOG_WARN("fail to aggregate one result", K(ret), K(result_));
   }
 
+  int tmp_ret = ret;
+  if (OB_FAIL(end_trans(OB_SUCCESS != ret))) {
+    LOG_WARN("fail to end trans", K(ret));
+  }
+  ret = (OB_SUCCESS == tmp_ret) ? ret : tmp_ret;
+
   // record events
-  audit_row_count_ = arg_.batch_operation_.count();
+  stat_row_count_ = arg_.batch_operation_.count();
 
 #ifndef NDEBUG
   // debug mode
-  LOG_INFO("[TABLE] execute batch operation", K(ret), K_(arg), K_(result), "timeout", rpc_pkt_->get_timeout(), K_(retry_count));
+  LOG_INFO("[TABLE] execute batch operation", K(ret), K_(result), K_(retry_count));
 #else
   // release mode
-  LOG_TRACE("[TABLE] execute batch operation", K(ret), K_(arg), K_(result), "timeout", rpc_pkt_->get_timeout(), K_(retry_count),
+  LOG_TRACE("[TABLE] execute batch operation", K(ret), K_(result), K_(retry_count),
             "receive_ts", get_receive_timestamp());
 #endif
   return ret;
 }
 
-ObTableAPITransCb *ObTableBatchExecuteP::new_callback(rpc::ObRequest *req)
-{
-  ObTableBatchExecuteEndTransCb *cb = OB_NEW(ObTableBatchExecuteEndTransCb, ObModIds::TABLE_PROC, req, arg_.batch_operation_.at(0).type());
-  if (NULL != cb) {
-    // @todo optimize to avoid this copy
-    int ret = OB_SUCCESS;
-    if (OB_FAIL(cb->assign_batch_execute_result(result_))) {
-      LOG_WARN("failed to assign result", K(ret));
-      cb->~ObTableBatchExecuteEndTransCb();
-      cb = NULL;
-    } else {
-      LOG_DEBUG("[yzfdebug] copy result", K_(result));
-    }
-  }
-  return cb;
-}
-
-int ObTableBatchExecuteP::get_rowkeys(ObIArray<ObRowkey> &rowkeys)
+int ObTableBatchExecuteP::init_single_op_tb_ctx(table::ObTableCtx &ctx,
+                                                const ObTableOperation &table_operation)
 {
   int ret = OB_SUCCESS;
-  const ObTableBatchOperation &batch_operation = arg_.batch_operation_;
-  const int64_t N = batch_operation.count();
-  for (int64_t i = 0; OB_SUCCESS == ret && i < N; ++i)
-  {
-    const ObTableOperation &table_op = batch_operation.at(i);
-    ObRowkey rowkey = const_cast<ObITableEntity&>(table_op.entity()).get_rowkey();
-    if (OB_FAIL(rowkeys.push_back(rowkey))) {
-      LOG_WARN("failed to push back", K(ret));
-    }
-  } // end for
-  return ret;
-}
+  ctx.set_entity(&table_operation.entity());
+  ctx.set_entity_type(arg_.entity_type_);
+  ctx.set_operation_type(table_operation.type());
+  ctx.set_schema_cache_guard(&schema_cache_guard_);
+  ctx.set_schema_guard(&schema_guard_);
+  ctx.set_simple_table_schema(simple_table_schema_);
+  ctx.set_sess_guard(&sess_guard_);
 
-int ObTableBatchExecuteP::get_partition_ids(uint64_t table_id, ObIArray<int64_t> &part_ids)
-{
-  int ret = OB_SUCCESS;
-  uint64_t partition_id = arg_.partition_id_;
-  if (OB_INVALID_ID == partition_id) {
-    ObSEArray<sql::RowkeyArray, 3> rowkeys_per_part;
-    ObSEArray<ObRowkey, 3> rowkeys;
-    if (OB_FAIL(get_rowkeys(rowkeys))) {
-      LOG_WARN("failed to get rowkeys", K(ret));
-    } else if (OB_FAIL(get_partition_by_rowkey(table_id, rowkeys, part_ids, rowkeys_per_part))) {
-      LOG_WARN("failed to get partition", K(ret), K(rowkeys));
-    }
+  if (ctx.is_init()) {
+    LOG_INFO("tb ctx has been inited", K(ctx));
+  } else if (OB_FAIL(ctx.init_common(credential_, arg_.tablet_id_, get_timeout_ts()))) {
+    LOG_WARN("fail to init table ctx common part", K(ret), K(arg_.table_name_));
   } else {
-    if (OB_FAIL(part_ids.push_back(partition_id))) {
-      LOG_WARN("failed to push back", K(ret));
-    }
-  }
-  return ret;
-}
-
-int ObTableBatchExecuteP::multi_insert_or_update()
-{
-  int ret = OB_SUCCESS;
-  const ObTableBatchOperation &batch_operation = arg_.batch_operation_;
-  const bool is_readonly = false;
-  uint64_t &table_id = table_service_ctx_.param_table_id();
-  table_service_ctx_.init_param(get_timeout_ts(), this->get_trans_desc(), &allocator_,
-                                arg_.returning_affected_rows_,
-                                arg_.entity_type_,
-                                arg_.binlog_row_image_type_);
-  ObSEArray<int64_t, 1> part_ids;
-  if (OB_FAIL(check_arg2())) {
-  } else if (OB_FAIL(get_table_id(arg_.table_name_, arg_.table_id_, table_id))) {
-    LOG_WARN("failed to get table id", K(ret));
-  } else if (OB_FAIL(get_partition_ids(table_id, part_ids))) {
-    LOG_WARN("failed to get part id", K(ret));
-  } else if (1 != part_ids.count()) {
-    ret = OB_NOT_SUPPORTED;
-    LOG_WARN("should have one partition", K(ret), K(part_ids));
-  } else if (FALSE_IT(table_service_ctx_.param_partition_id() = part_ids.at(0))) {
-  } else if (OB_FAIL(start_trans(is_readonly, sql::stmt::T_INSERT, table_id, part_ids, get_timeout_ts()))) {
-    LOG_WARN("failed to start transaction", K(ret));
-  } else if (OB_FAIL(table_service_->multi_insert_or_update(table_service_ctx_, batch_operation, result_))) {
-    if (OB_TRY_LOCK_ROW_CONFLICT != ret) {
-      LOG_WARN("failed to insert_or_update", K(ret), K(table_id));
-    }
-  }
-  int tmp_ret = ret;
-  if (OB_FAIL(end_trans(OB_SUCCESS != ret, req_, get_timeout_ts()))) {
-    LOG_WARN("failed to end trans");
-  }
-  ret = (OB_SUCCESS == tmp_ret) ? ret : tmp_ret;
-  return ret;
-}
-
-int ObTableBatchExecuteP::htable_put()
-{
-  int ret = OB_SUCCESS;
-  const ObTableBatchOperation &batch_operation = arg_.batch_operation_;
-  const bool is_readonly = false;
-  uint64_t table_id = OB_INVALID_ID;
-  ObSEArray<int64_t, 1> part_ids;
-
-  if (OB_FAIL(check_arg2())) {
-  } else if (OB_FAIL(get_table_id(arg_.table_name_, arg_.table_id_, table_id))) {
-    LOG_WARN("failed to get table id", K(ret));
-  } else if (OB_FAIL(get_partition_ids(table_id, part_ids))) {
-    LOG_WARN("failed to get part id", K(ret));
-  } else if (1 != part_ids.count()) {
-    ret = OB_NOT_SUPPORTED;
-    LOG_WARN("should have one partition", K(ret), K(part_ids));
-  } else if (OB_FAIL(start_trans(is_readonly, sql::stmt::T_INSERT, table_id, part_ids, get_timeout_ts()))) {
-    LOG_WARN("failed to start transaction", K(ret));
-  } else {
-    int64_t affected_rows = 0;
-    ObHTablePutExecutor put_executor(allocator_,
-                                     table_id,
-                                     part_ids.at(0),
-                                     get_timeout_ts(),
-                                     this,
-                                     table_service_,
-                                     part_service_);
-    ret = put_executor.htable_put(batch_operation, affected_rows);
-    if (OB_SUCC(ret)) {
-      ObTableOperationResult single_op_result;
-      single_op_result.set_entity(result_entity_);
-      single_op_result.set_type(ObTableOperationType::INSERT_OR_UPDATE);
-      single_op_result.set_errno(ret);
-      single_op_result.set_affected_rows(affected_rows);
-      result_.reset();
-      if (OB_FAIL(result_.push_back(single_op_result))) {
-        LOG_WARN("failed to add result", K(ret));
-      }
-    }
-  }
-  
-  int tmp_ret = ret;
-  if (OB_FAIL(end_trans(OB_SUCCESS != ret, req_, get_timeout_ts()))) {
-    LOG_WARN("failed to end trans");
-  }
-  ret = (OB_SUCCESS == tmp_ret) ? ret : tmp_ret;
-  return ret;
-}
-
-int ObTableBatchExecuteP::multi_get()
-{
-  int ret = OB_SUCCESS;
-  need_rollback_trans_ = false;
-  uint64_t &table_id = table_service_ctx_.param_table_id();
-  table_service_ctx_.init_param(get_timeout_ts(), this->get_trans_desc(), &allocator_,
-                                arg_.returning_affected_rows_,
-                                arg_.entity_type_,
-                                arg_.binlog_row_image_type_);
-  ObSEArray<int64_t, 1> part_ids;
-  const bool is_readonly = true;
-  const ObTableConsistencyLevel consistency_level = arg_.consistency_level_;
-  if (OB_FAIL(check_arg2())) {
-  } else if (OB_FAIL(get_table_id(arg_.table_name_, arg_.table_id_, table_id))) {
-    LOG_WARN("failed to get table id", K(ret));
-  } else if (OB_FAIL(get_partition_ids(table_id, part_ids))) {
-    LOG_WARN("failed to get part id", K(ret));
-  } else if (1 != part_ids.count()) {
-    ret = OB_NOT_SUPPORTED;
-    LOG_WARN("should have one partition", K(ret), K(part_ids));
-  } else if (FALSE_IT(table_service_ctx_.param_partition_id() = part_ids.at(0))) {
-  } else if (OB_FAIL(start_trans(is_readonly, sql::stmt::T_SELECT, consistency_level, table_id, part_ids, get_timeout_ts()))) {
-    LOG_WARN("failed to start readonly transaction", K(ret));
-  } else if (OB_FAIL(table_service_->multi_get(table_service_ctx_, arg_.batch_operation_, result_))) {
-    if (OB_TRY_LOCK_ROW_CONFLICT != ret) {
-      LOG_WARN("failed to execute get", K(ret), K(table_id));
-    }
-  } else {}
-  need_rollback_trans_ = (OB_SUCCESS != ret);
-  int tmp_ret = ret;
-  if (OB_FAIL(end_trans(need_rollback_trans_, req_, get_timeout_ts()))) {
-    LOG_WARN("failed to end trans", K(ret), "rollback", need_rollback_trans_);
-  }
-  ret = (OB_SUCCESS == tmp_ret) ? ret : tmp_ret;
-  return ret;
-}
-
-int ObTableBatchExecuteP::multi_delete()
-{
-  int ret = OB_SUCCESS;
-  const ObTableBatchOperation &batch_operation = arg_.batch_operation_;
-  const bool is_readonly = false;
-  uint64_t &table_id = table_service_ctx_.param_table_id();
-  table_service_ctx_.init_param(get_timeout_ts(), this->get_trans_desc(), &allocator_,
-                                arg_.returning_affected_rows_,
-                                arg_.entity_type_,
-                                arg_.binlog_row_image_type_);
-  ObSEArray<int64_t, 1> part_ids;
-  if (OB_FAIL(check_arg2())) {
-  } else if (OB_FAIL(get_table_id(arg_.table_name_, arg_.table_id_, table_id))) {
-    LOG_WARN("failed to get table id", K(ret));
-  } else if (OB_FAIL(get_partition_ids(table_id, part_ids))) {
-    LOG_WARN("failed to get part id", K(ret));
-  } else if (1 != part_ids.count()) {
-    ret = OB_NOT_SUPPORTED;
-    LOG_WARN("should have one partition", K(ret), K(part_ids));
-  } else if (FALSE_IT(table_service_ctx_.param_partition_id() = part_ids.at(0))) {
-  } else if (OB_FAIL(start_trans(is_readonly, sql::stmt::T_DELETE, table_id, part_ids, get_timeout_ts()))) {
-    LOG_WARN("failed to start transaction", K(ret));
-  } else if (OB_FAIL(table_service_->multi_delete(table_service_ctx_, batch_operation, result_))) {
-    if (OB_TRY_LOCK_ROW_CONFLICT != ret) {
-      LOG_WARN("failed to multi_delete", K(ret), K(table_id));
-    }
-  }
-  int tmp_ret = ret;
-  if (OB_FAIL(end_trans(OB_SUCCESS != ret, req_, get_timeout_ts()))) {
-    LOG_WARN("failed to end trans");
-  }
-  ret = (OB_SUCCESS == tmp_ret) ? ret : tmp_ret;
-  return ret;
-}
-
-int ObTableBatchExecuteP::htable_delete()
-{
-  int ret = OB_SUCCESS;
-  const ObTableBatchOperation &batch_operation = arg_.batch_operation_;
-  const bool is_readonly = false;
-  uint64_t table_id = OB_INVALID_ID;
-  ObSEArray<int64_t, 1> part_ids;
-
-  if (OB_FAIL(check_arg2())) {
-  } else if (OB_FAIL(get_table_id(arg_.table_name_, arg_.table_id_, table_id))) {
-    LOG_WARN("failed to get table id", K(ret));
-  } else if (OB_FAIL(get_partition_ids(table_id, part_ids))) {
-    LOG_WARN("failed to get part id", K(ret));
-  } else if (1 != part_ids.count()) {
-    ret = OB_NOT_SUPPORTED;
-    LOG_WARN("should have one partition", K(ret), K(part_ids));
-  } else if (OB_FAIL(start_trans(is_readonly, sql::stmt::T_DELETE, table_id, part_ids, get_timeout_ts()))) {
-    LOG_WARN("failed to start transaction", K(ret));
-  } else {
-    int64_t affected_rows = 0;
-    ObHTableDeleteExecutor delete_executor(allocator_,
-                                           table_id,
-                                           part_ids.at(0),
-                                           get_timeout_ts(),
-                                           this,
-                                           table_service_,
-                                           part_service_);
-    ret = delete_executor.htable_delete(batch_operation, affected_rows);
-    if (OB_SUCC(ret)) {
-      ObTableOperationResult single_op_result;
-      single_op_result.set_entity(result_entity_);
-      single_op_result.set_type(ObTableOperationType::DEL);
-      single_op_result.set_errno(ret);
-      single_op_result.set_affected_rows(affected_rows);
-      result_.reset();
-      if (OB_FAIL(result_.push_back(single_op_result))) {
-        LOG_WARN("failed to add result", K(ret));
-      }
-    }
-  }
-  int tmp_ret = ret;
-  if (OB_FAIL(end_trans(OB_SUCCESS != ret, req_, get_timeout_ts()))) {
-    LOG_WARN("failed to end trans");
-  }
-  ret = (OB_SUCCESS == tmp_ret) ? ret : tmp_ret;
-  return ret;
-}
-
-int ObTableBatchExecuteP::multi_insert()
-{
-  int ret = OB_SUCCESS;
-  const ObTableBatchOperation &batch_operation = arg_.batch_operation_;
-  const bool is_readonly = false;
-  uint64_t &table_id = table_service_ctx_.param_table_id();
-  table_service_ctx_.init_param(get_timeout_ts(), this->get_trans_desc(), &allocator_,
-                                arg_.returning_affected_rows_,
-                                arg_.entity_type_,
-                                arg_.binlog_row_image_type_);
-  ObSEArray<int64_t, 1> part_ids;
-  if (OB_FAIL(check_arg2())) {
-  } else if (OB_FAIL(get_table_id(arg_.table_name_, arg_.table_id_, table_id))) {
-    LOG_WARN("failed to get table id", K(ret));
-  } else if (OB_FAIL(get_partition_ids(table_id, part_ids))) {
-    LOG_WARN("failed to get part id", K(ret));
-  } else if (1 != part_ids.count()) {
-    ret = OB_NOT_SUPPORTED;
-    LOG_WARN("should have one partition", K(ret), K(part_ids));
-  } else if (FALSE_IT(table_service_ctx_.param_partition_id() = part_ids.at(0))) {
-  } else if (OB_FAIL(start_trans(is_readonly, sql::stmt::T_INSERT, table_id, part_ids, get_timeout_ts()))) {
-    LOG_WARN("failed to start transaction", K(ret));
-  } else if (OB_FAIL(table_service_->multi_insert(table_service_ctx_, batch_operation, result_))) {
-    if (OB_TRY_LOCK_ROW_CONFLICT != ret) {
-      LOG_WARN("failed to multi_insert", K(ret), K(table_id));
-    }
-  }
-  int tmp_ret = ret;
-  if (OB_FAIL(end_trans(OB_SUCCESS != ret, req_, get_timeout_ts()))) {
-    LOG_WARN("failed to end trans");
-  }
-  ret = (OB_SUCCESS == tmp_ret) ? ret : tmp_ret;
-  return ret;
-}
-
-int ObTableBatchExecuteP::multi_replace()
-{
-  int ret = OB_SUCCESS;
-  const ObTableBatchOperation &batch_operation = arg_.batch_operation_;
-  const bool is_readonly = false;
-  uint64_t &table_id = table_service_ctx_.param_table_id();
-  table_service_ctx_.init_param(get_timeout_ts(), this->get_trans_desc(), &allocator_,
-                                arg_.returning_affected_rows_,
-                                arg_.entity_type_,
-                                arg_.binlog_row_image_type_);
-  ObSEArray<int64_t, 1> part_ids;
-  if (OB_FAIL(check_arg2())) {
-  } else if (OB_FAIL(get_table_id(arg_.table_name_, arg_.table_id_, table_id))) {
-    LOG_WARN("failed to get table id", K(ret));
-  } else if (OB_FAIL(get_partition_ids(table_id, part_ids))) {
-    LOG_WARN("failed to get part id", K(ret));
-  } else if (1 != part_ids.count()) {
-    ret = OB_NOT_SUPPORTED;
-    LOG_WARN("should have one partition", K(ret), K(part_ids));
-  } else if (FALSE_IT(table_service_ctx_.param_partition_id() = part_ids.at(0))) {
-  } else if (OB_FAIL(start_trans(is_readonly, sql::stmt::T_REPLACE, table_id, part_ids, get_timeout_ts()))) {
-    LOG_WARN("failed to start transaction", K(ret));
-  } else if (OB_FAIL(table_service_->multi_replace(table_service_ctx_, batch_operation, result_))) {
-    if (OB_TRY_LOCK_ROW_CONFLICT != ret) {
-      LOG_WARN("failed to multi_replace", K(ret), K(table_id));
-    }
-  }
-  int tmp_ret = ret;
-  if (OB_FAIL(end_trans(OB_SUCCESS != ret, req_, get_timeout_ts()))) {
-    LOG_WARN("failed to end trans");
-  }
-  ret = (OB_SUCCESS == tmp_ret) ? ret : tmp_ret;
-  return ret;
-}
-
-int ObTableBatchExecuteP::multi_update()
-{
-  int ret = OB_SUCCESS;
-  const ObTableBatchOperation &batch_operation = arg_.batch_operation_;
-  const bool is_readonly = false;
-  uint64_t &table_id = table_service_ctx_.param_table_id();
-  table_service_ctx_.init_param(get_timeout_ts(), this->get_trans_desc(), &allocator_,
-                                arg_.returning_affected_rows_,
-                                arg_.entity_type_,
-                                arg_.binlog_row_image_type_/*important*/);
-  ObSEArray<int64_t, 1> part_ids;
-  if (OB_FAIL(check_arg2())) {
-  } else if (OB_FAIL(get_table_id(arg_.table_name_, arg_.table_id_, table_id))) {
-    LOG_WARN("failed to get table id", K(ret));
-  } else if (OB_FAIL(get_partition_ids(table_id, part_ids))) {
-    LOG_WARN("failed to get part id", K(ret));
-  } else if (1 != part_ids.count()) {
-    ret = OB_NOT_SUPPORTED;
-    LOG_WARN("should have one partition", K(ret), K(part_ids));
-  } else if (FALSE_IT(table_service_ctx_.param_partition_id() = part_ids.at(0))) {
-  } else if (OB_FAIL(start_trans(is_readonly, sql::stmt::T_UPDATE, table_id, part_ids, get_timeout_ts()))) {
-    LOG_WARN("failed to start transaction", K(ret));
-  } else if (OB_FAIL(table_service_->multi_update(table_service_ctx_, batch_operation, result_))) {
-    if (OB_TRY_LOCK_ROW_CONFLICT != ret) {
-      LOG_WARN("failed to multi_update", K(ret), K(table_id));
-    }
-  }
-  int tmp_ret = ret;
-  if (OB_FAIL(end_trans(OB_SUCCESS != ret, req_, get_timeout_ts()))) {
-    LOG_WARN("failed to end trans");
-  }
-  ret = (OB_SUCCESS == tmp_ret) ? ret : tmp_ret;
-  return ret;
-}
-
-int ObTableBatchExecuteP::batch_execute(bool is_readonly)
-{
-  int ret = OB_SUCCESS;
-  const ObTableBatchOperation &batch_operation = arg_.batch_operation_;
-  uint64_t &table_id = table_service_ctx_.param_table_id();
-  table_service_ctx_.init_param(get_timeout_ts(), this->get_trans_desc(), &allocator_,
-                                arg_.returning_affected_rows_,
-                                arg_.entity_type_,
-                                arg_.binlog_row_image_type_,
-                                arg_.returning_affected_entity_,
-                                arg_.returning_rowkey_);
-  ObSEArray<int64_t, 1> part_ids;
-  const ObTableConsistencyLevel consistency_level = arg_.consistency_level_;
-  if (OB_FAIL(get_table_id(arg_.table_name_, arg_.table_id_, table_id))) {
-    LOG_WARN("failed to get table id", K(ret));
-  } else if (OB_FAIL(get_partition_ids(table_id, part_ids))) {
-    LOG_WARN("failed to get part id", K(ret));
-  } else if (1 != part_ids.count()) {
-    ret = OB_NOT_SUPPORTED;
-    LOG_WARN("should have one partition", K(ret), K(part_ids));
-  } else if (FALSE_IT(table_service_ctx_.param_partition_id() = part_ids.at(0))) {
-  } else if (OB_FAIL(start_trans(is_readonly, (is_readonly ? sql::stmt::T_SELECT : sql::stmt::T_UPDATE),
-                                 consistency_level, table_id, part_ids, get_timeout_ts()))) {
-    LOG_WARN("failed to start transaction", K(ret));
-  } else if (OB_FAIL(table_service_->batch_execute(table_service_ctx_, batch_operation, result_))) {
-    if (OB_TRY_LOCK_ROW_CONFLICT != ret) {
-      LOG_WARN("failed to execute batch", K(ret), K(table_id));
-    }
-  }
-  int tmp_ret = ret;
-  if (OB_FAIL(end_trans(OB_SUCCESS != ret, req_, get_timeout_ts()))) {
-    LOG_WARN("failed to end trans");
-  }
-  ret = (OB_SUCCESS == tmp_ret) ? ret : tmp_ret;
-  return ret;
-}
-
-int ObTableBatchExecuteP::htable_mutate_row()
-{
-  int ret = OB_SUCCESS;
-  const ObTableBatchOperation &batch_operation = arg_.batch_operation_;
-  const bool is_readonly = false;
-  uint64_t table_id = OB_INVALID_ID;
-  ObSEArray<int64_t, 1> part_ids;
-  int64_t now_ms = -ObHTableUtils::current_time_millis();
-  if (OB_FAIL(check_arg2())) {
-  } else if (OB_FAIL(get_table_id(arg_.table_name_, arg_.table_id_, table_id))) {
-    LOG_WARN("failed to get table id", K(ret));
-  } else if (OB_FAIL(get_partition_ids(table_id, part_ids))) {
-    LOG_WARN("failed to get part id", K(ret));
-  } else if (1 != part_ids.count()) {
-    ret = OB_NOT_SUPPORTED;
-    LOG_WARN("should have one partition", K(ret), K(part_ids));
-  } else if (OB_FAIL(start_trans(is_readonly, sql::stmt::T_DELETE, table_id, part_ids, get_timeout_ts()))) {
-    LOG_WARN("failed to start transaction", K(ret));
-  } else {
-    int64_t N = batch_operation.count();
-    for (int64_t i = 0; OB_SUCCESS == ret && i < N; ++i)
-    {
-      // execute each mutation one by one
-      const ObTableOperation &table_operation = batch_operation.at(i);
-      ObTableBatchOperation batch_ops;
-      if (OB_FAIL(batch_ops.add(table_operation))) {
-        LOG_WARN("failed to add", K(ret));
+    ObTableOperationType::Type op_type = table_operation.type();
+    switch (op_type) {
+      case ObTableOperationType::GET: {
+        if (OB_FAIL(ctx.init_get())) {
+          LOG_WARN("fail to init get ctx", K(ret), K(ctx));
+        }
         break;
       }
-      switch(table_operation.type()) {
-        case ObTableOperationType::INSERT_OR_UPDATE:
-          {
-            int64_t affected_rows = 0;
-            ObHTablePutExecutor put_executor(allocator_,
-                                             table_id,
-                                             part_ids.at(0),
-                                             get_timeout_ts(),
-                                             this,
-                                             table_service_,
-                                             part_service_);
-            ret = put_executor.htable_put(batch_ops, affected_rows, now_ms);
-          }
-          break;
-        case ObTableOperationType::DEL:
-          {
-            int64_t affected_rows = 0;
-            ObHTableDeleteExecutor delete_executor(allocator_,
-                                                   table_id,
-                                                   part_ids.at(0),
-                                                   get_timeout_ts(),
-                                                   this,
-                                                   table_service_,
-                                                   part_service_);
-            ret = delete_executor.htable_delete(batch_ops, affected_rows);
-          }
-          break;
-        default:
-          ret = OB_NOT_SUPPORTED;
-          LOG_WARN("not supported mutation type", K(ret), K(table_operation));
-          break;
-      }  // end switch
-    }    // end for
+      case ObTableOperationType::PUT: {
+        if (OB_FAIL(ctx.init_put())) {
+          LOG_WARN("fail to init put ctx", K(ret), K(ctx));
+        }
+        break;
+      }
+      case ObTableOperationType::INSERT: {
+        if (OB_FAIL(ctx.init_insert())) {
+          LOG_WARN("fail to init insert ctx", K(ret), K(ctx));
+        }
+        break;
+      }
+      case ObTableOperationType::DEL: {
+        if (OB_FAIL(ctx.init_delete())) {
+          LOG_WARN("fail to init delete ctx", K(ret), K(ctx));
+        }
+        break;
+      }
+      case ObTableOperationType::UPDATE: {
+        if (OB_FAIL(ctx.init_update())) {
+          LOG_WARN("fail to init update ctx", K(ret), K(ctx));
+        }
+        break;
+      }
+      case ObTableOperationType::INSERT_OR_UPDATE: {
+        if (OB_FAIL(ctx.init_insert_up(arg_.use_put()))) {
+          LOG_WARN("fail to init insert up ctx", K(ret), K(ctx));
+        }
+        break;
+      }
+      case ObTableOperationType::REPLACE: {
+        if (OB_FAIL(ctx.init_replace())) {
+          LOG_WARN("fail to init replace ctx", K(ret), K(ctx));
+        }
+        break;
+      }
+      case ObTableOperationType::APPEND: {
+        if (OB_FAIL(ctx.init_append(arg_.returning_affected_entity(),
+                                    arg_.returning_rowkey()))) {
+          LOG_WARN("fail to init append ctx", K(ret), K(ctx));
+        }
+        break;
+      }
+      case ObTableOperationType::INCREMENT: {
+        if (OB_FAIL(ctx.init_increment(arg_.returning_affected_entity(),
+                                       arg_.returning_rowkey()))) {
+          LOG_WARN("fail to init increment ctx", K(ret), K(ctx));
+        }
+        break;
+      }
+      default: {
+        ret = OB_ERR_UNEXPECTED;
+        LOG_ERROR("unexpected operation type", "type", op_type);
+        break;
+      }
+    }
   }
-  int tmp_ret = ret;
-  if (OB_FAIL(end_trans(OB_SUCCESS != ret, req_, get_timeout_ts()))) {
-    LOG_WARN("failed to end trans");
+
+  if (OB_FAIL(ret)) {
+    // do nothing
+  } else if (OB_FAIL(ctx.init_exec_ctx())) {
+    LOG_WARN("fail to init exec ctx", K(ret), K(ctx));
   }
-  ret = (OB_SUCCESS == tmp_ret) ? ret : tmp_ret;
+
   return ret;
 }

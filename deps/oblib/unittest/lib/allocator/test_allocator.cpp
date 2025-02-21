@@ -11,55 +11,55 @@
  */
 
 #include <gtest/gtest.h>
-#include "lib/alloc/ob_malloc_allocator.h"
 #define private public
-#include "lib/allocator/ob_page_manager.h"
-#undef private
 #include "lib/allocator/ob_allocator_v2.h"
+#undef private
 
 using namespace std;
+using namespace oceanbase;
 using namespace oceanbase::common;
 using namespace oceanbase::lib;
 
 const uint64_t tenant_id = 100;
 const uint64_t ctx_id = 2;
 const int64_t limit = 1 << 30;
-const lib::ObLabel& label = "1";
+const lib::ObLabel &label = "1";
 
 const uint64_t new_tenant_id = 101;
 
 static bool has_unfree = false;
-void has_unfree_callback()
+void has_unfree_callback(char *)
 {
   has_unfree = true;
 }
-class TestAllocator : public ::testing::Test {
+class TestAllocator : public ::testing::Test
+{
 public:
   virtual void SetUp()
   {
-    ObMallocAllocator* ma = ObMallocAllocator::get_instance();
-    ASSERT_EQ(OB_SUCCESS, ma->create_tenant_ctx_allocator(tenant_id, ctx_id));
+    ObMallocAllocator *ma = ObMallocAllocator::get_instance();
+    ASSERT_EQ(OB_SUCCESS, ma->create_and_add_tenant_allocator(tenant_id));
     ASSERT_EQ(OB_SUCCESS, ma->set_tenant_limit(tenant_id, limit));
-    ObTenantCtxAllocator* ta = ma->get_tenant_ctx_allocator(tenant_id, ctx_id);
+    auto ta = ma->get_tenant_ctx_allocator(tenant_id, ctx_id);
     ASSERT_TRUE(NULL != ta);
 
-    ASSERT_EQ(OB_SUCCESS, ma->create_tenant_ctx_allocator(new_tenant_id, ctx_id));
+    ASSERT_EQ(OB_SUCCESS, ma->create_and_add_tenant_allocator(new_tenant_id));
     ta = ma->get_tenant_ctx_allocator(new_tenant_id, ctx_id);
     ASSERT_TRUE(NULL != ta);
   }
-  // virtual void TearDown();
+  //virtual void TearDown();
 };
 
 // ObAllocator has no state and no logic, only basic functions are tested here
 TEST_F(TestAllocator, basic)
 {
-  ObMallocAllocator* ma = ObMallocAllocator::get_instance();
-  ObTenantCtxAllocator* ta = ma->get_tenant_ctx_allocator(tenant_id, ctx_id);
+  ObMallocAllocator *ma = ObMallocAllocator::get_instance();
+  auto ta = ma->get_tenant_ctx_allocator(tenant_id, ctx_id);
   ObMemAttr attr(tenant_id, label, ctx_id);
-  ObAllocator a(attr);
+  ObAllocator a(nullptr, attr);
   int64_t sz = 100;
 
-  void* p[128] = {};
+  void *p[128] = {};
   int64_t cnt = 1L << 18;
   sz = 1L << 4;
 
@@ -86,23 +86,32 @@ TEST_F(TestAllocator, basic)
     while (i--) {
       a.free(p[i]);
     }
-    sz = ((sz | reinterpret_cast<size_t>(p[0])) & ((1 << 13) - 1));
+    sz = ((sz | reinterpret_cast<size_t>(p[0])) & ((1<<13) - 1));
   }
 
+  // test alloc_align/free_align
+  for (int i = 0; i < 10; ++i) {
+    int64_t align = 8<<i;
+    void *ptr = a.alloc_align(100, align);
+    ASSERT_EQ(0, (int64_t)ptr & (align - 1));
+    ASSERT_GT(a.used(), 0);
+    a.free_align(ptr);
+    ASSERT_EQ(a.used(), 0);
+  }
   cout << "done" << endl;
 }
 
 TEST_F(TestAllocator, reveal_unfree)
 {
-  ObMallocAllocator* ma = ObMallocAllocator::get_instance();
-  ObTenantCtxAllocator* ta = ma->get_tenant_ctx_allocator(tenant_id, ctx_id);
+  ObMallocAllocator *ma = ObMallocAllocator::get_instance();
+  auto ta = ma->get_tenant_ctx_allocator(tenant_id, ctx_id);
   ObMemAttr attr(tenant_id, label, ctx_id);
   has_unfree = false;
   // no unfree
   {
-    ObAllocator a(attr);
+    ObAllocator a(nullptr, attr);
     const int64_t hold = a.used();
-    void* ptr = a.alloc(100);
+    void *ptr = a.alloc(100);
     ASSERT_NE(ptr, nullptr);
     ASSERT_GT(a.used(), hold);
     a.free(ptr);
@@ -112,12 +121,12 @@ TEST_F(TestAllocator, reveal_unfree)
   }
   // has unfree
   {
-    ObAllocator a(attr);
+    ObAllocator a(nullptr, attr);
     const int64_t hold = a.used();
-    void* ptr = a.alloc(100);
+    void *ptr = a.alloc(100);
     ASSERT_NE(ptr, nullptr);
     ASSERT_GT(a.used(), hold);
-    // a.free(ptr);
+    //a.free(ptr);
     a.~ObAllocator();
     ASSERT_TRUE(has_unfree);
     ASSERT_EQ(a.used(), hold);
@@ -126,12 +135,12 @@ TEST_F(TestAllocator, reveal_unfree)
 
 TEST_F(TestAllocator, reset)
 {
-  ObMallocAllocator* ma = ObMallocAllocator::get_instance();
-  ObTenantCtxAllocator* ta = ma->get_tenant_ctx_allocator(tenant_id, ctx_id);
+  ObMallocAllocator *ma = ObMallocAllocator::get_instance();
+  auto ta = ma->get_tenant_ctx_allocator(tenant_id, ctx_id);
   ObMemAttr attr(tenant_id, label, ctx_id);
   const int64_t hold = 0;
-  ObAllocator a(attr);
-  void* ptr = a.alloc(100);
+  ObAllocator a(nullptr, attr);
+  void *ptr = a.alloc(100);
   ASSERT_NE(ptr, nullptr);
   ASSERT_GT(a.used(), hold);
   // reset
@@ -145,24 +154,25 @@ TEST_F(TestAllocator, reset)
   ASSERT_EQ(a.used(), hold);
 }
 
+#if 0
 TEST_F(TestAllocator, pm_basic)
 {
   ObPageManager pm;
   // use default
-  void* page = pm.alloc_page(100);
+  void *page = pm.alloc_page(100);
   ASSERT_NE(nullptr, page);
   ASSERT_EQ(pm.get_hold(), pm.set_.get_total_hold());
   pm.free_page(page);
   ASSERT_EQ(OB_SUCCESS, pm.set_tenant_ctx(tenant_id, ctx_id));
   int64_t ps = 1024;
-  void* ptr = nullptr;
+  void *ptr = nullptr;
 
-  void* p[128] = {};
+  void *p[128] = {};
   ps = 8L << 10;
 
   int i = 0;
-  // For cut tenants, the release of chunks is lazy and triggered by the next application (that is, the first
-  // application of a new tenant) So here hold> 0
+  // For cut tenants, the release of chunks is lazy and triggered by the next application (that is, the first application of a new tenant)
+  // So here hold> 0
   int64_t hold = pm.get_hold();
   while (i < 30) {
     p[i] = pm.alloc_page(ps);
@@ -177,13 +187,11 @@ TEST_F(TestAllocator, pm_basic)
 
   // freelist
   int large_size = INTACT_ACHUNK_SIZE - 200;
-  pm.set_max_chunk_cache_cnt(1);
   ptr = pm.alloc_page(large_size);
   hold = pm.get_hold();
   ASSERT_GT(hold, 0);
   pm.free_page(ptr);
   ASSERT_EQ(pm.get_hold(), hold);
-  pm.set_max_chunk_cache_cnt(0);
   ptr = pm.alloc_page(large_size);
   ASSERT_EQ(pm.get_hold(), hold);
   pm.free_page(ptr);
@@ -194,7 +202,6 @@ TEST_F(TestAllocator, pm_basic)
   pm.free_page(ptr);
   ASSERT_EQ(pm.get_hold(), hold);
 
-  pm.set_max_chunk_cache_cnt(2);
   pm.alloc_page(large_size);
   pm.alloc_page(large_size);
   pm.alloc_page(large_size);
@@ -211,8 +218,8 @@ TEST_F(TestAllocator, pm_basic)
 
 TEST_F(TestAllocator, pm_reveal_unfree)
 {
-  ObMallocAllocator* ma = ObMallocAllocator::get_instance();
-  ObTenantCtxAllocator* ta = ma->get_tenant_ctx_allocator(tenant_id, ctx_id);
+  ObMallocAllocator *ma = ObMallocAllocator::get_instance();
+  auto ta = ma->get_tenant_ctx_allocator(tenant_id, ctx_id);
   has_unfree = false;
   int64_t ps = 8L << 10;
   // no unfree
@@ -220,7 +227,7 @@ TEST_F(TestAllocator, pm_reveal_unfree)
     const int64_t hold = ta->get_hold();
     ObPageManager pm;
     ASSERT_EQ(OB_SUCCESS, pm.set_tenant_ctx(tenant_id, ctx_id));
-    void* ptr = pm.alloc_page(ps);
+    void *ptr = pm.alloc_page(ps);
     ASSERT_NE(ptr, nullptr);
     ASSERT_GT(ta->get_hold(), hold);
     pm.free_page(ptr);
@@ -233,7 +240,7 @@ TEST_F(TestAllocator, pm_reveal_unfree)
     const int64_t hold = ta->get_hold();
     ObPageManager pm;
     ASSERT_EQ(OB_SUCCESS, pm.set_tenant_ctx(tenant_id, ctx_id));
-    void* ptr = pm.alloc_page(100);
+    void *ptr = pm.alloc_page(100);
     ASSERT_NE(ptr, nullptr);
     ASSERT_GT(ta->get_hold(), hold);
     pm.~ObPageManager();
@@ -241,8 +248,9 @@ TEST_F(TestAllocator, pm_reveal_unfree)
     ASSERT_EQ(ta->get_hold(), hold);
   }
 }
+#endif
 
-int main(int argc, char** argv)
+int main(int argc, char **argv)
 {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

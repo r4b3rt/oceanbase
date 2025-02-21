@@ -10,48 +10,50 @@
  * See the Mulan PubL v2 for more details.
  */
 
-#include "share/ob_thread_mgr.h"
+#include "ob_thread_mgr.h"
 #include "lib/thread/thread_mgr.h"
-#include "share/partition_table/ob_partition_location_cache.h"
-#include "sql/executor/ob_distributed_scheduler.h"
-#include "clog/ob_log_scan_runnable.h"
-#include "clog/ob_clog_config.h"
-#include "clog/ob_clog_mgr.h"
-#include "clog/ob_remote_log_query_engine.h"
-#include "clog/ob_clog_history_reporter.h"
-#include "storage/transaction/ob_clog_adapter.h"
-#include "storage/transaction/ob_trans_service.h"
-#include "storage/ob_build_index_scheduler.h"
-#include "storage/transaction/ob_gts_worker.h"
-#include "storage/replayengine/ob_log_replay_engine.h"
-#include "storage/ob_replay_status.h"
-#include "rootserver/ob_index_builder.h"
-#include "observer/ob_sstable_checksum_updater.h"
+#include "storage/tx/ob_trans_service.h"
 #include "observer/ob_srv_deliver.h"
+#include "observer/ob_startup_accel_task_handler.h"
+#ifdef OB_BUILD_ARBITRATION
+#include "logservice/arbserver/ob_arb_srv_deliver.h"
+#endif
+#include "logservice/rcservice/ob_role_change_service.h"
+#include "observer/ob_startup_accel_task_handler.h"
+#ifdef OB_BUILD_SHARED_STORAGE
+#include "storage/shared_storage/prewarm/ob_replica_prewarm_struct.h"
+#include "close_modules/shared_storage/storage/shared_storage/ob_private_block_gc_task.h"
+#include "close_modules/shared_storage/storage/shared_storage/ob_public_block_gc_service.h"
+#endif
 
 using namespace oceanbase::common;
 using namespace oceanbase::lib;
-namespace oceanbase {
-namespace share {
+namespace oceanbase
+{
+namespace share
+{
 void ob_init_create_func()
 {
-#define TG_DEF(id, name, desc, scope, type, args...)            \
-  lib::create_funcs_[lib::TGDefIDs::id] = []() {                \
-    auto ret = OB_NEW(TGCLSMap<TGType::type>::CLS, "tg", args); \
-    ret->attr_ = {#name, desc, TGScope::scope, TGType::type};   \
-    return ret;                                                 \
-  };
-#include "share/ob_thread_define.h"
-#undef TG_DEF
+  #define TG_DEF(id, name, type, args...)                              \
+    lib::create_funcs_[lib::TGDefIDs::id] = []() {                     \
+      TG_##type *ret = OB_NEW(TG_##type, SET_USE_500("tg"), args);     \
+      if (NULL != ret) {                                               \
+        ret->attr_ = {#name, TGType::type};                            \
+      }                                                                \
+      return ret;                                                      \
+    };
+  #include "share/ob_thread_define.h"
+  #undef TG_DEF
 }
-}  // end of namespace share
+} // end of namespace share
 
-namespace lib {
+namespace lib
+{
 void init_create_func()
 {
   lib_init_create_func();
   share::ob_init_create_func();
 }
-}  // namespace lib
+}
 
-}  // end of namespace oceanbase
+} // end of namespace oceanbase

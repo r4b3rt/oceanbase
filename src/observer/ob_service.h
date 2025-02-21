@@ -13,241 +13,244 @@
 #ifndef OCEANBASE_OBSERVER_OB_SERVICE_H_
 #define OCEANBASE_OBSERVER_OB_SERVICE_H_
 
-#include "common/ob_i_rs_cb.h"
-#include "share/partition_table/ob_ipartition_table.h"
-#include "storage/ob_i_partition_report.h"
-#include "storage/ob_all_server_tracer.h"
+
+#include "share/ls/ob_ls_table.h"
+#include "share/ob_all_server_tracer.h"
 #include "observer/ob_lease_state_mgr.h"
 #include "observer/ob_heartbeat.h"
-#include "observer/ob_partition_table_updater.h"
-#include "observer/ob_partition_location_updater.h"
-#include "observer/ob_sstable_checksum_updater.h"
 #include "observer/ob_server_schema_updater.h"
-#include "observer/ob_pg_partition_meta_table_updater.h"
 #include "observer/ob_rpc_processor_simple.h"
-#include "observer/ob_index_status_reporter.h"
-#include "observer/ob_rebuild_flag_reporter.h"
-#include "observer/ob_partition_table_checker.h"
 #include "observer/ob_uniq_task_queue.h"
-#include "share/backup/ob_pg_backup_task_updater.h"
-#include "share/backup/ob_tenant_backup_task_updater.h"
-#include "share/backup/ob_pg_validate_task_updater.h"
-#include "share/backup/ob_tenant_validate_task_updater.h"
+#include "observer/report/ob_i_meta_report.h"
+#include "observer/report/ob_ls_table_updater.h"
+#include "observer/report/ob_tablet_table_updater.h"
+#include "observer/report/ob_server_meta_table_checker.h" // ObServerMetaTableChecker
 
-namespace oceanbase {
-namespace share {
-class ObSSTableDataChecksumItem;
-class ObSSTableColumnChecksumItem;
-class ObPGPartitionMTUpdateItem;
+namespace oceanbase
+{
+namespace share
+{
 class ObIAliveServerTracer;
-}  // namespace share
-namespace storage {
-class ObFrozenStatus;
-class ObServerTraceTask;
-}  // namespace storage
-namespace observer {
+struct ObTabletReplicaChecksumItem;
+class ObTenantDagScheduler;
+class ObIDag;
+}
+namespace storage
+{
+struct ObFrozenStatus;
+class ObLS;
+}
+namespace observer
+{
 class ObServer;
 class ObServerInstance;
 class ObRemoteLocationGetter;
 
-class ObSchemaReleaseTimeTask : public common::ObTimerTask {
+class ObSchemaReleaseTimeTask: public common::ObTimerTask
+{
 public:
   ObSchemaReleaseTimeTask();
-  virtual ~ObSchemaReleaseTimeTask()
-  {}
-  int init(ObServerSchemaUpdater& schema_updater, int tg_id);
+  virtual ~ObSchemaReleaseTimeTask() {}
+  int init(ObServerSchemaUpdater &schema_updater, int tg_id);
   void destroy();
   virtual void runTimerTask() override;
-
 private:
-  const static int64_t REFRESH_INTERVAL = 30L * 60L * 1000L * 1000L;  // 30min
-  ObServerSchemaUpdater* schema_updater_;
+  int schedule_();
+private:
+  ObServerSchemaUpdater *schema_updater_;
   bool is_inited_;
 };
 
-class ObService : public ObIPartitionReplicaFiller,
-                  public share::ObIPartPropertyGetter,
-                  public storage::ObIPartitionReport {
+class ObRemoteMasterRsUpdateTask : public common::ObTimerTask
+{
 public:
-  explicit ObService(const ObGlobalContext& gctx);
+  ObRemoteMasterRsUpdateTask(const ObGlobalContext &gctx);
+  virtual ~ObRemoteMasterRsUpdateTask() {}
+  int init(int tg_id);
+  void destroy() {}
+  virtual void runTimerTask() override;
+private:
+  const static int64_t REFRESH_INTERVAL = 10L * 60L * 1000L * 1000L; // 10min
+  const ObGlobalContext &gctx_;
+  bool is_inited_;
+};
+
+class ObService : public ObIMetaReport
+{
+public:
+  explicit ObService(const ObGlobalContext &gctx);
   virtual ~ObService();
 
-  int init(common::ObMySQLProxy& sql_proxy, share::ObIAliveServerTracer& server_tracer);
+  int init(common::ObMySQLProxy &sql_proxy,
+           share::ObIAliveServerTracer &server_tracer);
   int start();
   void set_stop();
   void stop();
   void wait();
   int destroy();
 
-  virtual int get_role(const common::ObPartitionKey& part_key, common::ObRole& role) override;
-  int batch_get_role(const obrpc::ObBatchGetRoleArg& arg, obrpc::ObBatchGetRoleResult& result);
-  // ObIPartPropertyGetter interface
-  virtual int get_leader_member(
-      const common::ObPartitionKey& part_key, common::ObIArray<common::ObAddr>& member_list) override;
-  virtual int get_member_list_and_leader(
-      const common::ObPartitionKey& part_key, obrpc::ObMemberListAndLeaderArg& arg) override;
-  virtual int get_member_list_and_leader_v2(
-      const common::ObPartitionKey& part_key, obrpc::ObGetMemberListAndLeaderResult& arg) override;
-  int batch_get_member_list_and_leader(const obrpc::ObLocationRpcRenewArg& arg, obrpc::ObLocationRpcRenewResult& res);
+  //fill_tablet_replica: to build a tablet replica locally
+  // @params[in] tenant_id: tablet belongs to which tenant
+  // @params[in] ls_id: tablet belongs to which log stream
+  // @params[in] tablet_id: the tablet to build
+  // @params[out] tablet_replica: infos about this tablet replica
+  // @params[out] tablet_checksum: infos about this tablet data/column checksum
+  // @params[in] need_checksum: whether to fill tablet_checksum
+  // ATTENTION: If ls not exist, then OB_LS_NOT_EXIST
+  //            If tablet not exist on that ls, then OB_TABLET_NOT_EXIST
+  int fill_tablet_report_info(
+      const uint64_t tenant_id,
+      const share::ObLSID &ls_id,
+      const ObTabletID &tablet_id,
+      share::ObTabletReplica &tablet_replica,
+      share::ObTabletReplicaChecksumItem &tablet_checksum,
+      const bool need_checksum = true);
+
+  int detect_master_rs_ls(const obrpc::ObDetectMasterRsArg &arg,
+                       obrpc::ObDetectMasterRsLSResult &result);
+  int fill_ls_replica(const uint64_t tenant_id,
+                              const share::ObLSID &ls_id,
+                              share::ObLSReplica &replica);
   int update_baseline_schema_version(const int64_t schema_version);
-  // ObIPartitionReplicaFiller interface
-  virtual int fill_partition_replica(const common::ObPGKey& pg_key, share::ObPartitionReplica& replica) override;
-  virtual int fill_partition_replica(storage::ObIPartitionGroup* part, share::ObPartitionReplica& replica);
-  int get_pg_key(const common::ObPartitionKey& pkey, common::ObPGKey& pg_key) const;
-  virtual const common::ObAddr& get_self_addr() override;
-  virtual int fill_checksum(const common::ObPartitionKey& pkey, const uint64_t sstable_id, const int sstable_type,
-      const ObSSTableChecksumUpdateType update_type,
-      common::ObIArray<share::ObSSTableDataChecksumItem>& data_checksum_items,
-      common::ObIArray<share::ObSSTableColumnChecksumItem>& column_checksum_items);
-  int fill_partition_table_update_task(const common::ObPartitionKey& pkey, share::ObPGPartitionMTUpdateItem& item);
+  virtual const common::ObAddr &get_self_addr();
+  //////////////////////////////// ObIMetaReport interfaces ////////////////////////////////
+  virtual int submit_ls_update_task(
+      const uint64_t tenant_id,
+      const share::ObLSID &ls_id) override;
 
   ////////////////////////////////////////////////////////////////
-  // ObIPartitionReport interface
-  virtual int submit_pt_update_task(
-      const common::ObPartitionKey& part_key, const bool need_report_checksum = true) override;
-  virtual int submit_pt_update_role_task(const common::ObPartitionKey& part_key) override;
-  virtual void submit_pg_pt_update_task(const common::ObPartitionArray& pg_partitions) override;
-  virtual int submit_checksum_update_task(const common::ObPartitionKey& part_key, const uint64_t sstable_id,
-      const int sstable_type, const ObSSTableChecksumUpdateType update_type = ObSSTableChecksumUpdateType::UPDATE_ALL,
-      const bool task_need_batch = true) override;
-  virtual int pt_sync_update(const common::ObPartitionKey& part_key) override;
-  // ObIPartitionReport interface
-  virtual int report_merge_finished(const int64_t frozen_version) override;
-  // ObIPartitionReport interface
-  virtual int report_merge_error(const common::ObPartitionKey& part_key, const int error_code) override;
-  // ObIPartitionReport interface
-  virtual int report_local_index_build_complete(const common::ObPartitionKey& part_key, const uint64_t index_id,
-      const share::schema::ObIndexStatus index_status, const int32_t ret_code) override;
-  // ObIPartitionReport interface
-  virtual int report_rebuild_replica(const common::ObPartitionKey& part_key, const common::ObAddr& server,
-      const storage::ObRebuildSwitch& rebuild_switch) override;
-  virtual int report_rebuild_replica_async(const common::ObPartitionKey& part_key, const common::ObAddr& server,
-      const storage::ObRebuildSwitch& rebuild_switch) override;
-  virtual int update_pg_backup_task_info(
-      const common::ObIArray<share::ObPGBackupTaskInfo>& pg_task_info_array) override;
-  virtual int report_pg_backup_backupset_task(const common::ObIArray<share::ObBackupBackupsetArg>& args,
-      const common::ObIArray<int32_t>& results, const share::ObPGBackupBackupsetTaskInfo::TaskStatus& status) override;
-  // ObIPartitionReport interface
-  int submit_pt_remove_task(const common::ObPartitionKey& part_key) override;
-
-  ////////////////////////////////////////////////////////////////
-  int reach_partition_limit(const obrpc::ObReachPartitionLimitArg& arg);
-  int check_frozen_version(const obrpc::ObCheckFrozenVersionArg& arg);
+  int check_frozen_scn(const obrpc::ObCheckFrozenScnArg &arg);
   int get_min_sstable_schema_version(
-      const obrpc::ObGetMinSSTableSchemaVersionArg& arg, obrpc::ObGetMinSSTableSchemaVersionRes& result);
+      const obrpc::ObGetMinSSTableSchemaVersionArg &arg,
+      obrpc::ObGetMinSSTableSchemaVersionRes &result);
   // ObRpcSwitchSchemaP @RS DDL
-  int switch_schema(const obrpc::ObSwitchSchemaArg& arg);
-  // ObRpcCreatePartitionP @RS DDL
-  int create_partition(const obrpc::ObCreatePartitionArg& arg);
-  // ObRpcCreatePartitionBatchP @RS DDL
-  int create_partition_batch(
-      const obrpc::ObCreatePartitionBatchArg& batch_arg, obrpc::ObCreatePartitionBatchRes& batch_res);
-  int sync_report_replica_info(const int64_t data_version, const obrpc::ObCreatePartitionArg& first,
-      const obrpc::ObCreatePartitionBatchArg& batch_arg);
-  int check_unique_index_request(const obrpc::ObCheckUniqueIndexRequestArg& arg);
-  int calc_column_checksum_request(const obrpc::ObCalcColumnChecksumRequestArg& arg);
-  int split_partition(const obrpc::ObSplitPartitionArg& arg, obrpc::ObSplitPartitionResult& is_succ);
-  int batch_set_member_list(const obrpc::ObBatchStartElectionArg& arg, obrpc::Int64& result);
-  int batch_wait_leader(const obrpc::ObBatchCheckLeaderArg& arg, obrpc::ObBatchCheckRes& result);
-  int batch_write_cutdata_clog(const obrpc::ObBatchWriteCutdataClogArg& arg, obrpc::ObBatchCheckRes& result);
-  int stop_partition_write(const obrpc::Int64& switchover_timestamp, obrpc::Int64& result);
-  int check_partition_log(const obrpc::Int64& switchover_timestamp, obrpc::Int64& result);
-  int get_wrs_info(const obrpc::ObGetWRSArg& arg, obrpc::ObGetWRSResult& result);
-  int check_single_replica_major_sstable_exist(const obrpc::ObCheckSingleReplicaMajorSSTableExistArg& arg);
-  int check_all_replica_major_sstable_exist(const obrpc::ObCheckAllReplicaMajorSSTableExistArg& arg);
-  int check_single_replica_major_sstable_exist(const obrpc::ObCheckSingleReplicaMajorSSTableExistArg& arg,
-      obrpc::ObCheckSingleReplicaMajorSSTableExistResult& res);
-  int check_all_replica_major_sstable_exist(
-      const obrpc::ObCheckAllReplicaMajorSSTableExistArg& arg, obrpc::ObCheckAllReplicaMajorSSTableExistResult& res);
-
+  int switch_schema(const obrpc::ObSwitchSchemaArg &arg, obrpc::ObSwitchSchemaResult &result);
+  int calc_column_checksum_request(const obrpc::ObCalcColumnChecksumRequestArg &arg, obrpc::ObCalcColumnChecksumRequestRes &res);
+  int build_split_tablet_data_start_request(const obrpc::ObTabletSplitStartArg &arg, obrpc::ObTabletSplitStartResult &res);
+  int build_split_tablet_data_finish_request(const obrpc::ObTabletSplitFinishArg &arg, obrpc::ObTabletSplitFinishResult &res);
+  int freeze_split_src_tablet(const obrpc::ObFreezeSplitSrcTabletArg &arg, obrpc::ObFreezeSplitSrcTabletRes &res, const int64_t abs_timeout_us);
+  int fetch_split_tablet_info(const obrpc::ObFetchSplitTabletInfoArg &arg, obrpc::ObFetchSplitTabletInfoRes &res, const int64_t abs_timeout_us);
+  int build_ddl_single_replica_request(const obrpc::ObDDLBuildSingleReplicaRequestArg &arg);
+  int build_ddl_single_replica_request(const obrpc::ObDDLBuildSingleReplicaRequestArg &arg, obrpc::ObDDLBuildSingleReplicaRequestResult &res);
+  int check_and_cancel_ddl_complement_data_dag(const obrpc::ObDDLBuildSingleReplicaRequestArg &arg, bool &is_dag_exist);
+  int check_and_cancel_delete_lob_meta_row_dag(const obrpc::ObDDLBuildSingleReplicaRequestArg &arg, bool &is_dag_exist);
+  int stop_partition_write(const obrpc::Int64 &switchover_timestamp, obrpc::Int64 &result);
+  int check_partition_log(const obrpc::Int64 &switchover_timestamp, obrpc::Int64 &result);
+  int get_wrs_info(const obrpc::ObGetWRSArg &arg, obrpc::ObGetWRSResult &result);
+  int broadcast_consensus_version(
+      const obrpc::ObBroadcastConsensusVersionArg &arg,
+      obrpc::ObBroadcastConsensusVersionRes &result);
   ////////////////////////////////////////////////////////////////
-  // ObRpcFetchRootPartitionP @RS load balance
-  int fetch_root_partition(share::ObPartitionReplica& replica);
-  // ObRpcAddReplicaP @RS load balance
-  int add_replica(const obrpc::ObAddReplicaArg& arg, const share::ObTaskId& task_id);
-  // ObRpcRemoveReplicaP @RS load balance
-  int remove_non_paxos_replica(const obrpc::ObRemoveNonPaxosReplicaArg& arg);
-  int remove_replica(const obrpc::ObRemoveNonPaxosReplicaArg& arg);
-  // ObRpcRemoveMemberP @RS load balance
-  int remove_member(const obrpc::ObMemberChangeArg& arg);
-  int modify_quorum(const obrpc::ObModifyQuorumArg& arg);
-  int restore_replica(const obrpc::ObRestoreReplicaArg& arg, const share::ObTaskId& task_id);
-  int physical_restore_replica(const obrpc::ObPhyRestoreReplicaArg& arg, const share::ObTaskId& task_id);
-  int get_tenant_log_archive_status(
-      const share::ObGetTenantLogArchiveStatusArg& arg, share::ObTenantLogArchiveStatusWrapper& result);
-  int get_tenant_log_archive_status_v2(
-      const share::ObGetTenantLogArchiveStatusArg& arg, share::ObServerTenantLogArchiveStatusWrapper& result);
-  int copy_sstable_batch(const obrpc::ObCopySSTableBatchArg& arg);
-  // ObRpcMigrateReplicaP @RS load balance
-  int migrate_replica(const obrpc::ObMigrateReplicaArg& arg, const share::ObTaskId& task_id);
-  int rebuild_replica(const obrpc::ObRebuildReplicaArg& arg, const share::ObTaskId& task_id);
-  // ObRpcChangeReplicaP @RS load balance
-  int change_replica(const obrpc::ObChangeReplicaArg& arg, const share::ObTaskId& task_id);
-  // ObRpcAddReplicaBatchP @RS load balance
-  int add_replica_batch(const obrpc::ObAddReplicaBatchArg& arg);
-  // ObRpcRemoveReplicaBatchP @RS load balance
-  int remove_non_paxos_replica_batch(
-      const obrpc::ObRemoveNonPaxosReplicaBatchArg& arg, obrpc::ObRemoveNonPaxosReplicaBatchResult& result);
-  // ObRpcRemoveMemberBatchP @RS load balance
-  int remove_member_batch(const obrpc::ObMemberChangeBatchArg& arg, obrpc::ObMemberChangeBatchResult& result);
-  // ObRpcModifyQuorumBatchP @RS load balance
-  int modify_quorum_batch(const obrpc::ObModifyQuorumBatchArg& arg, obrpc::ObModifyQuorumBatchResult& result);
-  // ObRpcMigrateReplicaBatchP @RS load balance
-  int migrate_replica_batch(const obrpc::ObMigrateReplicaBatchArg& arg);
-  int rebuild_replica_batch(const obrpc::ObRebuildReplicaBatchArg& arg);
-  // ObRpcChangeReplicaArgP @RS load balance
-  int backup_replica_batch(const obrpc::ObBackupBatchArg& arg);
-  // ObRpcAddReplicaBatchP @RS load balance
-  int standby_cutdata_batch_task(const obrpc::ObStandbyCutDataBatchTaskArg& arg);
+  // ObRpcFetchSysLSP @RS load balance
+  int fetch_sys_ls(share::ObLSReplica &replica);
+  int backup_ls_data(const obrpc::ObBackupDataArg &arg);
+  int backup_completing_log(const obrpc::ObBackupComplLogArg &arg);
+  int backup_build_index(const obrpc::ObBackupBuildIdxArg &arg);
+  int backup_fuse_tablet_meta(const obrpc::ObBackupFuseTabletMetaArg &arg);
+  int check_backup_dest_connectivity(const obrpc::ObCheckBackupConnectivityArg &arg);
+  int backup_meta(const obrpc::ObBackupMetaArg &arg);
+  int check_backup_task_exist(const obrpc::ObBackupCheckTaskArg &arg, bool &res);
+  int check_sys_task_exist(const share::ObTaskId &arg, bool &res);
+  int check_migrate_task_exist(const share::ObTaskId &arg, bool &res);
+  int delete_backup_ls_task(const obrpc::ObLSBackupCleanArg &arg);
+  int notify_archive(const obrpc::ObNotifyArchiveArg &arg);
+  int report_backup_over(const obrpc::ObBackupTaskRes &res);
+  int report_backup_clean_over(const obrpc::ObBackupTaskRes &res);
 
-  int validate_backup_batch(const obrpc::ObValidateBatchArg& arg);
-  int backup_backupset_batch(const obrpc::ObBackupBackupsetBatchArg& arg);
-  int backup_archive_log(const obrpc::ObBackupArchiveLogBatchArg& arg);
-
-  int change_replica_batch(const obrpc::ObChangeReplicaBatchArg& arg);
-  int check_sys_task_exist(const share::ObTaskId& arg, bool& res);
-  int check_migrate_task_exist(const share::ObTaskId& arg, bool& res);
-  // ObGetMemberListP @ObPartitionService::handle_add_replica_callback
-  int get_member_list(const common::ObPartitionKey& partition_key, obrpc::ObServerList& members);
-
-  int estimate_partition_rows(const obrpc::ObEstPartArg& arg, obrpc::ObEstPartRes& res) const;
-
+  int get_ls_sync_scn(const obrpc::ObGetLSSyncScnArg &arg,
+                           obrpc::ObGetLSSyncScnRes &result);
+  int force_set_ls_as_single_replica(const obrpc::ObForceSetLSAsSingleReplicaArg &arg);
+  int force_set_server_list(const obrpc::ObForceSetServerListArg &arg, obrpc::ObForceSetServerListResult &result);
+  int refresh_tenant_info(const obrpc::ObRefreshTenantInfoArg &arg,
+                          obrpc::ObRefreshTenantInfoRes &result);
+  int get_ls_replayed_scn(const obrpc::ObGetLSReplayedScnArg &arg,
+                          obrpc::ObGetLSReplayedScnRes &result);
+  int estimate_partition_rows(const obrpc::ObEstPartArg &arg,
+                              obrpc::ObEstPartRes &res) const;
+  int estimate_tablet_block_count(const obrpc::ObEstBlockArg &arg,
+                                  obrpc::ObEstBlockRes &res) const;
+  int update_tenant_info_cache(const obrpc::ObUpdateTenantInfoCacheArg &arg,
+                                  obrpc::ObUpdateTenantInfoCacheRes &result);
+  int refresh_service_name(const obrpc::ObRefreshServiceNameArg &arg,
+                           obrpc::ObRefreshServiceNameRes &result);
   ////////////////////////////////////////////////////////////////
   // ObRpcMinorFreezeP @RS minor freeze
-  int minor_freeze(const obrpc::ObMinorFreezeArg& arg, obrpc::Int64& result);
+  int minor_freeze(const obrpc::ObMinorFreezeArg &arg,
+                   obrpc::Int64 &result);
+  // ObRpcTabletMajorFreezeP @RS tablet major freeze
+  int tablet_major_freeze(const obrpc::ObTabletMajorFreezeArg &arg,
+                   obrpc::Int64 &result);
   // ObRpcCheckSchemaVersionElapsedP @RS global index builder
   int check_schema_version_elapsed(
-      const obrpc::ObCheckSchemaVersionElapsedArg& arg, obrpc::ObCheckSchemaVersionElapsedResult& result);
+      const obrpc::ObCheckSchemaVersionElapsedArg &arg,
+      obrpc::ObCheckSchemaVersionElapsedResult &result);
   // ObRpcGetChecksumCalSnapshotP
-  int check_ctx_create_timestamp_elapsed(
-      const obrpc::ObCheckCtxCreateTimestampElapsedArg& arg, obrpc::ObCheckCtxCreateTimestampElapsedResult& result);
 
+  // ObRpcCheckMemtableCntP
+  int check_memtable_cnt(
+      const obrpc::ObCheckMemtableCntArg &arg,
+      obrpc::ObCheckMemtableCntResult &result);
+  // ObRpcCheckMediumCompactionInfoListP
+  int check_medium_compaction_info_list_cnt(
+      const obrpc::ObCheckMediumCompactionInfoListArg &arg,
+      obrpc::ObCheckMediumCompactionInfoListResult &result);
+  int prepare_tablet_split_task_ranges(
+      const obrpc::ObPrepareSplitRangesArg &arg,
+      obrpc::ObPrepareSplitRangesRes &result);
+
+  int check_modify_time_elapsed(
+      const obrpc::ObCheckModifyTimeElapsedArg &arg,
+      obrpc::ObCheckModifyTimeElapsedResult &result);
+
+  int check_ddl_tablet_merge_status(
+    const obrpc::ObDDLCheckTabletMergeStatusArg &arg,
+    obrpc::ObDDLCheckTabletMergeStatusResult &result);
   ////////////////////////////////////////////////////////////////
-  // ObRpcSwitchLeaderP @RS leader coordinator & admin
-  int switch_leader(const obrpc::ObSwitchLeaderArg& arg);
   // ObRpcBatchSwitchRsLeaderP @RS leader coordinator & admin
-  int batch_switch_rs_leader(const ObAddr& arg);
-  // ObRpcSwitchLeaderListP @RS leader coordinator
-  int switch_leader_list(const obrpc::ObSwitchLeaderListArg& arg);
-  // ObRpcGetLeaderCandidatesP @RS leader coordinator & admin
-  int get_leader_candidates(const obrpc::ObGetLeaderCandidatesArg& arg, obrpc::ObGetLeaderCandidatesResult& result);
-  int get_leader_candidates_v2(
-      const obrpc::ObGetLeaderCandidatesV2Arg& arg, obrpc::ObGetLeaderCandidatesResult& result);
+  int batch_switch_rs_leader(const ObAddr &arg);
   // ObRpcGetPartitionCountP @RS leader coordinator
-  int get_partition_count(obrpc::ObGetPartitionCountResult& result);
+  int get_partition_count(obrpc::ObGetPartitionCountResult &result);
 
   ////////////////////////////////////////////////////////////////
   // ObRpcBootstrapP @RS bootstrap
-  int bootstrap(const obrpc::ObBootstrapArg& arg);
+  int bootstrap(const obrpc::ObBootstrapArg &arg);
+  // ObRpcPrepareServerForAddingServerP @RS add server
+  int prepare_server_for_adding_server(
+      const obrpc::ObPrepareServerForAddingServerArg &arg,
+      obrpc::ObPrepareServerForAddingServerResult &result);
+  // ObRpcGetServerStatusP @RS
+  int get_server_resource_info(const obrpc::ObGetServerResourceInfoArg &arg, obrpc::ObGetServerResourceInfoResult &result);
+  int get_server_resource_info(share::ObServerResourceInfo &resource_info);
+  static int get_build_version(share::ObServerInfoInTable::ObBuildVersion &build_version);
+  // log stream replica task related
+  static int do_remove_ls_paxos_replica(const obrpc::ObLSDropPaxosReplicaArg &arg);
+  static int do_remove_ls_nonpaxos_replica(const obrpc::ObLSDropNonPaxosReplicaArg &arg);
+  static int do_add_ls_replica(const obrpc::ObLSAddReplicaArg &arg);
+  // ObRpcCheckServerEmptyP @RS bootstrap
+  int check_server_empty(const obrpc::ObCheckServerEmptyArg &arg, obrpc::Bool &is_empty);
+  int check_server_empty_with_result(const obrpc::ObCheckServerEmptyArg &arg, obrpc::ObCheckServerEmptyResult &result);
+  static int do_migrate_ls_replica(const obrpc::ObLSMigrateReplicaArg &arg);
   // ObRpcIsEmptyServerP @RS bootstrap
-  int is_empty_server(const obrpc::ObCheckServerEmptyArg& arg, obrpc::Bool& is_empty);
+
   // ObRpcCheckDeploymentModeP
-  int check_deployment_mode_match(const obrpc::ObCheckDeploymentModeArg& arg, obrpc::Bool& match);
-  // ObBroadcastSysSchemaP @RS bootstrap
-  int broadcast_sys_schema(const common::ObSArray<share::schema::ObTableSchema>& table_schemas);
+  int check_deployment_mode_match(const obrpc::ObCheckDeploymentModeArg &arg, obrpc::Bool &match);
+  int get_leader_locations(
+      const obrpc::ObGetLeaderLocationsArg &arg,
+      obrpc::ObGetLeaderLocationsResult &result);
+  int batch_broadcast_schema(
+      const obrpc::ObBatchBroadcastSchemaArg &arg,
+      obrpc::ObBatchBroadcastSchemaResult &result);
 
   ////////////////////////////////////////////////////////////////
-  int get_partition_stat(obrpc::ObPartitionStatList& partition_stat_list);
+#ifdef OB_BUILD_TDE_SECURITY
+  int wait_master_key_in_sync(const obrpc::ObWaitMasterKeyInSyncArg &wms_in_sync_arg);
+  int trigger_tenant_config(const obrpc::ObWaitMasterKeyInSyncArg &wms_in_sync_arg);
+  int do_wait_master_key_in_sync(
+      const common::ObIArray<std::pair<uint64_t, uint64_t> > &got_version_array);
+  int convert_tenant_max_key_version(
+      const common::ObIArray<std::pair<uint64_t, share::ObLeaseResponse::TLRpKeyVersion> > &,
+      common::ObIArray<std::pair<uint64_t, uint64_t> > &);
+#endif
   // ObReportReplicaP @RS::admin to report replicas
   int report_replica();
   int load_leader_cluster_login_info();
@@ -256,67 +259,66 @@ public:
   // ObClearLocationCacheP @RS::admin to clear location cache
   int clear_location_cache();
   // ObDropReplicaP @RS::admin to drop replica
-  int drop_replica(const obrpc::ObDropReplicaArg& arg);
-  // ObSetDSActionP @RS::broadcast_debug_sync_action & ObDebugSync::add_debug_sync
-  int set_ds_action(const obrpc::ObDebugSyncActionArg& arg);
+  int set_ds_action(const obrpc::ObDebugSyncActionArg &arg);
   // ObRequestHeartbeatP @RS::admin to cancel delete server
-  int request_heartbeat(share::ObLeaseRequest& lease_requeset);
-  int update_cluster_info(obrpc::ObClusterInfoArg& cluster_info);
-  // ObCheckPartitionTableP @RS::admin to check partition table
-  int check_partition_table();
-  int report_replica(const obrpc::ObReportSingleReplicaArg& arg);
+  int request_heartbeat(share::ObLeaseRequest &lease_requeset);
+  int report_replica(const obrpc::ObReportSingleReplicaArg &arg);
   // ObSyncPartitionTableP @RS empty_server_checker
-  int sync_partition_table(const obrpc::Int64& arg);
-  int sync_pg_partition_table(const obrpc::Int64& arg);
-  // ObCheckDanglingReplicaExistP @RS meta_table_migrator
-  int check_dangling_replica_exist(const obrpc::Int64& arg);
+  int sync_partition_table(const obrpc::Int64 &arg);
   // ObRpcSetTPP @RS::admin to set tracepoint
-  int set_tracepoint(const obrpc::ObAdminSetTPArg& arg);
-  // for ObPartitionService::check_mc_allowed_by_server_lease
-  int get_server_heartbeat_expire_time(int64_t& lease_expire_time);
-  bool is_heartbeat_expired() const;
-  bool is_svr_lease_valid() const;
-  int cancel_sys_task(const share::ObTaskId& task_id);
+  int set_tracepoint(const obrpc::ObAdminSetTPArg &arg);
+  int cancel_sys_task(const share::ObTaskId &task_id);
   int refresh_memory_stat();
-  int broadcast_rs_list(const obrpc::ObRsListArg& arg);
-  int submit_broadcast_task(const share::ObPartitionBroadcastTask& task);
-  int broadcast_locations(const obrpc::ObPartitionBroadcastArg& arg, obrpc::ObPartitionBroadcastResult& result);
+  int wash_memory_fragmentation();
+  int broadcast_rs_list(const obrpc::ObRsListArg &arg);
   ////////////////////////////////////////////////////////////////
   // misc functions
-  int64_t get_partition_table_updater_user_queue_size() const;
-  int64_t get_partition_table_updater_sys_queue_size() const;
-  int64_t get_partition_table_updater_core_queue_size() const;
-  ObPartitionLocationUpdater &get_partition_location_updater()
-  {
-    return partition_location_updater_;
-  }
 
-  int get_all_partition_status(int64_t& inactive_num, int64_t& total_num) const;
-  int get_root_server_status(obrpc::ObGetRootserverRoleResult& get_role_result);
-  int get_tenant_group_string(common::ObString& ttg_string);
-  int refresh_core_partition();
+  int get_all_partition_status(int64_t &inactive_num, int64_t &total_num) const;
+  int get_root_server_status(obrpc::ObGetRootserverRoleResult &get_role_result);
+  int refresh_sys_tenant_ls();
 
   int get_tenant_refreshed_schema_version(
-      const obrpc::ObGetTenantSchemaVersionArg& arg, obrpc::ObGetTenantSchemaVersionResult& result);
-  int get_master_root_server(obrpc::ObGetRootserverRoleResult& result);
-  int check_physical_flashback_succ(
-      const obrpc::ObCheckPhysicalFlashbackArg& arg, obrpc::ObPhysicalFlashbackResultArg& result);
+      const obrpc::ObGetTenantSchemaVersionArg &arg,
+      obrpc::ObGetTenantSchemaVersionResult &result);
   int submit_async_refresh_schema_task(const uint64_t tenant_id, const int64_t schema_version);
-  int renew_in_zone_hb(const share::ObInZoneHbRequest& arg, share::ObInZoneHbResponse& result);
-  int pre_process_server_reply(const obrpc::ObPreProcessServerReplyArg& arg);
-  int submit_retry_ghost_index_task(const uint64_t index_id);
-
-  ////////////////////////////////////////////////////////////////
-  // table api
-  int ttl_request(const obrpc::ObTTLRequestArg &arg, obrpc::ObTTLResult &result);
+  int renew_in_zone_hb(const share::ObInZoneHbRequest &arg,
+                       share::ObInZoneHbResponse &result);
+  int init_tenant_config(
+      const obrpc::ObInitTenantConfigArg &arg,
+      obrpc::ObInitTenantConfigRes &result);
+  int handle_heartbeat(
+      const share::ObHBRequest &hb_request,
+      share::ObHBResponse &hb_response);
+  int check_storage_operation_status(
+      const obrpc::ObCheckStorageOperationStatusArg &arg,
+      obrpc::ObCheckStorageOperationStatusResult &result);
+  int ob_admin_unlock_member_list(
+      const obrpc::ObAdminUnlockMemberListOpArg &arg);
+  int check_server_empty(bool &server_empty);
+  int change_external_storage_dest(obrpc::ObAdminSetConfigArg &arg);
 
 private:
+  int inner_fill_tablet_info_(
+      const int64_t tenant_id,
+      const ObTabletID &tablet_id,
+      storage::ObLS *ls,
+      share::ObTabletReplica &tablet_replica,
+      share::ObTabletReplicaChecksumItem &tablet_checksum,
+      const bool need_checksum);
   int register_self();
-  int check_server_empty(const obrpc::ObCheckServerEmptyArg& arg, const bool wait_log_scan, bool& server_empty);
-  int schedule_pt_check_task();
-  int check_partition_need_update_pt_(const obrpc::ObCreatePartitionBatchArg& batch_arg,
-      obrpc::ObCreatePartitionBatchRes& batch_res, bool& need_update);
+  int set_server_id_(const int64_t server_id);
 
+  int handle_server_freeze_req_(const obrpc::ObMinorFreezeArg &arg);
+  int handle_tenant_freeze_req_(const obrpc::ObMinorFreezeArg &arg);
+  int handle_ls_freeze_req_(const obrpc::ObMinorFreezeArg &arg);
+  int tenant_freeze_(const uint64_t tenant_id);
+  int handle_ls_freeze_req_(const uint64_t tenant_id, const share::ObLSID &ls_id, const common::ObTabletID &tablet_id);
+  int generate_master_rs_ls_info_(
+      const share::ObLSReplica &cur_leader,
+      share::ObLSInfo &ls_info);
+  int generate_tenant_table_schemas_(const obrpc::ObBatchBroadcastSchemaArg &arg,
+      ObSArray<share::schema::ObTableSchema> &tables, ObIAllocator &allocator);
 private:
   bool inited_;
   bool in_register_process_;
@@ -325,31 +327,20 @@ private:
 
   ObServerSchemaUpdater schema_updater_;
 
-  ObPartitionTableUpdater partition_table_updater_;
-  ObPartitionLocationUpdater partition_location_updater_;
-  ObIndexStatusUpdater index_updater_;
-  ObSSTableChecksumUpdater checksum_updater_;
-  ObUniqTaskQueue<ObIndexStatusReporter, ObIndexStatusUpdater> index_status_report_queue_;
-  ObRebuildFlagUpdater rebuild_updater_;
-  ObUniqTaskQueue<ObRebuildFlagReporter, ObRebuildFlagUpdater> rebuild_flag_report_queue_;
-
-  // partition table checker
-  ObPartitionTableChecker pt_checker_;
-
-  // lease
+  //lease
   ObLeaseStateMgr lease_state_mgr_;
   ObHeartBeatProcess heartbeat_process_;
-  const ObGlobalContext& gctx_;
+  const ObGlobalContext &gctx_;
   // server tracer task
-  storage::ObServerTraceTask server_trace_task_;
+  share::ObServerTraceTask server_trace_task_;
   ObSchemaReleaseTimeTask schema_release_task_;
-  share::ObTenantBackupTaskUpdater tenant_backup_task_updater_;
-  share::ObPGBackupTaskUpdater pg_backup_task_updater_;
-  share::ObTenantValidateTaskUpdater tenant_validate_task_updater_;
-  share::ObPGValidateTaskUpdater pg_validate_task_updater_;
   ObRefreshSchemaStatusTimerTask schema_status_task_;
+  ObRemoteMasterRsUpdateTask remote_master_rs_update_task_;
+  // report
+  ObLSTableUpdater ls_table_updater_;
+  ObServerMetaTableChecker meta_table_checker_;
 };
 
-}  // end namespace observer
-}  // end namespace oceanbase
+}//end namespace observer
+}//end namespace oceanbase
 #endif

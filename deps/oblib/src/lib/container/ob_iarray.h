@@ -17,65 +17,63 @@
 #include "lib/utility/ob_print_utils.h"
 #include "lib/container/ob_array_wrap.h"
 
-namespace oceanbase {
-namespace common {
+namespace oceanbase
+{
+namespace common
+{
 // this interface has three derived classes: ObArray, ObSEArray and Ob2DArray.
 template <typename T>
-class ObIArray : public ObIArrayWrap<T> {
+class ObIArray : public ObIArrayWrap<T>
+{
 public:
   using ObIArrayWrap<T>::at;
   using ObIArrayWrap<T>::count;
-  ObIArray() : ObIArrayWrap<T>()
-  {}
-  ObIArray(T* data, const int64_t count) : ObIArrayWrap<T>(data, count)
-  {}
+  ObIArray() : ObIArrayWrap<T>() {}
+  ObIArray(T *data, const int64_t count) : ObIArrayWrap<T>(data, count) {}
 
-  virtual ~ObIArray()
-  {}
-  virtual int push_back(const T& obj) = 0;
+  virtual ~ObIArray() {}
+  virtual int push_back(const T &obj) = 0;
   virtual void pop_back() = 0;
-  virtual int pop_back(T& obj) = 0;
+  virtual int pop_back(T &obj) = 0;
   virtual int remove(int64_t idx) = 0;
 
-  virtual int at(int64_t idx, T& obj) const = 0;
+  virtual int at(int64_t idx, T &obj) const = 0;
 
   /// reset is the same as clear()
   virtual void reset() = 0;
   virtual void reuse() = 0;
   virtual void destroy() = 0;
   virtual int reserve(int64_t capacity) = 0;
-  virtual int assign(const ObIArray& other) = 0;
+  virtual int assign(const ObIArray &other) = 0;
   virtual int prepare_allocate(int64_t capacity) = 0;
-  virtual T* alloc_place_holder()
-  {
-    OB_LOG(WARN, "Not supported");
-    return NULL;
-  }
+  virtual T *alloc_place_holder()
+  { OB_LOG_RET(WARN, OB_NOT_SUPPORTED, "Not supported"); return NULL; }
 
   virtual int64_t to_string(char* buf, int64_t buf_len) const
   {
     int64_t pos = 0;
     J_ARRAY_START();
     int64_t N = count();
+    J_KV("cnt", N);
     for (int64_t index = 0; index < N - 1; ++index) {
-      BUF_PRINTO(at(index));
       J_COMMA();
+      BUF_PRINTO(at(index));
     }
     if (0 < N) {
+      J_COMMA();
       BUF_PRINTO(at(N - 1));
     }
     J_ARRAY_END();
     return pos;
   }
-
 protected:
   using ObIArrayWrap<T>::data_;
   using ObIArrayWrap<T>::count_;
   DISALLOW_COPY_AND_ASSIGN(ObIArray);
 };
 
-template <typename T>
-bool is_contain(const ObIArray<T>& arr, const T& item)
+template<typename T>
+bool is_contain(const ObIArray<T> &arr, const T &item)
 {
   bool bret = false;
   for (int64_t i = 0; i < arr.count(); ++i) {
@@ -87,8 +85,8 @@ bool is_contain(const ObIArray<T>& arr, const T& item)
   return bret;
 }
 
-template <typename T>
-int get_difference(const ObIArray<T>& a, const ObIArray<T>& b, ObIArray<T>& dest)
+template<typename T>
+int get_difference(const ObIArray<T> &a, const ObIArray<T> &b, ObIArray<T> &dest)
 {
   int ret = OB_SUCCESS;
   dest.reset();
@@ -100,19 +98,19 @@ int get_difference(const ObIArray<T>& a, const ObIArray<T>& b, ObIArray<T>& dest
   return ret;
 }
 
-template <typename DstArrayT, typename SrcArrayT>
-int append(DstArrayT& dst, const SrcArrayT& src)
+template<typename DstArrayT, typename SrcArrayT>
+int append(DstArrayT &dst, const SrcArrayT &src)
 {
   int ret = OB_SUCCESS;
   int64_t N = src.count();
   for (int64_t i = 0; OB_SUCC(ret) && i < N; ++i) {
     ret = dst.push_back(src.at(i));
-  }  // end for
+  } // end for
   return ret;
 }
 
-template <typename DstArrayT, typename SrcArrayT>
-bool is_array_equal(DstArrayT& left, const SrcArrayT& right)
+template<typename DstArrayT, typename SrcArrayT>
+bool is_array_equal(DstArrayT &left, const SrcArrayT &right)
 {
   int bret = true;
 
@@ -128,7 +126,7 @@ bool is_array_equal(DstArrayT& left, const SrcArrayT& right)
   return bret;
 }
 
-}  // end namespace common
-}  // end namespace oceanbase
+} // end namespace common
+} // end namespace oceanbase
 
-#endif  // OCEANBASE_LIB_CONTAINER_IARRAY_
+#endif // OCEANBASE_LIB_CONTAINER_IARRAY_

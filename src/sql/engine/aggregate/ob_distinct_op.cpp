@@ -13,20 +13,28 @@
 #define USING_LOG_PREFIX SQL_ENG
 
 #include "sql/engine/aggregate/ob_distinct_op.h"
-#include "sql/session/ob_sql_session_info.h"
-#include "sql/engine/px/ob_px_util.h"
-#include "sql/engine/ob_physical_plan.h"
-#include "sql/engine/ob_exec_context.h"
 
-namespace oceanbase {
+namespace oceanbase
+{
 using namespace common;
-namespace sql {
+namespace sql
+{
 
-ObDistinctSpec::ObDistinctSpec(ObIAllocator& alloc, const ObPhyOperatorType type)
-    : ObOpSpec(alloc, type), distinct_exprs_(alloc), cmp_funcs_(alloc), is_block_mode_(false)
+ObDistinctSpec::ObDistinctSpec(ObIAllocator &alloc, const ObPhyOperatorType type)
+  : ObOpSpec(alloc, type),
+  distinct_exprs_(alloc),
+  cmp_funcs_(alloc),
+  is_block_mode_(false),
+  by_pass_enabled_(false)
 {}
 
-OB_SERIALIZE_MEMBER((ObDistinctSpec, ObOpSpec), distinct_exprs_, cmp_funcs_, is_block_mode_);
+OB_SERIALIZE_MEMBER((ObDistinctSpec, ObOpSpec),
+                    distinct_exprs_,
+                    cmp_funcs_,
+                    is_block_mode_,
+                    by_pass_enabled_);
 
-}  // end namespace sql
-}  // end namespace oceanbase
+
+} // end namespace sql
+} // end namespace oceanbase
+

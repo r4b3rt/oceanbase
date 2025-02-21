@@ -12,30 +12,33 @@
 
 #define USING_LOG_PREFIX SQL_ENG
 #include "ob_expr_sqrt.h"
-#include <cmath>
-#include "share/object/ob_obj_cast.h"
-#include "sql/parser/ob_item_type.h"
-//#include "sql/engine/expr/ob_expr_promotion_util.h"
 #include "sql/session/ob_sql_session_info.h"
 using namespace oceanbase::common;
 using namespace oceanbase::sql;
 
-namespace oceanbase {
-namespace sql {
+namespace oceanbase
+{
+namespace sql
+{
 
-ObExprSqrt::ObExprSqrt(ObIAllocator& alloc) : ObFuncExprOperator(alloc, T_FUN_SYS_SQRT, N_SQRT, 1, NOT_ROW_DIMENSION)
-{}
+ObExprSqrt::ObExprSqrt(ObIAllocator &alloc)
+    : ObFuncExprOperator(alloc, T_FUN_SYS_SQRT, N_SQRT, 1, VALID_FOR_GENERATED_COL, NOT_ROW_DIMENSION)
+{
+}
 
 ObExprSqrt::~ObExprSqrt()
-{}
+{
+}
 
-int ObExprSqrt::calc_result_type1(ObExprResType& type, ObExprResType& type1, common::ObExprTypeCtx& type_ctx) const
+int ObExprSqrt::calc_result_type1(ObExprResType &type,
+                                  ObExprResType &type1,
+                                  common::ObExprTypeCtx &type_ctx) const
 {
   UNUSED(type_ctx);
   int ret = OB_SUCCESS;
   if (NOT_ROW_DIMENSION != row_dimension_ || ObMaxType == type1.get_type()) {
     ret = OB_ERR_INVALID_TYPE_FOR_OP;
-  } else if (!share::is_oracle_mode()) {
+  } else if (!lib::is_oracle_mode()) {
     type.set_double();
   } else {
     if (ob_is_real_type(type1.get_type())) {
@@ -51,67 +54,11 @@ int ObExprSqrt::calc_result_type1(ObExprResType& type, ObExprResType& type1, com
   return ret;
 }
 
-int ObExprSqrt::calc_result1(ObObj& result, const ObObj& obj, ObExprCtx& expr_ctx) const
+int calc_sqrt_expr_mysql(const ObExpr &expr, ObEvalCtx &ctx,
+                                ObDatum &res_datum)
 {
   int ret = OB_SUCCESS;
-  if (OB_ISNULL(expr_ctx.calc_buf_)) {
-    ret = OB_NOT_INIT;
-    LOG_WARN("varchar buffer not init", K(ret));
-  } else if (obj.is_null()) {
-    result.set_null();
-  } else if (lib::is_oracle_mode()) {
-    if (obj.is_number()) {
-      const number::ObNumber arg_number = obj.get_number();
-      number::ObNumber result_number;
-      common::ObIAllocator& allocator = *(expr_ctx.calc_buf_);
-      if (OB_FAIL(arg_number.sqrt(result_number, allocator))) {
-        LOG_WARN("sqrt failed", K(ret), K(arg_number), K(result_number));
-      } else {
-        result.set_number(result_number);
-        LOG_DEBUG("ObExprSqrt, ObNumber path end successfully");
-      }
-    } else if (obj.is_double()) {
-      double value = obj.get_double();
-      if (value < 0) {
-        ret = OB_ERR_ARGUMENT_OUT_OF_RANGE;
-      } else if (std::fpclassify(value) == FP_ZERO) {
-        result.set_double(-0);
-      } else {
-        result.set_double(sqrt(value));
-      }
-    } else if (obj.is_float()) {
-      float value = obj.get_float();
-      if (value < 0) {
-        ret = OB_ERR_ARGUMENT_OUT_OF_RANGE;
-      } else if (std::fpclassify(value) == FP_ZERO) {
-        result.set_float(-0);
-      } else {
-        result.set_float(sqrtf(value));
-      }
-    } else {
-      ret = OB_ERR_UNEXPECTED;
-      LOG_WARN("obj type should be number or float, double", K(obj), K(ret));
-    }
-  } else {
-    if (obj.is_double()) {
-      double value = obj.get_double();
-      if (value < 0) {
-        result.set_null();
-      } else {
-        result.set_double(sqrt(value));
-      }
-    } else {
-      ret = OB_ERR_UNEXPECTED;
-      LOG_WARN("obj type should be double", K(obj), K(ret));
-    }
-  }
-  return ret;
-}
-
-int calc_sqrt_expr_mysql(const ObExpr& expr, ObEvalCtx& ctx, ObDatum& res_datum)
-{
-  int ret = OB_SUCCESS;
-  ObDatum* arg = NULL;
+  ObDatum *arg = NULL;
   if (OB_FAIL(expr.args_[0]->eval(ctx, arg))) {
     LOG_WARN("eval arg failed", K(ret), K(expr));
   } else if (arg->is_null()) {
@@ -127,10 +74,37 @@ int calc_sqrt_expr_mysql(const ObExpr& expr, ObEvalCtx& ctx, ObDatum& res_datum)
   return ret;
 }
 
-int calc_sqrt_expr_oracle_double(const ObExpr& expr, ObEvalCtx& ctx, ObDatum& res_datum)
+int calc_sqrt_expr_mysql_in_batch(const ObExpr &expr,
+                                  ObEvalCtx &ctx,
+                                  const ObBitVector &skip,
+                                  const int64_t batch_size)
 {
   int ret = OB_SUCCESS;
-  ObDatum* arg = NULL;
+  if (OB_FAIL(expr.args_[0]->eval_batch(ctx, skip, batch_size))) {
+    LOG_WARN("vectorized evaluate failed", K(ret), K(expr));
+  } else {
+    ObBitVector &eval_flag = expr.get_evaluated_flags(ctx);
+    ObDatumVector arg_datums = expr.args_[0]->locate_expr_datumvector(ctx);
+    ObDatum *res_datums = expr.locate_batch_datums(ctx);
+    for (int64_t i = 0; i < batch_size; ++i) {
+      if (!eval_flag.contain(i) && !skip.contain(i)) {
+        if (arg_datums.at(i)->is_null() || arg_datums.at(i)->get_double() < 0) {
+          res_datums[i].set_null();
+        } else {
+          res_datums[i].set_double(std::sqrt(arg_datums.at(i)->get_double()));
+        }
+        eval_flag.set(i);
+      }
+    }
+  }
+  return ret;
+}
+
+int calc_sqrt_expr_oracle_double(const ObExpr &expr, ObEvalCtx &ctx,
+                                ObDatum &res_datum)
+{
+  int ret = OB_SUCCESS;
+  ObDatum *arg = NULL;
   if (OB_FAIL(expr.args_[0]->eval(ctx, arg))) {
     LOG_WARN("eval arg failed", K(ret), K(expr));
   } else if (arg->is_null()) {
@@ -140,14 +114,14 @@ int calc_sqrt_expr_oracle_double(const ObExpr& expr, ObEvalCtx& ctx, ObDatum& re
     if (ObDoubleType == arg_type) {
       double val = arg->get_double();
       if (val < 0) {
-        ret = OB_ERR_ARGUMENT_OUT_OF_RANGE;
+        res_datum.set_double(NAN);
       } else {
         res_datum.set_double(std::sqrt(val));
       }
     } else if (ObFloatType == arg_type) {
       float val = arg->get_float();
       if (val < 0) {
-        ret = OB_ERR_ARGUMENT_OUT_OF_RANGE;
+        res_datum.set_float(NAN);
       } else {
         res_datum.set_float(sqrtf(val));
       }
@@ -159,10 +133,79 @@ int calc_sqrt_expr_oracle_double(const ObExpr& expr, ObEvalCtx& ctx, ObDatum& re
   return ret;
 }
 
-int calc_sqrt_expr_oracle_number(const ObExpr& expr, ObEvalCtx& ctx, ObDatum& res_datum)
+template <typename T>
+int calc_sqrt_expr_oracle_double_in_batch_impl(const ObExpr &expr,
+                                               ObEvalCtx &ctx,
+                                               const ObBitVector &skip,
+                                               const int64_t batch_size)
+{
+  ObBitVector &eval_flag = expr.get_evaluated_flags(ctx);
+  ObDatumVector arg_datums = expr.args_[0]->locate_expr_datumvector(ctx);
+  ObDatum *res_datums = expr.locate_batch_datums(ctx);
+  int ret = OB_SUCCESS;
+  if (std::is_same<T, float>::value) {
+    for (int64_t i = 0; i < batch_size && OB_SUCC(ret); ++i) {
+      if (!eval_flag.contain(i) && !skip.contain(i)) {
+        ObDatum *arg = arg_datums.at(i);
+        if (arg->is_null()) {
+          res_datums[i].set_null();
+        } else if (arg->get_float() < 0) {
+          res_datums[i].set_float(NAN);
+        } else {
+          res_datums[i].set_float(std::sqrt(arg->get_float()));
+        }
+        eval_flag.set(i);
+      }
+    }
+  } else if (std::is_same<T, double>::value) {
+    for (int64_t i = 0; i < batch_size && OB_SUCC(ret); ++i) {
+      if (!eval_flag.contain(i) && !skip.contain(i)) {
+        ObDatum *arg = arg_datums.at(i);
+        if (arg->is_null()) {
+          res_datums[i].set_null();
+        } else if (arg->get_double() < 0) {
+          res_datums[i].set_double(NAN);
+        } else {
+          res_datums[i].set_double(std::sqrt(arg->get_double()));
+        }
+        eval_flag.set(i);
+      }
+    }
+  }
+  return ret;
+}
+
+int calc_sqrt_expr_oracle_double_in_batch(const ObExpr &expr,
+                                          ObEvalCtx &ctx,
+                                          const ObBitVector &skip,
+                                          const int64_t batch_size)
 {
   int ret = OB_SUCCESS;
-  ObDatum* arg = NULL;
+  if (OB_FAIL(expr.args_[0]->eval_batch(ctx, skip, batch_size))) {
+    LOG_WARN("vectorized evaluate failed", K(ret), K(expr));
+  } else {
+    ObObjType arg_type = expr.args_[0]->datum_meta_.type_;
+    switch (arg_type) {
+    case ObDoubleType:
+      ret = calc_sqrt_expr_oracle_double_in_batch_impl<double>(expr, ctx, skip, batch_size);
+      break;
+    case ObFloatType:
+      ret = calc_sqrt_expr_oracle_double_in_batch_impl<float>(expr, ctx, skip, batch_size);
+      break;
+    default:
+      ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("unexpected arg type", K(ret), K(arg_type));
+      break;
+    }
+  }
+  return ret;
+}
+
+int calc_sqrt_expr_oracle_number(const ObExpr &expr, ObEvalCtx &ctx,
+                                ObDatum &res_datum)
+{
+  int ret = OB_SUCCESS;
+  ObDatum *arg = NULL;
   if (OB_FAIL(expr.args_[0]->eval(ctx, arg))) {
     LOG_WARN("eval arg failed", K(ret), K(expr));
   } else if (arg->is_null()) {
@@ -170,8 +213,18 @@ int calc_sqrt_expr_oracle_number(const ObExpr& expr, ObEvalCtx& ctx, ObDatum& re
   } else {
     const number::ObNumber arg_nmb(arg->get_number());
     number::ObNumber res_nmb;
-    if (OB_FAIL(arg_nmb.sqrt(res_nmb, ctx.get_reset_tmp_alloc()))) {
-      LOG_WARN("calc sqrt failed", K(ret), K(arg_nmb), K(res_nmb));
+    ObEvalCtx::TempAllocGuard alloc_guard(ctx);
+    if (OB_FAIL(arg_nmb.sqrt(res_nmb, alloc_guard.get_allocator()))) {
+      // The input of the sqrt rewritten by stddev will not be negative. If it is negative, it
+      // means that the parameter has overflowed. Since the precision of ob is very large and the
+      // absolute value of the parameter is very small, the result can be directly corrected to 0
+      if (OB_UNLIKELY(arg_nmb.is_negative() && expr.extra_ == T_FUN_STDDEV)) {
+        res_nmb.set_zero();
+        res_datum.set_number(res_nmb);
+        ret = OB_SUCCESS;
+      } else {
+        LOG_WARN("calc sqrt failed", K(ret), K(arg_nmb), K(res_nmb));
+      }
     } else {
       res_datum.set_number(res_nmb);
     }
@@ -179,28 +232,79 @@ int calc_sqrt_expr_oracle_number(const ObExpr& expr, ObEvalCtx& ctx, ObDatum& re
   return ret;
 }
 
-int ObExprSqrt::cg_expr(ObExprCGCtx& expr_cg_ctx, const ObRawExpr& raw_expr, ObExpr& rt_expr) const
+int calc_sqrt_expr_oracle_number_in_batch(const ObExpr &expr,
+                                          ObEvalCtx &ctx,
+                                          const ObBitVector &skip,
+                                          const int64_t batch_size)
+{
+  int ret = OB_SUCCESS;
+  if (OB_FAIL(expr.args_[0]->eval_batch(ctx, skip, batch_size))) {
+    LOG_WARN("vectorized evaluate failed", K(ret), K(expr));
+  } else {
+    ObBitVector &eval_flag = expr.get_evaluated_flags(ctx);
+    ObDatumVector arg_datums = expr.args_[0]->locate_expr_datumvector(ctx);
+    ObDatum *res_datums = expr.locate_batch_datums(ctx);
+    number::ObNumber res_nmb;
+    number::ObNumber arg_nmb;
+    char temp_buf_alloc[number::ObNumber::MAX_CALC_BYTE_LEN];
+    ObDataBuffer temp_allocator(temp_buf_alloc, number::ObNumber::MAX_CALC_BYTE_LEN);
+    for (int64_t i = 0; i < batch_size && OB_SUCC(ret); ++i) {
+      if (!eval_flag.contain(i) && !skip.contain(i)) {
+        if (arg_datums.at(i)->is_null()) {
+          res_datums[i].set_null();
+        } else {
+          arg_nmb = arg_datums.at(i)->get_number();
+          if (OB_FAIL(arg_nmb.sqrt(res_nmb, temp_allocator))) {
+            // The input of the sqrt rewritten by stddev will not be negative. If it is negative, it
+            // means that the parameter has overflowed. Since the precision of ob is very large and
+            // the absolute value of the parameter is very small, the result can be directly
+            // corrected to 0
+            if (OB_UNLIKELY(arg_nmb.is_negative() && expr.extra_ == T_FUN_STDDEV)) {
+              res_nmb.set_zero();
+              res_datums[i].set_number(res_nmb);
+              ret = OB_SUCCESS;
+            } else {
+              LOG_WARN("calc sqrt failed", K(ret), K(arg_nmb), K(res_nmb));
+            }
+          } else {
+            res_datums[i].set_number(res_nmb);
+          }
+          temp_allocator.free();
+        }
+        eval_flag.set(i);
+      }
+    }
+  }
+  return ret;
+}
+
+int ObExprSqrt::cg_expr(ObExprCGCtx &expr_cg_ctx, const ObRawExpr &raw_expr,
+                       ObExpr &rt_expr) const
 {
   int ret = OB_SUCCESS;
   UNUSED(expr_cg_ctx);
-  UNUSED(raw_expr);
+  rt_expr.extra_ = raw_expr.get_extra();
   if (OB_UNLIKELY(1 != rt_expr.arg_cnt_)) {
     ret = OB_ERR_UNEXPECTED;
     LOG_WARN("invalid arg_cnt_ of expr", K(ret), K(rt_expr));
   } else {
     ObObjType arg_res_type = rt_expr.args_[0]->datum_meta_.type_;
-    if (share::is_oracle_mode()) {
+    if (lib::is_oracle_mode()) {
       if (ObDoubleType == arg_res_type || ObFloatType == arg_res_type) {
         rt_expr.eval_func_ = calc_sqrt_expr_oracle_double;
+        rt_expr.eval_batch_func_ = calc_sqrt_expr_oracle_double_in_batch;
       } else if (ObNumberType == arg_res_type) {
         rt_expr.eval_func_ = calc_sqrt_expr_oracle_number;
+        rt_expr.eval_batch_func_ = calc_sqrt_expr_oracle_number_in_batch;
       } else {
         ret = OB_ERR_UNEXPECTED;
-        LOG_WARN("arg type must be double or number in oracle mode", K(ret), K(arg_res_type), K(rt_expr));
+        LOG_WARN("arg type must be double or number in oracle mode", K(ret),
+            K(arg_res_type), K(rt_expr));
       }
     } else {
       if (ObDoubleType == arg_res_type) {
         rt_expr.eval_func_ = calc_sqrt_expr_mysql;
+        rt_expr.eval_batch_func_ = calc_sqrt_expr_mysql_in_batch;
       } else {
         ret = OB_ERR_UNEXPECTED;
         LOG_WARN("arg_res_type must be double in mysql mode", K(ret), K(arg_res_type));
@@ -209,5 +313,5 @@ int ObExprSqrt::cg_expr(ObExprCGCtx& expr_cg_ctx, const ObRawExpr& raw_expr, ObE
   }
   return ret;
 }
-}  // namespace sql
-}  // namespace oceanbase
+} //namespace sql
+} //namespace oceanbase

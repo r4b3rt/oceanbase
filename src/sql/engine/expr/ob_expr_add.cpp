@@ -11,43 +11,80 @@
  */
 
 #define USING_LOG_PREFIX SQL_ENG
-#include "sql/engine/expr/ob_expr_add.h"
-#include "lib/oblog/ob_log.h"
-#include "lib/utility/ob_macro_utils.h"
+#include "ob_expr_add.h"
 #include "sql/engine/expr/ob_expr_result_type_util.h"
-#include "sql/resolver/expr/ob_raw_expr.h"
-#include "sql/engine/ob_exec_context.h"
-#include "sql/code_generator/ob_static_engine_expr_cg.h"
-namespace oceanbase {
+#include "sql/engine/expr/ob_batch_eval_util.h"
+#include "sql/resolver/expr/ob_raw_expr_util.h"
+
+
+namespace oceanbase
+{
 using namespace common;
 using namespace common::number;
-namespace sql {
+namespace sql
+{
 
-ObExprAdd::ObExprAdd(ObIAllocator& alloc, ObExprOperatorType type)
-    : ObArithExprOperator(alloc, type, N_ADD, 2, NOT_ROW_DIMENSION, ObExprResultTypeUtil::get_add_result_type,
-          ObExprResultTypeUtil::get_add_calc_type, add_funcs_)
+ObExprAdd::ObExprAdd(ObIAllocator &alloc, ObExprOperatorType type)
+  : ObArithExprOperator(alloc,
+                        type,
+                        N_ADD,
+                        2,
+                        NOT_ROW_DIMENSION,
+                        ObExprResultTypeUtil::get_add_result_type,
+                        ObExprResultTypeUtil::get_add_calc_type,
+                        add_funcs_)
 {
   param_lazy_eval_ = lib::is_oracle_mode();
 }
 
-int ObExprAdd::calc_result_type2(
-    ObExprResType& type, ObExprResType& type1, ObExprResType& type2, ObExprTypeCtx& type_ctx) const
+/* Note: precision, scale计算需要考虑： 字符串，整数，浮点数，十进制数等混合相加的情况 */
+int ObExprAdd::calc_result_type2(ObExprResType &type,
+                                 ObExprResType &type1,
+                                 ObExprResType &type2,
+                                 ObExprTypeCtx &type_ctx) const
 {
   int ret = OB_SUCCESS;
   static const int64_t CARRY_OFFSET = 1;
   ObScale scale = SCALE_UNKNOWN_YET;
   ObPrecision precision = PRECISION_UNKNOWN_YET;
-  bool is_oracle = share::is_oracle_mode();
+  bool is_oracle = lib::is_oracle_mode();
+  const bool is_all_decint_args =
+    ob_is_decimal_int(type1.get_type()) && ob_is_decimal_int(type2.get_type());
   if (OB_FAIL(ObArithExprOperator::calc_result_type2(type, type1, type2, type_ctx))) {
     LOG_WARN("fail to calc result type", K(ret), K(type), K(type1), K(type2));
-  } else if (is_oracle && type.is_oracle_decimal()) {
-    type.set_scale(ORA_NUMBER_SCALE_UNKNOWN_YET);
-    type.set_precision(PRECISION_UNKNOWN_YET);
+  } else if (type.is_decimal_int() && (type1.is_null() || type2.is_null())) {
+    type.set_scale(MAX(type1.get_scale(), type2.get_scale()));
+    type.set_precision(MAX(type1.get_precision(), type2.get_precision()));
+  } else if (type.is_collection_sql_type()) {
+    if (type1.is_collection_sql_type() && type2.is_collection_sql_type()) {
+      ObSQLSessionInfo *session = const_cast<ObSQLSessionInfo *>(type_ctx.get_session());
+      ObExecContext *exec_ctx = OB_ISNULL(session) ? NULL : session->get_cur_exec_ctx();
+      ObExprResType coll_calc_type = type;
+      if (OB_FAIL(ObExprResultTypeUtil::get_array_calc_type(exec_ctx, type1, type2, coll_calc_type))) {
+        LOG_WARN("failed to check array compatibilty", K(ret));
+      } else {
+        type1.set_calc_meta(coll_calc_type);
+        type2.set_calc_meta(coll_calc_type);
+        type.set_collection(coll_calc_type.get_subschema_id());
+      }
+    } else {
+      // only support vector/array/varchar + vector/array/varchar now // array and varchar need cast to array(float)
+      uint16_t res_subschema_id = UINT16_MAX;
+      if (OB_FAIL(ObArrayExprUtils::calc_cast_type2(type1, type2, type_ctx, res_subschema_id))) {
+        LOG_WARN("failed to calc cast type", K(ret), K(type1));
+      } else if (UINT16_MAX == res_subschema_id) {
+        ret = OB_ERR_UNEXPECTED;
+        LOG_WARN("unexpected result subschema_id", K(ret));
+      } else {
+        type.set_collection(res_subschema_id);
+      }
+    }
   } else if (OB_UNLIKELY(SCALE_UNKNOWN_YET == type1.get_scale()) ||
              OB_UNLIKELY(SCALE_UNKNOWN_YET == type2.get_scale())) {
-    type.set_scale(SCALE_UNKNOWN_YET);
+    type.set_scale(NUMBER_SCALE_UNKNOWN_YET);
     type.set_precision(PRECISION_UNKNOWN_YET);
-  } else if (type1.get_type_class() == ObIntervalTC || type2.get_type_class() == ObIntervalTC) {
+  } else if (type1.get_type_class() == ObIntervalTC
+            || type2.get_type_class() == ObIntervalTC) {
     type.set_scale(ObAccuracy::MAX_ACCURACY2[ORACLE_MODE][type.get_type()].get_scale());
     type.set_precision(ObAccuracy::MAX_ACCURACY2[ORACLE_MODE][type.get_type()].get_precision());
   } else {
@@ -56,10 +93,18 @@ int ObExprAdd::calc_result_type2(
     } else {
       ObScale scale1 = static_cast<ObScale>(MAX(type1.get_scale(), 0));
       ObScale scale2 = static_cast<ObScale>(MAX(type2.get_scale(), 0));
-      int64_t inter_part_length1 = type1.get_precision() - type1.get_scale();
-      int64_t inter_part_length2 = type2.get_precision() - type2.get_scale();
       scale = MAX(scale1, scale2);
-      precision = static_cast<ObPrecision>(MAX(inter_part_length1, inter_part_length2) + CARRY_OFFSET + scale);
+      if (lib::is_mysql_mode() && type.is_double()) {
+        precision = ObMySQLUtil::float_length(scale);
+      } else if (type.has_result_flag(DECIMAL_INT_ADJUST_FLAG)) {
+        precision = MAX(type1.get_precision(), type2.get_precision());
+      } else {
+        int64_t inter_part_length1 = type1.get_precision() - type1.get_scale();
+        int64_t inter_part_length2 = type2.get_precision() - type2.get_scale();
+        precision = MIN(static_cast<ObPrecision>(MAX(inter_part_length1, inter_part_length2)
+                                                 + CARRY_OFFSET + scale),
+                        OB_MAX_DECIMAL_POSSIBLE_PRECISION);
+      }
     }
 
     type.set_scale(scale);
@@ -70,149 +115,159 @@ int ObExprAdd::calc_result_type2(
     } else {
       type.set_precision(precision);
     }
+    if (is_all_decint_args || type.is_decimal_int()) {
+      if (OB_UNLIKELY(PRECISION_UNKNOWN_YET == type.get_precision() ||
+                      SCALE_UNKNOWN_YET == type.get_scale())) {
+        ret = OB_ERR_UNEXPECTED;
+        LOG_WARN("unexpected decimal int precision and scale", K(ret), K(type));
+      } else if (is_oracle && type.get_precision() > OB_MAX_NUMBER_PRECISION) {
+        type1.set_calc_type(ObNumberType);
+        type2.set_calc_type(ObNumberType);
+        type.set_number();
+      } else {
+        if (ObRawExprUtils::decimal_int_need_cast(type1.get_accuracy(), type.get_accuracy()) ||
+              ObRawExprUtils::decimal_int_need_cast(type2.get_accuracy(), type.get_accuracy())) {
+          // 如果参数的scale和结果类型不一致，或者是参数精度和结果类型跨了一个decimal int类型（int32->int64)
+          // 需要将参数进行cast，此外还需设置DECIMAL_INT_ADJUST_FLAG，标记参数(P, S)已经调整避免下次类型
+          // 推导重复调整
+          type.set_result_flag(DECIMAL_INT_ADJUST_FLAG);
+        }
+        type1.set_calc_accuracy(type.get_accuracy());
+        type2.set_calc_accuracy(type.get_accuracy());
+      }
+      LOG_DEBUG("calc_result_type2", K(type.get_accuracy()), K(type1.get_accuracy()),
+                                     K(type2.get_accuracy()));
+    }
+    // reset PS to unknown for oracle number type
+    if (OB_SUCC(ret) && is_oracle && type.is_oracle_decimal() && !type.is_decimal_int()) {
+      type.set_scale(ORA_NUMBER_SCALE_UNKNOWN_YET);
+      type.set_precision(PRECISION_UNKNOWN_YET);
+    }
+    if ((ob_is_double_tc(type.get_type()) || ob_is_float_tc(type.get_type())) && type.get_scale() > 0) {
+      // if result is fixed double/float, calc type's of params should also be fixed double/float
+      if (ob_is_double_tc(type1.get_calc_type()) || ob_is_float_tc(type1.get_calc_type())) {
+        type1.set_calc_scale(type.get_scale());
+      }
+      if (ob_is_double_tc(type2.get_calc_type()) || ob_is_float_tc(type2.get_calc_type())) {
+        type2.set_calc_scale(type.get_scale());
+      }
+    }
   }
   LOG_DEBUG("calc_result_type2", K(scale), K(type1), K(type2), K(type), K(precision));
   return ret;
 }
 
-int ObExprAdd::calc_result2(ObObj& result, const ObObj& left, const ObObj& right, ObExprCtx& expr_ctx) const
+int ObExprAdd::calc(ObObj &res,
+                    const ObObj &left,
+                    const ObObj &right,
+                    ObIAllocator *allocator,
+                    ObScale scale)
 {
-  int ret = OB_SUCCESS;
-  ObScale calc_scale = result_type_.get_calc_scale();
-  ObObjType calc_type = result_type_.get_calc_type();
-  if (lib::is_oracle_mode()) {
-    if (OB_FAIL(param_eval(expr_ctx, left, 0))) {
-      LOG_WARN("parameter evaluate failed", K(ret));
-    } else if (left.is_null_oracle()) {
-      result.set_null();
-    } else if (OB_FAIL(param_eval(expr_ctx, right, 1))) {
-      LOG_WARN("parameter evaluate failed", K(ret));
-    } else {
-      ObObjTypeClass tc1 = left.get_type_class();
-      ObObjTypeClass tc2 = right.get_type_class();
-      if (ObIntervalTC == tc1 || ObIntervalTC == tc2) {
-        // interval can calc with different types such as date, timestamp, interval. the params do not need to do cast
-        ret = (ObIntervalTC == tc2) ? interval_add_minus(result, left, right, expr_ctx, calc_scale)
-                                    : interval_add_minus(result, right, left, expr_ctx, calc_scale);
-      } else {
-        // When execute add_xxx later, can set result type with result.get_type().
-        result.set_type(get_result_type().get_type());
-        ret = ObArithExprOperator::calc_(result, left, right, expr_ctx, calc_scale, calc_type, add_funcs_);
-      }
-    }
-  } else if (OB_UNLIKELY(ObNullType == left.get_type() || ObNullType == right.get_type())) {
-    result.set_null();
-  } else {
-    ObObjTypeClass tc1 = left.get_type_class();
-    ObObjTypeClass tc2 = right.get_type_class();
-    if (ObIntTC == tc1) {
-      if (ObIntTC == tc2 || ObUIntTC == tc2) {
-        ret = add_int(result, left, right, expr_ctx.calc_buf_, calc_scale);
-      } else {
-        ret = ObArithExprOperator::calc_(result, left, right, expr_ctx, calc_scale, calc_type, add_funcs_);
-      }
-    } else if (ObUIntTC == tc1) {
-      if (ObIntTC == tc2 || ObUIntTC == tc2) {
-        ret = add_uint(result, left, right, expr_ctx.calc_buf_, calc_scale);
-      } else {
-        ret = ObArithExprOperator::calc_(result, left, right, expr_ctx, calc_scale, calc_type, add_funcs_);
-      }
-    } else {
-      result.set_type(get_result_type().get_type());
-      ret = ObArithExprOperator::calc_(
-          result, left, right, expr_ctx, calc_scale, calc_type, type_ == T_OP_AGG_ADD ? agg_add_funcs_ : add_funcs_);
-    }
-  }
-  return ret;
+  return ObArithExprOperator::calc(res, left, right,
+                                   allocator, scale,
+                                   ObExprResultTypeUtil::get_add_result_type,
+                                   add_funcs_);
 }
 
-int ObExprAdd::calc(ObObj& res, const ObObj& left, const ObObj& right, ObIAllocator* allocator, ObScale scale)
-{
-  return ObArithExprOperator::calc(
-      res, left, right, allocator, scale, ObExprResultTypeUtil::get_add_result_type, add_funcs_);
-}
-
-int ObExprAdd::calc(ObObj& res, const ObObj& left, const ObObj& right, ObExprCtx& expr_ctx, ObScale scale)
+int ObExprAdd::calc(ObObj &res,
+                    const ObObj &left,
+                    const ObObj &right,
+                    ObExprCtx &expr_ctx,
+                    ObScale scale)
 {
   int ret = OB_SUCCESS;
   const ObObjTypeClass tc1 = left.get_type_class();
   const ObObjTypeClass tc2 = right.get_type_class();
   if (lib::is_oracle_mode() && (ObIntervalTC == tc1 || ObIntervalTC == tc2)) {
-    // interval can calc with different types such as date, timestamp, interval.
-    // the params do not need to do cast
+    //interval can calc with different types such as date, timestamp, interval.
+    //the params do not need to do cast
     ret = (ObIntervalTC == tc2) ? interval_add_minus(res, left, right, expr_ctx, scale)
                                 : interval_add_minus(res, right, left, expr_ctx, scale);
   } else {
-    ret = ObArithExprOperator::calc(
-        res, left, right, expr_ctx, scale, ObExprResultTypeUtil::get_add_result_type, add_funcs_);
+    ret = ObArithExprOperator::calc(res, left, right,
+                                    expr_ctx, scale,
+                                    ObExprResultTypeUtil::get_add_result_type,
+                                    add_funcs_);
   }
   return ret;
 }
 
-int ObExprAdd::calc_for_agg(ObObj& res, const ObObj& left, const ObObj& right, ObExprCtx& expr_ctx, ObScale scale)
+int ObExprAdd::calc_for_agg(ObObj &res,
+                            const ObObj &left,
+                            const ObObj &right,
+                            ObExprCtx &expr_ctx,
+                            ObScale scale)
 {
   int ret = OB_SUCCESS;
   const ObObjTypeClass tc1 = left.get_type_class();
   const ObObjTypeClass tc2 = right.get_type_class();
   if (lib::is_oracle_mode() && (ObIntervalTC == tc1 || ObIntervalTC == tc2)) {
-    // interval can calc with different types such as date, timestamp, interval.
-    // the params do not need to do cast
+    //interval can calc with different types such as date, timestamp, interval.
+    //the params do not need to do cast
     ret = (ObIntervalTC == tc2) ? interval_add_minus(res, left, right, expr_ctx, scale)
                                 : interval_add_minus(res, right, left, expr_ctx, scale);
   } else {
-    ret = ObArithExprOperator::calc(
-        res, left, right, expr_ctx, scale, ObExprResultTypeUtil::get_add_result_type, agg_add_funcs_);
+    ret = ObArithExprOperator::calc(res, left, right,
+                                    expr_ctx, scale,
+                                    ObExprResultTypeUtil::get_add_result_type,
+                                    agg_add_funcs_);
   }
   return ret;
 }
 
-ObArithFunc ObExprAdd::add_funcs_[ObMaxTC] = {
-    NULL,
-    ObExprAdd::add_int,
-    ObExprAdd::add_uint,
-    ObExprAdd::add_float,
-    ObExprAdd::add_double,
-    ObExprAdd::add_number,
-    ObExprAdd::add_datetime,  // datetime
-    NULL,                     // date
-    NULL,                     // time
-    NULL,                     // year
-    NULL,                     // varchar
-    NULL,                     // extend
-    NULL,                     // unknown
-    NULL,                     // text
-    NULL,                     // bit
-    NULL,                     // enumset
-    NULL,                     // enumsetInner
-    NULL,                     // otimestamp
-    NULL,                     // raw
-    NULL,                     // interval, hard code using interval_add_minus
+ObArithFunc ObExprAdd::add_funcs_[ObMaxTC] =
+{
+  NULL,
+  ObExprAdd::add_int,
+  ObExprAdd::add_uint,
+  ObExprAdd::add_float,
+  ObExprAdd::add_double,
+  ObExprAdd::add_number,
+  ObExprAdd::add_datetime, //datetime
+  NULL,//date
+  NULL,//time
+  NULL,//year
+  NULL,//varchar
+  NULL,//extend
+  NULL,//unknown
+  NULL,//text
+  NULL,//bit
+  NULL,//enumset
+  NULL,//enumsetInner
+  NULL,//otimestamp
+  NULL,//raw
+  NULL,//interval, hard code using interval_add_minus
 };
 
-ObArithFunc ObExprAdd::agg_add_funcs_[ObMaxTC] = {
-    NULL,
-    ObExprAdd::add_int,
-    ObExprAdd::add_uint,
-    ObExprAdd::add_float,
-    ObExprAdd::add_double_no_overflow,
-    ObExprAdd::add_number,
-    ObExprAdd::add_datetime,  // datetime
-    NULL,                     // date
-    NULL,                     // time
-    NULL,                     // year
-    NULL,                     // varchar
-    NULL,                     // extend
-    NULL,                     // unknown
-    NULL,                     // text
-    NULL,                     // bit
-    NULL,                     // enumset
-    NULL,                     // enumsetInner
-    NULL,                     // otimestamp
-    NULL,                     // raw
-    NULL,                     // interval, hard code using interval_add_minus
+ObArithFunc ObExprAdd::agg_add_funcs_[ObMaxTC] =
+{
+  NULL,
+  ObExprAdd::add_int,
+  ObExprAdd::add_uint,
+  ObExprAdd::add_float,
+  ObExprAdd::add_double_no_overflow,
+  ObExprAdd::add_number,
+  ObExprAdd::add_datetime, //datetime
+  NULL,//date
+  NULL,//time
+  NULL,//year
+  NULL,//varchar
+  NULL,//extend
+  NULL,//unknown
+  NULL,//text
+  NULL,//bit
+  NULL,//enumset
+  NULL,//enumsetInner
+  NULL,//otimestamp
+  NULL,//raw
+  NULL,//interval, hard code using interval_add_minus
 };
 
-int ObExprAdd::add_int(ObObj& res, const ObObj& left, const ObObj& right, ObIAllocator* allocator, ObScale scale)
+int ObExprAdd::add_int(ObObj &res,
+                       const ObObj &left,
+                       const ObObj &right,
+                       ObIAllocator *allocator,
+                       ObScale scale)
 {
   int ret = OB_SUCCESS;
   int64_t left_i = left.get_int();
@@ -224,7 +279,10 @@ int ObExprAdd::add_int(ObObj& res, const ObObj& left, const ObObj& right, ObIAll
     if (OB_UNLIKELY(is_int_int_out_of_range(left_i, right_i, res.get_int()))) {
       ret = OB_OPERATE_OVERFLOW;
       pos = 0;
-      databuff_printf(expr_str, OB_MAX_TWO_OPERATOR_EXPR_LENGTH, pos, "'(%ld + %ld)'", left_i, right_i);
+      databuff_printf(expr_str,
+                      OB_MAX_TWO_OPERATOR_EXPR_LENGTH,
+                      pos,
+                      "'(%ld + %ld)'", left_i, right_i);
       LOG_USER_ERROR(OB_OPERATE_OVERFLOW, "BIGINT", expr_str);
     }
   } else if (ObUIntTC != right.get_type_class()) {
@@ -235,7 +293,10 @@ int ObExprAdd::add_int(ObObj& res, const ObObj& left, const ObObj& right, ObIAll
     if (OB_UNLIKELY(is_int_uint_out_of_range(left_i, right_i, res.get_uint64()))) {
       ret = OB_OPERATE_OVERFLOW;
       pos = 0;
-      databuff_printf(expr_str, OB_MAX_TWO_OPERATOR_EXPR_LENGTH, pos, "'(%ld + %lu)'", left_i, right_i);
+      databuff_printf(expr_str,
+                      OB_MAX_TWO_OPERATOR_EXPR_LENGTH,
+                      pos,
+                      "'(%ld + %lu)'", left_i, right_i);
       LOG_USER_ERROR(OB_OPERATE_OVERFLOW, "BIGINT UNSIGNED", expr_str);
     }
   }
@@ -244,7 +305,11 @@ int ObExprAdd::add_int(ObObj& res, const ObObj& left, const ObObj& right, ObIAll
   return ret;
 }
 
-int ObExprAdd::add_uint(ObObj& res, const ObObj& left, const ObObj& right, ObIAllocator* allocator, ObScale scale)
+int ObExprAdd::add_uint(ObObj &res,
+                        const ObObj &left,
+                        const ObObj &right,
+                        ObIAllocator *allocator,
+                        ObScale scale)
 {
   int ret = OB_SUCCESS;
   uint64_t left_i = left.get_uint64();
@@ -256,7 +321,10 @@ int ObExprAdd::add_uint(ObObj& res, const ObObj& left, const ObObj& right, ObIAl
     if (OB_UNLIKELY(is_uint_uint_out_of_range(left_i, right_i, res.get_uint64()))) {
       ret = OB_OPERATE_OVERFLOW;
       pos = 0;
-      databuff_printf(expr_str, OB_MAX_TWO_OPERATOR_EXPR_LENGTH, pos, "'(%lu + %lu)'", left_i, right_i);
+      databuff_printf(expr_str,
+                      OB_MAX_TWO_OPERATOR_EXPR_LENGTH,
+                      pos,
+                      "'(%lu + %lu)'", left_i, right_i);
       LOG_USER_ERROR(OB_OPERATE_OVERFLOW, "BIGINT UNSIGNED", expr_str);
     }
   } else if (ObIntTC != right.get_type_class()) {
@@ -266,7 +334,10 @@ int ObExprAdd::add_uint(ObObj& res, const ObObj& left, const ObObj& right, ObIAl
     if (OB_UNLIKELY(is_int_uint_out_of_range(right_i, left_i, res.get_uint64()))) {
       ret = OB_OPERATE_OVERFLOW;
       pos = 0;
-      databuff_printf(expr_str, OB_MAX_TWO_OPERATOR_EXPR_LENGTH, pos, "'(%lu + %ld)'", left_i, right_i);
+      databuff_printf(expr_str,
+                      OB_MAX_TWO_OPERATOR_EXPR_LENGTH,
+                      pos,
+                      "'(%lu + %ld)'", left_i, right_i);
       LOG_USER_ERROR(OB_OPERATE_OVERFLOW, "BIGINT UNSIGNED", expr_str);
     }
   }
@@ -275,7 +346,11 @@ int ObExprAdd::add_uint(ObObj& res, const ObObj& left, const ObObj& right, ObIAl
   return ret;
 }
 
-int ObExprAdd::add_float(ObObj& res, const ObObj& left, const ObObj& right, ObIAllocator* allocator, ObScale scale)
+int ObExprAdd::add_float(ObObj &res,
+                         const ObObj &left,
+                         const ObObj &right,
+                         ObIAllocator *allocator,
+                         ObScale scale)
 {
   int ret = OB_SUCCESS;
   if (OB_UNLIKELY(!lib::is_oracle_mode())) {
@@ -288,11 +363,15 @@ int ObExprAdd::add_float(ObObj& res, const ObObj& left, const ObObj& right, ObIA
     float left_f = left.get_float();
     float right_f = right.get_float();
     res.set_float(left_f + right_f);
-    if (OB_UNLIKELY(is_float_out_of_range(res.get_float()))) {
+    if (OB_UNLIKELY(is_float_out_of_range(res.get_float()))
+        && !lib::is_oracle_mode()) {
       ret = OB_OPERATE_OVERFLOW;
       char expr_str[OB_MAX_TWO_OPERATOR_EXPR_LENGTH];
       int64_t pos = 0;
-      databuff_printf(expr_str, OB_MAX_TWO_OPERATOR_EXPR_LENGTH, pos, "'(%e + %e)'", left_f, right_f);
+      databuff_printf(expr_str,
+                      OB_MAX_TWO_OPERATOR_EXPR_LENGTH,
+                      pos,
+                      "'(%e + %e)'", left_f, right_f);
       LOG_USER_ERROR(OB_OPERATE_OVERFLOW, "BINARY_FLOAT", expr_str);
       LOG_WARN("float out of range", K(res), K(left), K(right), K(res));
     }
@@ -303,7 +382,11 @@ int ObExprAdd::add_float(ObObj& res, const ObObj& left, const ObObj& right, ObIA
   return ret;
 }
 
-int ObExprAdd::add_double(ObObj& res, const ObObj& left, const ObObj& right, ObIAllocator* allocator, ObScale scale)
+int ObExprAdd::add_double(ObObj &res,
+                          const ObObj &left,
+                          const ObObj &right,
+                          ObIAllocator *allocator,
+                          ObScale scale)
 {
   int ret = OB_SUCCESS;
   if (OB_UNLIKELY(left.get_type_class() != right.get_type_class())) {
@@ -313,11 +396,15 @@ int ObExprAdd::add_double(ObObj& res, const ObObj& left, const ObObj& right, ObI
     double left_d = left.get_double();
     double right_d = right.get_double();
     res.set_double(left_d + right_d);
-    if (OB_UNLIKELY(is_double_out_of_range(res.get_double()))) {
+    if (OB_UNLIKELY(is_double_out_of_range(res.get_double()))
+        && !lib::is_oracle_mode()) {
       ret = OB_OPERATE_OVERFLOW;
       char expr_str[OB_MAX_TWO_OPERATOR_EXPR_LENGTH];
       int64_t pos = 0;
-      databuff_printf(expr_str, OB_MAX_TWO_OPERATOR_EXPR_LENGTH, pos, "'(%e + %e)'", left_d, right_d);
+      databuff_printf(expr_str,
+                      OB_MAX_TWO_OPERATOR_EXPR_LENGTH,
+                      pos,
+                      "'(%e + %e)'", left_d, right_d);
       LOG_USER_ERROR(OB_OPERATE_OVERFLOW, "DOUBLE", expr_str);
       LOG_WARN("double out of range", K(res), K(left), K(right), K(res));
       res.set_null();
@@ -329,7 +416,11 @@ int ObExprAdd::add_double(ObObj& res, const ObObj& left, const ObObj& right, ObI
   return ret;
 }
 
-int ObExprAdd::add_double_no_overflow(ObObj& res, const ObObj& left, const ObObj& right, ObIAllocator*, ObScale)
+int ObExprAdd::add_double_no_overflow(ObObj &res,
+                                      const ObObj &left,
+                                      const ObObj &right,
+                                      ObIAllocator *,
+                                      ObScale)
 {
   int ret = OB_SUCCESS;
   if (OB_UNLIKELY(left.get_type_class() != right.get_type_class())) {
@@ -344,7 +435,11 @@ int ObExprAdd::add_double_no_overflow(ObObj& res, const ObObj& left, const ObObj
   return ret;
 }
 
-int ObExprAdd::add_number(ObObj& res, const ObObj& left, const ObObj& right, ObIAllocator* allocator, ObScale scale)
+int ObExprAdd::add_number(ObObj &res,
+                          const ObObj &left,
+                          const ObObj &right,
+                          ObIAllocator *allocator,
+                          ObScale scale)
 {
   int ret = OB_SUCCESS;
   number::ObNumber res_nmb;
@@ -364,7 +459,8 @@ int ObExprAdd::add_number(ObObj& res, const ObObj& left, const ObObj& right, ObI
   return ret;
 }
 
-int ObExprAdd::add_datetime(ObObj& res, const ObObj& left, const ObObj& right, ObIAllocator* allocator, ObScale scale)
+int ObExprAdd::add_datetime(ObObj &res, const ObObj &left, const ObObj &right,
+    ObIAllocator *allocator, ObScale scale)
 {
   int ret = OB_SUCCESS;
   const int64_t left_i = left.get_datetime();
@@ -375,14 +471,17 @@ int ObExprAdd::add_datetime(ObObj& res, const ObObj& left, const ObObj& right, O
     res.set_datetime(round_value);
     res.set_scale(OB_MAX_DATE_PRECISION);
     ObTime ob_time;
-    if (OB_UNLIKELY(res.get_datetime() > DATETIME_MAX_VAL || res.get_datetime() < DATETIME_MIN_VAL) ||
-        (OB_FAIL(ObTimeConverter::datetime_to_ob_time(res.get_datetime(), NULL, ob_time))) ||
-        (OB_FAIL(ObTimeConverter::validate_oracle_date(ob_time)))) {
+    if (OB_UNLIKELY(res.get_datetime() > DATETIME_MAX_VAL || res.get_datetime() < DATETIME_MIN_VAL)
+        || (OB_FAIL(ObTimeConverter::datetime_to_ob_time(res.get_datetime(), NULL, ob_time)))
+        || (OB_FAIL(ObTimeConverter::validate_oracle_date(ob_time)))) {
       char expr_str[OB_MAX_TWO_OPERATOR_EXPR_LENGTH];
       int64_t pos = 0;
       ret = OB_OPERATE_OVERFLOW;
       pos = 0;
-      databuff_printf(expr_str, OB_MAX_TWO_OPERATOR_EXPR_LENGTH, pos, "'(%ld + %ld)'", left_i, right_i);
+      databuff_printf(expr_str,
+                      OB_MAX_TWO_OPERATOR_EXPR_LENGTH,
+                      pos,
+                      "'(%ld + %ld)'", left_i, right_i);
       LOG_USER_ERROR(OB_OPERATE_OVERFLOW, "DATE", expr_str);
     }
   }
@@ -392,19 +491,26 @@ int ObExprAdd::add_datetime(ObObj& res, const ObObj& left, const ObObj& right, O
   return ret;
 }
 
-int ObExprAdd::cg_expr(ObExprCGCtx& op_cg_ctx, const ObRawExpr& raw_expr, ObExpr& rt_expr) const
+int ObExprAdd::cg_expr(ObExprCGCtx &op_cg_ctx,
+                       const ObRawExpr &raw_expr,
+                       ObExpr &rt_expr) const
 {
+#define SET_ADD_FUNC_PTR(v) \
+  rt_expr.eval_func_ = ObExprAdd::v; \
+  rt_expr.eval_batch_func_ = ObExprAdd::v##_batch;
+
   int ret = OB_SUCCESS;
   UNUSED(raw_expr);
-  UNUSED(op_cg_ctx);
   if (rt_expr.arg_cnt_ != 2 || OB_ISNULL(rt_expr.args_)) {
     ret = OB_ERR_UNEXPECTED;
-    LOG_WARN("count of children is not 2 or children is null", K(ret), K(rt_expr.arg_cnt_), K(rt_expr.args_));
+    LOG_WARN("count of children is not 2 or children is null", K(ret), K(rt_expr.arg_cnt_),
+                                                              K(rt_expr.args_));
   } else if (OB_ISNULL(rt_expr.args_[0]) || OB_ISNULL(rt_expr.args_[1])) {
     ret = OB_ERR_UNEXPECTED;
     LOG_WARN("child is null", K(ret), K(rt_expr.args_[0]), K(rt_expr.args_[1]));
   } else {
     rt_expr.eval_func_ = NULL;
+    rt_expr.may_not_need_raw_check_ = false;
     const ObObjType left_type = rt_expr.args_[0]->datum_meta_.type_;
     const ObObjType right_type = rt_expr.args_[1]->datum_meta_.type_;
     const ObObjType result_type = rt_expr.datum_meta_.type_;
@@ -412,68 +518,74 @@ int ObExprAdd::cg_expr(ObExprCGCtx& op_cg_ctx, const ObRawExpr& raw_expr, ObExpr
     const ObObjTypeClass right_tc = ob_obj_type_class(right_type);
     switch (result_type) {
       case ObIntType:
-        rt_expr.eval_func_ = ObExprAdd::add_int_int;
+        rt_expr.may_not_need_raw_check_ = true;
+        SET_ADD_FUNC_PTR(add_int_int);
+        rt_expr.eval_vector_func_ = add_int_int_vector;
         break;
       case ObUInt64Type:
+        rt_expr.may_not_need_raw_check_ = false;
         if (ObIntTC == left_tc && ObUIntTC == right_tc) {
-          rt_expr.eval_func_ = ObExprAdd::add_int_uint;
+          SET_ADD_FUNC_PTR(add_int_uint);
+          rt_expr.eval_vector_func_ = add_int_uint_vector;
         } else if (ObUIntTC == left_tc && ObIntTC == right_tc) {
-          rt_expr.eval_func_ = ObExprAdd::add_uint_int;
+          SET_ADD_FUNC_PTR(add_uint_int);
+          rt_expr.eval_vector_func_ = add_uint_int_vector;
         } else if (ObUIntTC == left_tc && ObUIntTC == right_tc) {
-          rt_expr.eval_func_ = ObExprAdd::add_uint_uint;
+          SET_ADD_FUNC_PTR(add_uint_uint);
+          rt_expr.eval_vector_func_ = add_uint_uint_vector;
         }
         break;
       case ObIntervalYMType:
-        rt_expr.eval_func_ = ObExprAdd::add_intervalym_intervalym;
+        SET_ADD_FUNC_PTR(add_intervalym_intervalym);
         break;
       case ObIntervalDSType:
-        rt_expr.eval_func_ = ObExprAdd::add_intervalds_intervalds;
+        SET_ADD_FUNC_PTR(add_intervalds_intervalds);
         break;
       case ObDateTimeType:
         switch (left_type) {
           case ObIntervalYMType:
-            rt_expr.eval_func_ = ObExprAdd::add_intervalym_datetime;
+            SET_ADD_FUNC_PTR(add_intervalym_datetime);
             break;
           case ObIntervalDSType:
-            rt_expr.eval_func_ = ObExprAdd::add_intervalds_datetime;
+            SET_ADD_FUNC_PTR(add_intervalds_datetime);
             break;
           case ObNumberType:
-            rt_expr.eval_func_ = ObExprAdd::add_number_datetime;
+            SET_ADD_FUNC_PTR(add_number_datetime);
             break;
           case ObDateTimeType:
-            switch (right_type) {
+            switch(right_type) {
               case ObIntervalYMType:
-                rt_expr.eval_func_ = ObExprAdd::add_datetime_intervalym;
+                SET_ADD_FUNC_PTR(add_datetime_intervalym);
                 break;
               case ObNumberType:
-                rt_expr.eval_func_ = ObExprAdd::add_datetime_number;
+                SET_ADD_FUNC_PTR(add_datetime_number);
                 break;
               case ObIntervalDSType:
-                rt_expr.eval_func_ = ObExprAdd::add_datetime_intervalds;
+                SET_ADD_FUNC_PTR(add_datetime_intervalds);
                 break;
-              default:
-                rt_expr.eval_func_ = ObExprAdd::add_datetime_datetime;
-                break;
+             default:
+               SET_ADD_FUNC_PTR(add_datetime_datetime);
+               break;
             }
             break;
           default:
-            rt_expr.eval_func_ = ObExprAdd::add_datetime_datetime;
+            SET_ADD_FUNC_PTR(add_datetime_datetime);
             break;
         }
         break;
       case ObTimestampTZType:
         switch (left_type) {
           case ObIntervalYMType:
-            rt_expr.eval_func_ = ObExprAdd::add_intervalym_timestamptz;
+            SET_ADD_FUNC_PTR(add_intervalym_timestamptz);
             break;
           case ObIntervalDSType:
-            rt_expr.eval_func_ = ObExprAdd::add_intervalds_timestamptz;
+            SET_ADD_FUNC_PTR(add_intervalds_timestamptz);
             break;
           case ObTimestampTZType:
             if (ObIntervalYMType == right_type) {
-              rt_expr.eval_func_ = ObExprAdd::add_timestamptz_intervalym;
+              SET_ADD_FUNC_PTR(add_timestamptz_intervalym);
             } else if (ObIntervalDSType == right_type) {
-              rt_expr.eval_func_ = ObExprAdd::add_timestamptz_intervalds;
+              SET_ADD_FUNC_PTR(add_timestamptz_intervalds);
             }
             break;
           default:
@@ -483,16 +595,16 @@ int ObExprAdd::cg_expr(ObExprCGCtx& op_cg_ctx, const ObRawExpr& raw_expr, ObExpr
       case ObTimestampLTZType:
         switch (left_type) {
           case ObIntervalYMType:
-            rt_expr.eval_func_ = ObExprAdd::add_intervalym_timestampltz;
+            SET_ADD_FUNC_PTR(add_intervalym_timestampltz);
             break;
           case ObIntervalDSType:
-            rt_expr.eval_func_ = ObExprAdd::add_intervalds_timestamp_tiny;
+            SET_ADD_FUNC_PTR(add_intervalds_timestamp_tiny);
             break;
           case ObTimestampLTZType:
             if (ObIntervalYMType == right_type) {
-              rt_expr.eval_func_ = ObExprAdd::add_timestampltz_intervalym;
+              SET_ADD_FUNC_PTR(add_timestampltz_intervalym);
             } else if (ObIntervalDSType == right_type) {
-              rt_expr.eval_func_ = ObExprAdd::add_timestamp_tiny_intervalds;
+              SET_ADD_FUNC_PTR(add_timestamp_tiny_intervalds);
             }
             break;
           default:
@@ -502,16 +614,16 @@ int ObExprAdd::cg_expr(ObExprCGCtx& op_cg_ctx, const ObRawExpr& raw_expr, ObExpr
       case ObTimestampNanoType:
         switch (left_type) {
           case ObIntervalYMType:
-            rt_expr.eval_func_ = ObExprAdd::add_intervalym_timestampnano;
+            SET_ADD_FUNC_PTR(add_intervalym_timestampnano);
             break;
           case ObIntervalDSType:
-            rt_expr.eval_func_ = ObExprAdd::add_intervalds_timestamp_tiny;
+            SET_ADD_FUNC_PTR(add_intervalds_timestamp_tiny);
             break;
           case ObTimestampNanoType:
             if (ObIntervalYMType == right_type) {
-              rt_expr.eval_func_ = ObExprAdd::add_timestampnano_intervalym;
+              SET_ADD_FUNC_PTR(add_timestampnano_intervalym);
             } else if (ObIntervalDSType == right_type) {
-              rt_expr.eval_func_ = ObExprAdd::add_timestamp_tiny_intervalds;
+              SET_ADD_FUNC_PTR(add_timestamp_tiny_intervalds);
             }
             break;
           default:
@@ -519,15 +631,107 @@ int ObExprAdd::cg_expr(ObExprCGCtx& op_cg_ctx, const ObRawExpr& raw_expr, ObExpr
         }
         break;
       case ObFloatType:
-        rt_expr.eval_func_ = ObExprAdd::add_float_float;
+        SET_ADD_FUNC_PTR(add_float_float);
+        rt_expr.eval_vector_func_ = add_float_float_vector;
         break;
       case ObDoubleType:
-        rt_expr.eval_func_ = ObExprAdd::add_double_double;
+        SET_ADD_FUNC_PTR(add_double_double);
+        rt_expr.eval_vector_func_ = add_double_double_vector;
         break;
       case ObUNumberType:
       case ObNumberType:
-        rt_expr.eval_func_ = ObExprAdd::add_number_number;
+        if (ob_is_decimal_int(left_type) && ob_is_decimal_int(right_type)) {
+          switch (get_decimalint_type(rt_expr.args_[0]->datum_meta_.precision_)) {
+            case DECIMAL_INT_32:
+              SET_ADD_FUNC_PTR(add_decimalint32_oracle);
+              rt_expr.eval_vector_func_ = add_decimalint32_oracle_vector;
+              break;
+            case DECIMAL_INT_64:
+              SET_ADD_FUNC_PTR(add_decimalint64_oracle);
+              rt_expr.eval_vector_func_ = add_decimalint64_oracle_vector;
+              break;
+            case DECIMAL_INT_128:
+              SET_ADD_FUNC_PTR(add_decimalint128_oracle);
+              rt_expr.eval_vector_func_ = add_decimalint128_oracle_vector;
+              break;
+            default:
+              ret = OB_ERR_UNEXPECTED;
+              LOG_WARN("unexpected precision", K(ret), K(rt_expr.datum_meta_));
+              break;
+          }
+        } else {
+          SET_ADD_FUNC_PTR(add_number_number);
+          rt_expr.eval_vector_func_ = add_number_number_vector;
+        }
         break;
+      case ObDecimalIntType:
+        switch (get_decimalint_type(rt_expr.datum_meta_.precision_)) {
+          case DECIMAL_INT_32:
+            SET_ADD_FUNC_PTR(add_decimalint32);
+            rt_expr.eval_vector_func_ = add_decimalint32_vector;
+            break;
+          case DECIMAL_INT_64:
+            SET_ADD_FUNC_PTR(add_decimalint64);
+            rt_expr.eval_vector_func_ = add_decimalint64_vector;
+            break;
+          case DECIMAL_INT_128:
+            SET_ADD_FUNC_PTR(add_decimalint128);
+            rt_expr.eval_vector_func_ = add_decimalint128_vector;
+            break;
+          case DECIMAL_INT_256:
+            SET_ADD_FUNC_PTR(add_decimalint256);
+            rt_expr.eval_vector_func_ = add_decimalint256_vector;
+            break;
+          case DECIMAL_INT_512:
+            if (rt_expr.datum_meta_.precision_ < OB_MAX_DECIMAL_POSSIBLE_PRECISION) {
+              SET_ADD_FUNC_PTR(add_decimalint512);
+              rt_expr.eval_vector_func_ = add_decimalint512_vector;
+            } else {
+              SET_ADD_FUNC_PTR(add_decimalint512_with_check);
+              rt_expr.eval_vector_func_ = add_decimalint512_with_check_vector;
+            }
+            break;
+          default:
+            ret = OB_ERR_UNEXPECTED;
+            LOG_WARN("unexpected precision", K(ret), K(rt_expr.datum_meta_));
+            break;
+        }
+        break;
+      case ObCollectionSQLType: {
+          ObExecContext *exec_ctx = op_cg_ctx.session_->get_cur_exec_ctx();
+          const uint16_t sub_id = rt_expr.obj_meta_.get_subschema_id();
+          ObObjType elem_type;
+          uint32_t unused;
+          bool is_vec = false;
+          if (OB_FAIL(ObArrayExprUtils::get_array_element_type(exec_ctx, sub_id, elem_type, unused, is_vec))) {
+            LOG_WARN("failed to get collection elem type", K(ret), K(sub_id));
+          } else if (elem_type == ObTinyIntType) {
+            SET_ADD_FUNC_PTR(add_collection_collection_int8_t);
+            rt_expr.eval_vector_func_ = add_collection_collection_int8_t_vector;
+          } else if (elem_type == ObSmallIntType) {
+            SET_ADD_FUNC_PTR(add_collection_collection_int16_t);
+            rt_expr.eval_vector_func_ = add_collection_collection_int16_t_vector;
+          } else if (elem_type == ObInt32Type) {
+            SET_ADD_FUNC_PTR(add_collection_collection_int32_t);
+            rt_expr.eval_vector_func_ = add_collection_collection_int32_t_vector;
+          } else if (elem_type == ObIntType) {
+            SET_ADD_FUNC_PTR(add_collection_collection_int64_t);
+            rt_expr.eval_vector_func_ = add_collection_collection_int64_t_vector;
+          } else if (elem_type == ObFloatType) {
+            SET_ADD_FUNC_PTR(add_collection_collection_float);
+            rt_expr.eval_vector_func_ = add_collection_collection_float_vector;
+          } else if (elem_type == ObDoubleType) {
+            SET_ADD_FUNC_PTR(add_collection_collection_double);
+            rt_expr.eval_vector_func_ = add_collection_collection_double_vector;
+          } else if (elem_type == ObUInt64Type) {
+            SET_ADD_FUNC_PTR(add_collection_collection_uint64_t);
+            rt_expr.eval_vector_func_ = add_collection_collection_uint64_t_vector;
+          } else {
+            ret = OB_NOT_SUPPORTED;
+            LOG_WARN("invalid element type for array operation", K(ret), K(elem_type));
+          }
+          break;
+        }
       default:
         break;
     }
@@ -537,490 +741,1084 @@ int ObExprAdd::cg_expr(ObExprCGCtx& op_cg_ctx, const ObRawExpr& raw_expr, ObExpr
     }
   }
   return ret;
+#undef SET_ADD_FUNC_PTR
 }
 
-// calc_type is IntTC  left and right has same TC
-int ObExprAdd::add_int_int(const ObExpr& expr, ObEvalCtx& ctx, ObDatum& expr_datum)
+struct ObIntIntBatchAddRaw : public ObArithOpRawType<int64_t, int64_t, int64_t>
 {
-  int ret = OB_SUCCESS;
-  ObDatum* left = NULL;
-  ObDatum* right = NULL;
-  bool is_null = false;
-  if (OB_FAIL(ObArithExprOperator::get_arith_operand(expr, ctx, left, right, expr_datum, is_null))) {
-    LOG_WARN("evaluate params failed", K(ret));
-  } else if (false == is_null) {
-    int64_t left_i = left->get_int();
-    int64_t right_i = right->get_int();
-    expr_datum.set_int(left_i + right_i);
-    if (OB_UNLIKELY(is_int_int_out_of_range(left_i, right_i, expr_datum.get_int()))) {
+  static void raw_op(int64_t &res, const int64_t l, const int64_t r)
+  {
+    res = l + r;
+  }
+
+  static int raw_check(const int64_t res, const int64_t l, const int64_t r)
+  {
+    int ret = OB_SUCCESS;
+    if (OB_UNLIKELY(ObExprAdd::is_int_int_out_of_range(l, r, res))) {
       char expr_str[OB_MAX_TWO_OPERATOR_EXPR_LENGTH];
       ret = OB_OPERATE_OVERFLOW;
       int64_t pos = 0;
-      databuff_printf(expr_str, OB_MAX_TWO_OPERATOR_EXPR_LENGTH, pos, "'(%ld + %ld)'", left_i, right_i);
+      databuff_printf(expr_str,
+                      OB_MAX_TWO_OPERATOR_EXPR_LENGTH,
+                      pos,
+                      "'(%ld + %ld)'", l, r);
       LOG_USER_ERROR(OB_OPERATE_OVERFLOW, "BIGINT", expr_str);
     }
+    return ret;
   }
-  return ret;
+};
+
+//calc_type is IntTC  left and right has same TC
+int ObExprAdd::add_int_int(EVAL_FUNC_ARG_DECL)
+{
+  return def_arith_eval_func<ObArithOpWrap<ObIntIntBatchAddRaw>>(EVAL_FUNC_ARG_LIST);
 }
+
+int ObExprAdd::add_int_int_batch(BATCH_EVAL_FUNC_ARG_DECL)
+{
+  return def_batch_arith_op<ObArithOpWrap<ObIntIntBatchAddRaw>>(BATCH_EVAL_FUNC_ARG_LIST);
+}
+
+int ObExprAdd::add_int_int_vector(VECTOR_EVAL_FUNC_ARG_DECL)
+{
+  return def_fixed_len_vector_arith_op<ObVectorArithOpWrap<ObIntIntBatchAddRaw>>(VECTOR_EVAL_FUNC_ARG_LIST);
+}
+
+struct ObIntUIntBatchAddRaw : public ObArithOpRawType<uint64_t, int64_t, uint64_t>
+{
+  static void raw_op(uint64_t &res, const int64_t l, const uint64_t r)
+  {
+    res = l + r;
+  }
+
+  static int raw_check(const uint64_t res, const int64_t l, const uint64_t r)
+  {
+    int ret = OB_SUCCESS;
+    if (OB_UNLIKELY(ObExprAdd::is_int_uint_out_of_range(l, r, res))) {
+      char expr_str[OB_MAX_TWO_OPERATOR_EXPR_LENGTH];
+      ret = OB_OPERATE_OVERFLOW;
+      int64_t pos = 0;
+      databuff_printf(expr_str,
+                      OB_MAX_TWO_OPERATOR_EXPR_LENGTH,
+                      pos,
+                      "'(%ld + %lu)'", l, r);
+      LOG_USER_ERROR(OB_OPERATE_OVERFLOW, "BIGINT UNSIGNED", expr_str);
+    }
+    return ret;
+  }
+};
 
 // calc_type/left_type is IntTC, right is ObUIntTC, only mysql mode
-int ObExprAdd::add_int_uint(const ObExpr& expr, ObEvalCtx& ctx, ObDatum& expr_datum)
+int ObExprAdd::add_int_uint(EVAL_FUNC_ARG_DECL)
 {
-  int ret = OB_SUCCESS;
-  ObDatum* left = NULL;
-  ObDatum* right = NULL;
-  bool is_null = false;
-  if (OB_FAIL(ObArithExprOperator::get_arith_operand(expr, ctx, left, right, expr_datum, is_null))) {
-    LOG_WARN("evaluate params failed", K(ret));
-  } else if (false == is_null) {
-    int64_t left_i = left->get_int();
-    uint64_t right_ui = right->get_uint();
-    expr_datum.set_uint(left_i + right_ui);
-    if (OB_UNLIKELY(is_int_uint_out_of_range(left_i, right_ui, expr_datum.get_uint()))) {
-      char expr_str[OB_MAX_TWO_OPERATOR_EXPR_LENGTH];
-      ret = OB_OPERATE_OVERFLOW;
-      int64_t pos = 0;
-      databuff_printf(expr_str, OB_MAX_TWO_OPERATOR_EXPR_LENGTH, pos, "'(%ld + %lu)'", left_i, right_ui);
-      LOG_USER_ERROR(OB_OPERATE_OVERFLOW, "BIGINT UNSIGNED", expr_str);
-    }
-  }
-  return ret;
+  return def_arith_eval_func<ObArithOpWrap<ObIntUIntBatchAddRaw>>(EVAL_FUNC_ARG_LIST);
 }
 
-// calc_type is UIntTC  left and right has same TC
-int ObExprAdd::add_uint_uint(const ObExpr& expr, ObEvalCtx& ctx, ObDatum& expr_datum)
+int ObExprAdd::add_int_uint_batch(BATCH_EVAL_FUNC_ARG_DECL)
 {
-  int ret = OB_SUCCESS;
-  ObDatum* left = NULL;
-  ObDatum* right = NULL;
-  bool is_null = false;
-  if (OB_FAIL(ObArithExprOperator::get_arith_operand(expr, ctx, left, right, expr_datum, is_null))) {
-    LOG_WARN("evaluate params failed", K(ret));
-  } else if (false == is_null) {
-    uint64_t left_ui = left->get_uint();
-    uint64_t right_ui = right->get_uint();
-    expr_datum.set_uint(left_ui + right_ui);
-    if (OB_UNLIKELY(is_uint_uint_out_of_range(left_ui, right_ui, expr_datum.get_uint()))) {
+  return def_batch_arith_op<ObArithOpWrap<ObIntUIntBatchAddRaw>>(BATCH_EVAL_FUNC_ARG_LIST);
+}
+
+int ObExprAdd::add_int_uint_vector(VECTOR_EVAL_FUNC_ARG_DECL)
+{
+  return def_fixed_len_vector_arith_op<ObVectorArithOpWrap<ObIntUIntBatchAddRaw>>(VECTOR_EVAL_FUNC_ARG_LIST);
+}
+
+struct ObUIntUIntBatchAddRaw : public ObArithOpRawType<uint64_t, uint64_t, uint64_t>
+{
+  static void raw_op(uint64_t &res, const uint64_t l, const uint64_t r)
+  {
+    res = l + r;
+  }
+
+  static int raw_check(const uint64_t res, const uint64_t l, const uint64_t r)
+  {
+    int ret = OB_SUCCESS;
+    if (OB_UNLIKELY(ObExprAdd::is_uint_uint_out_of_range(l, r, res))) {
       char expr_str[OB_MAX_TWO_OPERATOR_EXPR_LENGTH];
       ret = OB_OPERATE_OVERFLOW;
       int64_t pos = 0;
-      databuff_printf(expr_str, OB_MAX_TWO_OPERATOR_EXPR_LENGTH, pos, "'(%lu + %lu)'", left_ui, right_ui);
+      databuff_printf(expr_str,
+                      OB_MAX_TWO_OPERATOR_EXPR_LENGTH,
+                      pos,
+                      "'(%lu + %lu)'", l, r);
       LOG_USER_ERROR(OB_OPERATE_OVERFLOW, "BIGINT UNSIGNED", expr_str);
     }
+    return ret;
   }
-  return ret;
+};
+
+//calc_type is UIntTC  left and right has same TC
+int ObExprAdd::add_uint_uint(EVAL_FUNC_ARG_DECL)
+{
+  return def_arith_eval_func<ObArithOpWrap<ObUIntUIntBatchAddRaw>>(EVAL_FUNC_ARG_LIST);
 }
+
+int ObExprAdd::add_uint_uint_batch(BATCH_EVAL_FUNC_ARG_DECL)
+{
+  return def_batch_arith_op<ObArithOpWrap<ObUIntUIntBatchAddRaw>>(BATCH_EVAL_FUNC_ARG_LIST);
+}
+
+int ObExprAdd::add_uint_uint_vector(VECTOR_EVAL_FUNC_ARG_DECL)
+{
+  return def_fixed_len_vector_arith_op<ObVectorArithOpWrap<ObUIntUIntBatchAddRaw>>(VECTOR_EVAL_FUNC_ARG_LIST);
+}
+
+struct ObUIntIntBatchAddRaw : public ObArithOpRawType<uint64_t, uint64_t, int64_t>
+{
+  static void raw_op(uint64_t &res, const uint64_t l, const int64_t r)
+  {
+    res = l + r;
+  }
+
+  static int raw_check(const uint64_t res, const uint64_t l, const int64_t r)
+  {
+    int ret = OB_SUCCESS;
+    if (OB_UNLIKELY(ObExprAdd::is_int_uint_out_of_range(r, l, res))) {
+      char expr_str[OB_MAX_TWO_OPERATOR_EXPR_LENGTH];
+      ret = OB_OPERATE_OVERFLOW;
+      int64_t pos = 0;
+      databuff_printf(expr_str,
+                      OB_MAX_TWO_OPERATOR_EXPR_LENGTH,
+                      pos,
+                      "'(%lu + %ld)'", l, r);
+      LOG_USER_ERROR(OB_OPERATE_OVERFLOW, "BIGINT UNSIGNED", expr_str);
+    }
+    return ret;
+  }
+};
 
 // calc_type/left_tpee is UIntTC , right is intTC. only mysql mode
-int ObExprAdd::add_uint_int(const ObExpr& expr, ObEvalCtx& ctx, ObDatum& expr_datum)
+int ObExprAdd::add_uint_int(EVAL_FUNC_ARG_DECL)
 {
-  int ret = OB_SUCCESS;
-  ObDatum* left = NULL;
-  ObDatum* right = NULL;
-  bool is_null = false;
-  if (OB_FAIL(ObArithExprOperator::get_arith_operand(expr, ctx, left, right, expr_datum, is_null))) {
-    LOG_WARN("evaluate params failed", K(ret));
-  } else if (false == is_null) {
-    uint64_t left_ui = left->get_uint();
-    int64_t right_i = right->get_int();
-    expr_datum.set_uint(left_ui + right_i);
-    if (OB_UNLIKELY(is_int_uint_out_of_range(right_i, left_ui, expr_datum.get_uint()))) {
-      char expr_str[OB_MAX_TWO_OPERATOR_EXPR_LENGTH];
-      ret = OB_OPERATE_OVERFLOW;
-      int64_t pos = 0;
-      databuff_printf(expr_str, OB_MAX_TWO_OPERATOR_EXPR_LENGTH, pos, "'(%lu + %ld)'", left_ui, right_i);
-      LOG_USER_ERROR(OB_OPERATE_OVERFLOW, "BIGINT UNSIGNED", expr_str);
-    }
-  }
-  return ret;
+  return def_arith_eval_func<ObArithOpWrap<ObUIntIntBatchAddRaw>>(EVAL_FUNC_ARG_LIST);
 }
 
-// calc type is floatTC, left and right has same TC
-int ObExprAdd::add_float_float(const ObExpr& expr, ObEvalCtx& ctx, ObDatum& expr_datum)
+int ObExprAdd::add_uint_int_batch(BATCH_EVAL_FUNC_ARG_DECL)
 {
-  int ret = OB_SUCCESS;
-  ObDatum* left = NULL;
-  ObDatum* right = NULL;
-  bool is_null = false;
-  if (OB_FAIL(ObArithExprOperator::get_arith_operand(expr, ctx, left, right, expr_datum, is_null))) {
-    LOG_WARN("evaluate params failed", K(ret));
-  } else if (false == is_null) {
-    float left_f = left->get_float();
-    float right_f = right->get_float();
-    expr_datum.set_float(left_f + right_f);
-    if (OB_UNLIKELY(is_float_out_of_range(expr_datum.get_float()))) {
-      ret = OB_OPERATE_OVERFLOW;
-      char expr_str[OB_MAX_TWO_OPERATOR_EXPR_LENGTH];
-      int64_t pos = 0;
-      databuff_printf(expr_str, OB_MAX_TWO_OPERATOR_EXPR_LENGTH, pos, "'(%e + %e)'", left_f, right_f);
-      LOG_USER_ERROR(OB_OPERATE_OVERFLOW, lib::is_oracle_mode() ? "BINARY_FLOAT" : "FLOAT", expr_str);
-      LOG_WARN("float out of range", K(*left), K(*right), K(expr_datum));
-    }
-  }
-  return ret;
+  return def_batch_arith_op<ObArithOpWrap<ObUIntIntBatchAddRaw>>(BATCH_EVAL_FUNC_ARG_LIST);
 }
 
-// calc type is doubleTC, left and right has same TC
-int ObExprAdd::add_double_double(const ObExpr& expr, ObEvalCtx& ctx, ObDatum& expr_datum)
+int ObExprAdd::add_uint_int_vector(VECTOR_EVAL_FUNC_ARG_DECL)
 {
-  int ret = OB_SUCCESS;
-  ObDatum* left = NULL;
-  ObDatum* right = NULL;
-  bool is_null = false;
-  if (OB_FAIL(ObArithExprOperator::get_arith_operand(expr, ctx, left, right, expr_datum, is_null))) {
-    LOG_WARN("evaluate params failed", K(ret));
-  } else if (false == is_null) {
-    double left_d = left->get_double();
-    double right_d = right->get_double();
-    expr_datum.set_double(left_d + right_d);
-    if (OB_UNLIKELY(is_double_out_of_range(expr_datum.get_double())) && T_OP_AGG_ADD != expr.type_) {
-      ret = OB_OPERATE_OVERFLOW;
+  return def_fixed_len_vector_arith_op<ObVectorArithOpWrap<ObUIntIntBatchAddRaw>>(VECTOR_EVAL_FUNC_ARG_LIST);
+}
+
+struct ObFloatBatchAddRawNoCheck : public ObArithOpRawType<float, float, float>
+{
+  static void raw_op(float &res, const float l, const float r)
+  {
+    res = l + r;
+  }
+
+  static int raw_check(const float, const float, const float)
+  {
+    return OB_SUCCESS;
+  }
+};
+
+struct ObFloatBatchAddRawWithCheck: public ObFloatBatchAddRawNoCheck
+{
+  static int raw_check(const float res, const float l, const float r)
+  {
+    int ret = OB_SUCCESS;
+    if (OB_UNLIKELY(ObExprAdd::is_float_out_of_range(res))) {
       char expr_str[OB_MAX_TWO_OPERATOR_EXPR_LENGTH];
+      ret = OB_OPERATE_OVERFLOW;
       int64_t pos = 0;
-      databuff_printf(expr_str, OB_MAX_TWO_OPERATOR_EXPR_LENGTH, pos, "'(%e + %e)'", left_d, right_d);
-      LOG_USER_ERROR(OB_OPERATE_OVERFLOW, lib::is_oracle_mode() ? "BINARY_DOUBLE" : "DOUBLE", expr_str);
-      LOG_WARN("double out of range", K(*left), K(*right), K(expr_datum));
-      expr_datum.set_null();
+      databuff_printf(expr_str,
+                      OB_MAX_TWO_OPERATOR_EXPR_LENGTH,
+                      pos,
+                      "'(%e + %e)'", l, r);
+      LOG_USER_ERROR(OB_OPERATE_OVERFLOW, "FLOAT", expr_str);
+      LOG_WARN("float out of range", K(l), K(r), K(res));
+    }
+    return ret;
+  }
+};
+
+//calc type is floatTC, left and right has same TC
+int ObExprAdd::add_float_float(EVAL_FUNC_ARG_DECL)
+{
+  return lib::is_oracle_mode()
+      ? def_arith_eval_func<ObArithOpWrap<ObFloatBatchAddRawNoCheck>>(EVAL_FUNC_ARG_LIST)
+      : def_arith_eval_func<ObArithOpWrap<ObFloatBatchAddRawWithCheck>>(EVAL_FUNC_ARG_LIST);
+}
+
+int ObExprAdd::add_float_float_batch(BATCH_EVAL_FUNC_ARG_DECL)
+{
+  return lib::is_oracle_mode()
+      ? def_batch_arith_op<ObArithOpWrap<ObFloatBatchAddRawNoCheck>>(BATCH_EVAL_FUNC_ARG_LIST)
+      : def_batch_arith_op<ObArithOpWrap<ObFloatBatchAddRawWithCheck>>(BATCH_EVAL_FUNC_ARG_LIST);
+}
+
+int ObExprAdd::add_float_float_vector(VECTOR_EVAL_FUNC_ARG_DECL)
+{
+  return lib::is_oracle_mode() ?
+           def_fixed_len_vector_arith_op<ObVectorArithOpWrap<ObFloatBatchAddRawNoCheck>>(
+             VECTOR_EVAL_FUNC_ARG_LIST) :
+           def_fixed_len_vector_arith_op<ObVectorArithOpWrap<ObFloatBatchAddRawWithCheck>>(
+             VECTOR_EVAL_FUNC_ARG_LIST);
+}
+
+struct ObDoubleBatchAddRawNoCheck : public ObArithOpRawType<double, double, double>
+{
+  static void raw_op(double &res, const double l, const double r)
+  {
+    res = l + r;
+  }
+
+  static int raw_check(const double , const double , const double)
+  {
+    return OB_SUCCESS;
+  }
+};
+
+struct ObDoubleBatchAddRawWithCheck: public ObDoubleBatchAddRawNoCheck
+{
+  static int raw_check(const double res, const double l, const double r)
+  {
+    int ret = OB_SUCCESS;
+    if (OB_UNLIKELY(ObExprAdd::is_double_out_of_range(res))) {
+      char expr_str[OB_MAX_TWO_OPERATOR_EXPR_LENGTH];
+      ret = OB_OPERATE_OVERFLOW;
+      int64_t pos = 0;
+      databuff_printf(expr_str,
+                      OB_MAX_TWO_OPERATOR_EXPR_LENGTH,
+                      pos,
+                      "'(%e + %e)'", l, r);
+      LOG_USER_ERROR(OB_OPERATE_OVERFLOW, "DOUBLE", expr_str);
+      LOG_WARN("double out of range", K(l), K(r), K(res));
+    }
+    return ret;
+  }
+};
+
+//calc type is doubleTC, left and right has same TC
+int ObExprAdd::add_double_double(EVAL_FUNC_ARG_DECL)
+{
+  return lib::is_oracle_mode() || T_OP_AGG_ADD == expr.type_
+      ? def_arith_eval_func<ObArithOpWrap<ObDoubleBatchAddRawNoCheck>>(EVAL_FUNC_ARG_LIST)
+      : def_arith_eval_func<ObArithOpWrap<ObDoubleBatchAddRawWithCheck>>(EVAL_FUNC_ARG_LIST);
+}
+
+int ObExprAdd::add_double_double_batch(BATCH_EVAL_FUNC_ARG_DECL)
+{
+  return lib::is_oracle_mode() || T_OP_AGG_ADD == expr.type_
+      ? def_batch_arith_op<ObArithOpWrap<ObDoubleBatchAddRawNoCheck>>(BATCH_EVAL_FUNC_ARG_LIST)
+      : def_batch_arith_op<ObArithOpWrap<ObDoubleBatchAddRawWithCheck>>(BATCH_EVAL_FUNC_ARG_LIST);
+}
+
+int ObExprAdd::add_double_double_vector(VECTOR_EVAL_FUNC_ARG_DECL)
+{
+  return lib::is_oracle_mode() || T_OP_AGG_ADD == expr.type_ ?
+           def_fixed_len_vector_arith_op<ObVectorArithOpWrap<ObDoubleBatchAddRawNoCheck>>(
+             VECTOR_EVAL_FUNC_ARG_LIST) :
+           def_fixed_len_vector_arith_op<ObVectorArithOpWrap<ObDoubleBatchAddRawWithCheck>>(
+             VECTOR_EVAL_FUNC_ARG_LIST);
+}
+
+struct ObNumberAddFunc
+{
+  int operator()(ObDatum &res, const ObDatum &l, const ObDatum &r) const
+  {
+    int ret = OB_SUCCESS;
+    char local_buff[ObNumber::MAX_BYTE_LEN];
+    ObDataBuffer local_alloc(local_buff, ObNumber::MAX_BYTE_LEN);
+    number::ObNumber l_num(l.get_number());
+    number::ObNumber r_num(r.get_number());
+    number::ObNumber res_num;
+    if (OB_FAIL(l_num.add_v3(r_num, res_num, local_alloc))) {
+      LOG_WARN("add num failed", K(ret), K(l_num), K(r_num));
     } else {
-      LOG_DEBUG("finish add_double_double", K(expr), K(left_d), K(right_d), "result", expr_datum.get_double());
+      res.set_number(res_num);
+    }
+    return ret;
+  }
+};
+
+//calc type TC is ObNumberTC
+int ObExprAdd::add_number_number(EVAL_FUNC_ARG_DECL)
+{
+  return def_arith_eval_func<ObNumberAddFunc>(EVAL_FUNC_ARG_LIST);
+}
+
+int ObExprAdd::add_number_number_batch(BATCH_EVAL_FUNC_ARG_DECL)
+{
+  LOG_DEBUG("add_number_number_batch begin");
+  int ret = OB_SUCCESS;
+  ObDatumVector l_datums;
+  ObDatumVector r_datums;
+  const ObExpr &left = *expr.args_[0];
+  const ObExpr &right = *expr.args_[1];
+
+  if (OB_FAIL(binary_operand_batch_eval(expr, ctx, skip, size,
+                                        lib::is_oracle_mode()))) {
+    LOG_WARN("number add batch evaluation failure", K(ret));
+  } else {
+    l_datums = left.locate_expr_datumvector(ctx);
+    r_datums = right.locate_expr_datumvector(ctx);
+  }
+
+  if (OB_SUCC(ret)) {
+    char local_buff[ObNumber::MAX_BYTE_LEN];
+    ObDataBuffer local_alloc(local_buff, ObNumber::MAX_BYTE_LEN);
+    ObDatumVector results = expr.locate_expr_datumvector(ctx);
+    ObBitVector &eval_flags = expr.get_evaluated_flags(ctx);
+
+    for (auto i = 0; OB_SUCC(ret) && i < size; i++) {
+      if (eval_flags.at(i) || skip.at(i)) {
+        continue;
+      }
+      if (l_datums.at(i)->is_null() || r_datums.at(i)->is_null()) {
+        results.at(i)->set_null();
+        eval_flags.set(i);
+        continue;
+      }
+      ObNumber res_num;
+      ObNumber l_num(l_datums.at(i)->get_number());
+      ObNumber r_num(r_datums.at(i)->get_number());
+      uint32_t *res_digits = const_cast<uint32_t *> (results.at(i)->get_number_digits());
+      ObNumber::Desc &desc_buf = const_cast<ObNumber::Desc &> (results.at(i)->get_number_desc());
+      // Notice that, space of tmp is allocated in frame but without memset operation, which causes random memory content.
+      // And the reserved in storage layer should be 0, thus you must replacement new here to avoid checksum error, etc.
+      ObNumber::Desc *res_desc = new (&desc_buf) ObNumber::Desc();
+      // speedup detection
+      if (ObNumber::try_fast_add(l_num, r_num, res_digits, *res_desc)) {
+        results.at(i)->set_pack(sizeof(number::ObCompactNumber) +
+                                res_desc->len_ * sizeof(*res_digits));
+        eval_flags.set(i);
+        // LOG_DEBUG("mul speedup", K(l_num.format()),
+        // K(r_num.format()), K(res_num.format()));
+      } else {
+        // normal path: no speedup
+        if (OB_FAIL(l_num.add_v3(r_num, res_num, local_alloc))) {
+          LOG_WARN("mul num failed", K(ret), K(l_num), K(r_num));
+        } else {
+          results.at(i)->set_number(res_num);
+          eval_flags.set(i);
+        }
+        local_alloc.free();
+      }
     }
   }
+  LOG_DEBUG("add_number_number_batch done");
   return ret;
 }
 
-// calc type TC is ObNumberTC
-int ObExprAdd::add_number_number(const ObExpr& expr, ObEvalCtx& ctx, ObDatum& expr_datum)
+struct NmbTryFastAdditionOp
 {
-  int ret = OB_SUCCESS;
-  ObDatum* left = NULL;
-  ObDatum* right = NULL;
-  bool is_null = false;
-  number::ObNumber res_nmb;
-  char local_buff[ObNumber::MAX_BYTE_LEN];
-  ObDataBuffer local_alloc(local_buff, ObNumber::MAX_BYTE_LEN);
-  if (OB_FAIL(ObArithExprOperator::get_arith_operand(expr, ctx, left, right, expr_datum, is_null))) {
-    LOG_WARN("evaluate params failed", K(ret));
-  } else if (false == is_null) {
-    number::ObNumber left_nmb(left->get_number());
-    number::ObNumber right_nmb(right->get_number());
-    if (OB_FAIL(left_nmb.add_v3(right_nmb, res_nmb, local_alloc))) {
-      LOG_WARN("failed to add numbers", K(ret), K(*left), K(*right));
-    } else {
-      expr_datum.set_number(res_nmb);
-    }
+  OB_INLINE bool operator()(ObNumber &l_num, ObNumber &r_num, uint32_t *res_digit,
+                                   ObNumberDesc &res_desc)
+  {
+    return ObNumber::try_fast_add(l_num, r_num, res_digit, res_desc);
   }
-  return ret;
+   OB_INLINE int operator()(const ObNumber &left, const ObNumber &right, ObNumber &value,
+                           ObIAllocator &allocator)
+  {
+    return ObNumber::add_v3(left, right, value, allocator);
+  }
+};
+
+int ObExprAdd::add_number_number_vector(VECTOR_EVAL_FUNC_ARG_DECL)
+{
+  NmbTryFastAdditionOp op;
+  return def_number_vector_arith_op(VECTOR_EVAL_FUNC_ARG_LIST, op);
 }
 
-// 1.interval can calc with different types such as date, timestamp, interval.
-// the params do not need to do cast
-// 2.left and right must have the same type. both IntervalYM or both IntervalDS
-int ObExprAdd::add_intervalym_intervalym(const ObExpr& expr, ObEvalCtx& ctx, ObDatum& expr_datum)
+struct ObIntervalYMIntervalYMAddFunc
 {
-  int ret = OB_SUCCESS;
-  ObDatum* left = NULL;
-  ObDatum* right = NULL;
-  bool is_null = false;
-  if (OB_FAIL(ObArithExprOperator::get_arith_operand(expr, ctx, left, right, expr_datum, is_null))) {
-    LOG_WARN("evaluate params failed", K(ret));
-  } else if (false == is_null) {
-    ObIntervalYMValue value = left->get_interval_nmonth() + right->get_interval_nmonth();
+  int operator()(ObDatum &res, const ObDatum &l, const ObDatum &r) const
+  {
+    int ret = OB_SUCCESS;
+    ObIntervalYMValue value = l.get_interval_nmonth() + r.get_interval_nmonth();
     if (OB_FAIL(value.validate())) {
       LOG_WARN("value validate failed", K(ret), K(value));
     } else {
-      expr_datum.set_interval_nmonth(value.get_nmonth());
+      res.set_interval_nmonth(value.get_nmonth());
     }
+    return ret;
   }
-  return ret;
+};
+
+//1.interval can calc with different types such as date, timestamp, interval.
+//the params do not need to do cast
+//2.left and right must have the same type. both IntervalYM or both IntervalDS
+int ObExprAdd::add_intervalym_intervalym(EVAL_FUNC_ARG_DECL)
+{
+  return def_arith_eval_func<ObIntervalYMIntervalYMAddFunc>(EVAL_FUNC_ARG_LIST);
 }
 
-// left and right must have the same type. both IntervalDS
-int ObExprAdd::add_intervalds_intervalds(const ObExpr& expr, ObEvalCtx& ctx, ObDatum& expr_datum)
+int ObExprAdd::add_intervalym_intervalym_batch(BATCH_EVAL_FUNC_ARG_DECL)
 {
-  int ret = OB_SUCCESS;
-  ObDatum* left = NULL;
-  ObDatum* right = NULL;
-  bool is_null = false;
-  if (OB_FAIL(ObArithExprOperator::get_arith_operand(expr, ctx, left, right, expr_datum, is_null))) {
-    LOG_WARN("evaluate params failed", K(ret));
-  } else if (false == is_null) {
-    ObIntervalDSValue value = left->get_interval_ds() + right->get_interval_ds();
+  return def_batch_arith_op_by_datum_func<ObIntervalYMIntervalYMAddFunc>(
+      BATCH_EVAL_FUNC_ARG_LIST);
+}
+
+struct ObIntervalDSIntervalDSAddFunc
+{
+  int operator()(ObDatum &res, const ObDatum &l, const ObDatum &r) const
+  {
+    int ret = OB_SUCCESS;
+    ObIntervalDSValue value = l.get_interval_ds() + r.get_interval_ds();
     if (OB_FAIL(value.validate())) {
       LOG_WARN("value validate failed", K(ret), K(value));
     } else {
-      expr_datum.set_interval_ds(value);
+      res.set_interval_ds(value);
     }
+    return ret;
   }
-  return ret;
+};
+
+//left and right must have the same type. both IntervalDS
+int ObExprAdd::add_intervalds_intervalds(EVAL_FUNC_ARG_DECL)
+{
+  return def_arith_eval_func<ObIntervalDSIntervalDSAddFunc>(EVAL_FUNC_ARG_LIST);
 }
 
-// Left is intervalYM type. Right is datetime TC
-int ObExprAdd::add_intervalym_datetime_common(
-    const ObExpr& expr, ObEvalCtx& ctx, ObDatum& expr_datum, bool interval_left)
+int ObExprAdd::add_intervalds_intervalds_batch(BATCH_EVAL_FUNC_ARG_DECL)
 {
-  int ret = OB_SUCCESS;
-  ObDatum* left = NULL;
-  ObDatum* right = NULL;
-  bool is_null = false;
-  if (interval_left && OB_FAIL(ObArithExprOperator::get_arith_operand(expr, ctx, left, right, expr_datum, is_null))) {
-    LOG_WARN("evaluate params failed", K(ret));
-  } else if (!interval_left &&
-             OB_FAIL(ObArithExprOperator::get_arith_operand(expr, ctx, right, left, expr_datum, is_null))) {
-    LOG_WARN("evaluate params failed", K(ret));
-  } else if (false == is_null) {
+  return def_batch_arith_op_by_datum_func<ObIntervalDSIntervalDSAddFunc>(
+      BATCH_EVAL_FUNC_ARG_LIST);
+}
+
+template <bool SWAP_L_R>
+struct ObIntervalYMDatetimeAddFunc
+{
+  int operator()(ObDatum &res, const ObDatum &l, const ObDatum &r) const
+  {
+    int ret = OB_SUCCESS;
     int64_t result_v = 0;
-    if (OB_FAIL(ObTimeConverter::date_add_nmonth(right->get_datetime(), left->get_interval_nmonth(), result_v))) {
-      LOG_WARN("add value failed", K(ret), K(*left), K(*right));
+    ret = SWAP_L_R
+        ? ObTimeConverter::date_add_nmonth(l.get_datetime(), r.get_interval_nmonth(), result_v)
+        : ObTimeConverter::date_add_nmonth(r.get_datetime(), l.get_interval_nmonth(), result_v);
+    if (OB_FAIL(ret)) {
+      LOG_WARN("add value failed", K(ret), K(l), K(r));
     } else {
-      expr_datum.set_datetime(result_v);
+      res.set_datetime(result_v);
     }
+    return ret;
   }
-  return ret;
+};
+
+//Left is intervalYM type. Right is datetime TC
+int ObExprAdd::add_intervalym_datetime_common(EVAL_FUNC_ARG_DECL, bool interval_left)
+{
+  return interval_left
+      ? def_arith_eval_func<ObIntervalYMDatetimeAddFunc<false>>(EVAL_FUNC_ARG_LIST)
+      : def_arith_eval_func<ObIntervalYMDatetimeAddFunc<true>>(EVAL_FUNC_ARG_LIST);
 }
 
-// Left is intervalDS type. Right is datetime TC
-int ObExprAdd::add_intervalds_datetime_common(
-    const ObExpr& expr, ObEvalCtx& ctx, ObDatum& expr_datum, bool interval_left)
+int ObExprAdd::add_intervalym_datetime_batch(BATCH_EVAL_FUNC_ARG_DECL)
 {
-  int ret = OB_SUCCESS;
-  ObDatum* left = NULL;
-  ObDatum* right = NULL;
-  bool is_null = false;
-  if (interval_left && OB_FAIL(ObArithExprOperator::get_arith_operand(expr, ctx, left, right, expr_datum, is_null))) {
-    LOG_WARN("evaluate params failed", K(ret));
-  } else if (!interval_left &&
-             OB_FAIL(ObArithExprOperator::get_arith_operand(expr, ctx, right, left, expr_datum, is_null))) {
-    LOG_WARN("evaluate params failed", K(ret));
-  } else if (false == is_null) {
+  return def_batch_arith_op_by_datum_func<ObIntervalYMDatetimeAddFunc<false>>(
+      BATCH_EVAL_FUNC_ARG_LIST);
+}
+
+int ObExprAdd::add_datetime_intervalym_batch(BATCH_EVAL_FUNC_ARG_DECL)
+{
+  return def_batch_arith_op_by_datum_func<ObIntervalYMDatetimeAddFunc<true>>(
+      BATCH_EVAL_FUNC_ARG_LIST);
+}
+
+template <bool SWAP_L_R>
+struct ObIntervalDSDatetimeAddFunc
+{
+  int operator()(ObDatum &res, const ObDatum &l, const ObDatum &r) const
+  {
+    int ret = OB_SUCCESS;
     int64_t result_v = 0;
-    if (OB_FAIL(ObTimeConverter::date_add_nsecond(right->get_datetime(),
-            left->get_interval_ds().get_nsecond(),
-            left->get_interval_ds().get_fs(),
-            result_v))) {
-      LOG_WARN("add value failed", K(ret), K(*left), K(*right));
+    ret = !SWAP_L_R
+        ? ObTimeConverter::date_add_nsecond(r.get_datetime(),
+                                            l.get_interval_ds().get_nsecond(),
+                                            l.get_interval_ds().get_fs(), result_v)
+        : ObTimeConverter::date_add_nsecond(l.get_datetime(),
+                                            r.get_interval_ds().get_nsecond(),
+                                            r.get_interval_ds().get_fs(), result_v);
+    if (OB_FAIL(ret)) {
+      LOG_WARN("add value failed", K(ret), K(l), K(r));
     } else {
-      expr_datum.set_datetime(result_v);
+      res.set_datetime(result_v);
     }
+    return ret;
   }
-  return ret;
+};
+
+//Left is intervalDS type. Right is datetime TC
+int ObExprAdd::add_intervalds_datetime_common(EVAL_FUNC_ARG_DECL, bool interval_left)
+{
+  return interval_left
+      ? def_arith_eval_func<ObIntervalDSDatetimeAddFunc<false>>(EVAL_FUNC_ARG_LIST)
+      : def_arith_eval_func<ObIntervalDSDatetimeAddFunc<true>>(EVAL_FUNC_ARG_LIST);
 }
 
-// Left is intervalYM type. Right is timestampTZ type.
-int ObExprAdd::add_intervalym_timestamptz_common(
-    const ObExpr& expr, ObEvalCtx& ctx, ObDatum& expr_datum, bool interval_left)
+int ObExprAdd::add_intervalds_datetime_batch(BATCH_EVAL_FUNC_ARG_DECL)
 {
-  int ret = OB_SUCCESS;
-  ObDatum* left = NULL;
-  ObDatum* right = NULL;
-  bool is_null = false;
-  if (interval_left && OB_FAIL(ObArithExprOperator::get_arith_operand(expr, ctx, left, right, expr_datum, is_null))) {
-    LOG_WARN("evaluate params failed", K(ret));
-  } else if (!interval_left &&
-             OB_FAIL(ObArithExprOperator::get_arith_operand(expr, ctx, right, left, expr_datum, is_null))) {
-    LOG_WARN("evaluate params failed", K(ret));
-  } else if (false == is_null) {
+  return def_batch_arith_op_by_datum_func<ObIntervalDSDatetimeAddFunc<false>>(
+      BATCH_EVAL_FUNC_ARG_LIST);
+}
+
+int ObExprAdd::add_datetime_intervalds_batch(BATCH_EVAL_FUNC_ARG_DECL)
+{
+  return def_batch_arith_op_by_datum_func<ObIntervalDSDatetimeAddFunc<true>>(
+      BATCH_EVAL_FUNC_ARG_LIST);
+}
+
+template <bool SWAP_L_R>
+struct ObIntervalYMTimestampTZAddFunc
+{
+  int operator()(ObDatum &res, const ObDatum &l, const ObDatum &r, ObEvalCtx &ctx) const
+  {
+    int ret = OB_SUCCESS;
     ObOTimestampData result_v;
-    if (OB_FAIL(ObTimeConverter::otimestamp_add_nmonth(ObTimestampTZType,
-            right->get_otimestamp_tz(),
+    ret = SWAP_L_R
+        ? ObTimeConverter::otimestamp_add_nmonth(
+            ObTimestampTZType,
+            l.get_otimestamp_tz(),
             get_timezone_info(ctx.exec_ctx_.get_my_session()),
-            left->get_interval_nmonth(),
-            result_v))) {
-      LOG_WARN("calc with timestamp value failed", K(ret), K(*left), K(*right));
-    } else {
-      expr_datum.set_otimestamp_tz(result_v);
-    }
-  }
-  return ret;
-}
-
-// Left is intervalYM type. Right is timestampLTZ type.
-int ObExprAdd::add_intervalym_timestampltz_common(
-    const ObExpr& expr, ObEvalCtx& ctx, ObDatum& expr_datum, bool interval_left)
-{
-  int ret = OB_SUCCESS;
-  ObDatum* left = NULL;
-  ObDatum* right = NULL;
-  bool is_null = false;
-  if (interval_left && OB_FAIL(ObArithExprOperator::get_arith_operand(expr, ctx, left, right, expr_datum, is_null))) {
-    LOG_WARN("evaluate params failed", K(ret));
-  } else if (!interval_left &&
-             OB_FAIL(ObArithExprOperator::get_arith_operand(expr, ctx, right, left, expr_datum, is_null))) {
-    LOG_WARN("evaluate params failed", K(ret));
-  } else if (false == is_null) {
-    ObOTimestampData result_v;
-    if (OB_FAIL(ObTimeConverter::otimestamp_add_nmonth(ObTimestampLTZType,
-            right->get_otimestamp_tiny(),
+            r.get_interval_nmonth(),
+            result_v)
+        : ObTimeConverter::otimestamp_add_nmonth(
+            ObTimestampTZType,
+            r.get_otimestamp_tz(),
             get_timezone_info(ctx.exec_ctx_.get_my_session()),
-            left->get_interval_nmonth(),
-            result_v))) {
-      LOG_WARN("calc with timestamp value failed", K(ret), K(*left), K(*right));
+            l.get_interval_nmonth(),
+            result_v);
+    if (OB_FAIL(ret)) {
+      LOG_WARN("add value failed", K(ret), K(l), K(r));
     } else {
-      expr_datum.set_otimestamp_tiny(result_v);
+      res.set_otimestamp_tz(result_v);
     }
+    return ret;
   }
-  return ret;
+};
+
+//Left is intervalYM type. Right is timestampTZ type.
+int ObExprAdd::add_intervalym_timestamptz_common(EVAL_FUNC_ARG_DECL, bool interval_left)
+{
+  return interval_left
+      ? def_arith_eval_func<ObIntervalYMTimestampTZAddFunc<false>>(EVAL_FUNC_ARG_LIST, ctx)
+      : def_arith_eval_func<ObIntervalYMTimestampTZAddFunc<true>>(EVAL_FUNC_ARG_LIST, ctx);
 }
 
-// Left is intervalYM type. Right is ObTimestampNano type.
-int ObExprAdd::add_intervalym_timestampnano_common(
-    const ObExpr& expr, ObEvalCtx& ctx, ObDatum& expr_datum, bool interval_left)
+int ObExprAdd::add_intervalym_timestamptz_batch(BATCH_EVAL_FUNC_ARG_DECL)
 {
-  int ret = OB_SUCCESS;
-  ObDatum* left = NULL;
-  ObDatum* right = NULL;
-  bool is_null = false;
-  if (interval_left && OB_FAIL(ObArithExprOperator::get_arith_operand(expr, ctx, left, right, expr_datum, is_null))) {
-    LOG_WARN("evaluate params failed", K(ret));
-  } else if (!interval_left &&
-             OB_FAIL(ObArithExprOperator::get_arith_operand(expr, ctx, right, left, expr_datum, is_null))) {
-    LOG_WARN("evaluate params failed", K(ret));
-  } else if (false == is_null) {
+  return def_batch_arith_op_by_datum_func<ObIntervalYMTimestampTZAddFunc<false>>(
+      BATCH_EVAL_FUNC_ARG_LIST, ctx);
+}
+
+int ObExprAdd::add_timestamptz_intervalym_batch(BATCH_EVAL_FUNC_ARG_DECL)
+{
+  return def_batch_arith_op_by_datum_func<ObIntervalYMTimestampTZAddFunc<true>>(
+      BATCH_EVAL_FUNC_ARG_LIST, ctx);
+}
+
+template <bool SWAP_L_R>
+struct ObIntervalYMTimestampLTZAddFunc
+{
+  int operator()(ObDatum &res, const ObDatum &l, const ObDatum &r, ObEvalCtx &ctx) const
+  {
+    int ret = OB_SUCCESS;
     ObOTimestampData result_v;
-    if (OB_FAIL(ObTimeConverter::otimestamp_add_nmonth(ObTimestampNanoType,
-            right->get_otimestamp_tiny(),
+    ret = !SWAP_L_R
+        ? ObTimeConverter::otimestamp_add_nmonth(
+            ObTimestampLTZType, r.get_otimestamp_tiny(),
             get_timezone_info(ctx.exec_ctx_.get_my_session()),
-            left->get_interval_nmonth(),
-            result_v))) {
-      LOG_WARN("calc with timestamp value failed", K(ret), K(*left), K(*right));
+            l.get_interval_nmonth(), result_v)
+        : ObTimeConverter::otimestamp_add_nmonth(
+            ObTimestampLTZType, l.get_otimestamp_tiny(),
+            get_timezone_info(ctx.exec_ctx_.get_my_session()),
+            r.get_interval_nmonth(), result_v);
+
+    if (OB_FAIL(ret)) {
+      LOG_WARN("calc with timestamp value failed", K(ret), K(l), K(r));
     } else {
-      expr_datum.set_otimestamp_tiny(result_v);
+      res.set_otimestamp_tiny(result_v);
     }
+    return ret;
   }
-  return ret;
+};
+
+
+//Left is intervalYM type. Right is timestampLTZ type.
+int ObExprAdd::add_intervalym_timestampltz_common(EVAL_FUNC_ARG_DECL, bool interval_left)
+{
+  return interval_left
+      ? def_arith_eval_func<ObIntervalYMTimestampLTZAddFunc<false>>(EVAL_FUNC_ARG_LIST, ctx)
+      : def_arith_eval_func<ObIntervalYMTimestampLTZAddFunc<true>>(EVAL_FUNC_ARG_LIST, ctx);
 }
 
-// Left is intervalDS type. Right is timestampTZ
-int ObExprAdd::add_intervalds_timestamptz_common(
-    const ObExpr& expr, ObEvalCtx& ctx, ObDatum& expr_datum, bool interval_left)
+int ObExprAdd::add_intervalym_timestampltz_batch(BATCH_EVAL_FUNC_ARG_DECL)
 {
-  int ret = OB_SUCCESS;
-  ObDatum* left = NULL;
-  ObDatum* right = NULL;
-  bool is_null = false;
-  if (interval_left && OB_FAIL(ObArithExprOperator::get_arith_operand(expr, ctx, left, right, expr_datum, is_null))) {
-    LOG_WARN("evaluate params failed", K(ret));
-  } else if (!interval_left &&
-             OB_FAIL(ObArithExprOperator::get_arith_operand(expr, ctx, right, left, expr_datum, is_null))) {
-    LOG_WARN("evaluate params failed", K(ret));
-  } else if (false == is_null) {
+  return def_batch_arith_op_by_datum_func<ObIntervalYMTimestampLTZAddFunc<false>>(
+      BATCH_EVAL_FUNC_ARG_LIST, ctx);
+}
+
+int ObExprAdd::add_timestampltz_intervalym_batch(BATCH_EVAL_FUNC_ARG_DECL)
+{
+  return def_batch_arith_op_by_datum_func<ObIntervalYMTimestampLTZAddFunc<true>>(
+      BATCH_EVAL_FUNC_ARG_LIST, ctx);
+}
+
+template <bool SWAP_L_R>
+struct ObIntervalYMTimestampNanoAddFunc
+{
+  int operator()(ObDatum &res, const ObDatum &l, const ObDatum &r, ObEvalCtx &ctx) const
+  {
+    int ret = OB_SUCCESS;
     ObOTimestampData result_v;
-    if (OB_FAIL(ObTimeConverter::otimestamp_add_nsecond(right->get_otimestamp_tz(),
-            left->get_interval_ds().get_nsecond(),
-            left->get_interval_ds().get_fs(),
-            result_v))) {
-      LOG_WARN("calc with timestamp value failed", K(ret), K(*left), K(*right));
+    ret = !SWAP_L_R
+        ? ObTimeConverter::otimestamp_add_nmonth(
+            ObTimestampNanoType, r.get_otimestamp_tiny(),
+            get_timezone_info(ctx.exec_ctx_.get_my_session()),
+            l.get_interval_nmonth(), result_v)
+        : ObTimeConverter::otimestamp_add_nmonth(
+            ObTimestampNanoType, l.get_otimestamp_tiny(),
+            get_timezone_info(ctx.exec_ctx_.get_my_session()),
+            r.get_interval_nmonth(), result_v);
+
+    if (OB_FAIL(ret)) {
+      LOG_WARN("calc with timestamp value failed", K(ret), K(l), K(r));
     } else {
-      expr_datum.set_otimestamp_tz(result_v);
+      res.set_otimestamp_tiny(result_v);
     }
+    return ret;
   }
-  return ret;
+};
+
+//Left is intervalYM type. Right is ObTimestampNano type.
+int ObExprAdd::add_intervalym_timestampnano_common(EVAL_FUNC_ARG_DECL, bool interval_left)
+{
+  return interval_left
+      ? def_arith_eval_func<ObIntervalYMTimestampNanoAddFunc<false>>(EVAL_FUNC_ARG_LIST, ctx)
+      : def_arith_eval_func<ObIntervalYMTimestampNanoAddFunc<true>>(EVAL_FUNC_ARG_LIST, ctx);
 }
 
-// Left is intervalDS type. Right is timestamp LTZ or Nano
-int ObExprAdd::add_intervalds_timestamp_tiny_common(
-    const ObExpr& expr, ObEvalCtx& ctx, ObDatum& expr_datum, bool interval_left)
+int ObExprAdd::add_intervalym_timestampnano_batch(BATCH_EVAL_FUNC_ARG_DECL)
 {
-  int ret = OB_SUCCESS;
-  ObDatum* left = NULL;
-  ObDatum* right = NULL;
-  bool is_null = false;
-  if (interval_left && OB_FAIL(ObArithExprOperator::get_arith_operand(expr, ctx, left, right, expr_datum, is_null))) {
-    LOG_WARN("evaluate params failed", K(ret));
-  } else if (!interval_left &&
-             OB_FAIL(ObArithExprOperator::get_arith_operand(expr, ctx, right, left, expr_datum, is_null))) {
-    LOG_WARN("evaluate params failed", K(ret));
-  } else if (false == is_null) {
+  return def_batch_arith_op_by_datum_func<ObIntervalYMTimestampNanoAddFunc<false>>(
+      BATCH_EVAL_FUNC_ARG_LIST, ctx);
+}
+
+int ObExprAdd::add_timestampnano_intervalym_batch(BATCH_EVAL_FUNC_ARG_DECL)
+{
+  return def_batch_arith_op_by_datum_func<ObIntervalYMTimestampNanoAddFunc<true>>(
+      BATCH_EVAL_FUNC_ARG_LIST, ctx);
+}
+
+template <bool SWAP_L_R>
+struct ObIntervalDSTimestampTZAddFunc
+{
+  int operator()(ObDatum &res, const ObDatum &l, const ObDatum &r) const
+  {
+    int ret = OB_SUCCESS;
     ObOTimestampData result_v;
-    if (OB_FAIL(ObTimeConverter::otimestamp_add_nsecond(right->get_otimestamp_tiny(),
-            left->get_interval_ds().get_nsecond(),
-            left->get_interval_ds().get_fs(),
-            result_v))) {
-      LOG_WARN("calc with timestamp value failed", K(ret), K(*left), K(*right));
+    ret = !SWAP_L_R
+        ? ObTimeConverter::otimestamp_add_nsecond(r.get_otimestamp_tz(),
+                                                  l.get_interval_ds().get_nsecond(),
+                                                  l.get_interval_ds().get_fs(),
+                                                  result_v)
+        : ObTimeConverter::otimestamp_add_nsecond(l.get_otimestamp_tz(),
+                                                  r.get_interval_ds().get_nsecond(),
+                                                  r.get_interval_ds().get_fs(),
+                                                  result_v);
+    if (OB_FAIL(ret)) {
+      LOG_WARN("calc with timestamp value failed", K(ret), K(l), K(r));
     } else {
-      expr_datum.set_otimestamp_tiny(result_v);
+      res.set_otimestamp_tz(result_v);
     }
+    return ret;
   }
-  return ret;
+};
+
+//Left is intervalDS type. Right is timestampTZ
+int ObExprAdd::add_intervalds_timestamptz_common(EVAL_FUNC_ARG_DECL, bool interval_left)
+{
+  return interval_left
+      ? def_arith_eval_func<ObIntervalDSTimestampTZAddFunc<false>>(EVAL_FUNC_ARG_LIST)
+      : def_arith_eval_func<ObIntervalDSTimestampTZAddFunc<true>>(EVAL_FUNC_ARG_LIST);
 }
 
-// left is NumberType, right is DateTimeType.
-int ObExprAdd::add_number_datetime_common(const ObExpr& expr, ObEvalCtx& ctx, ObDatum& expr_datum, bool number_left)
+int ObExprAdd::add_intervalds_timestamptz_batch(BATCH_EVAL_FUNC_ARG_DECL)
 {
-  int ret = OB_SUCCESS;
-  ObDatum* left = NULL;
-  ObDatum* right = NULL;
-  bool is_null = false;
-  if (number_left && OB_FAIL(ObArithExprOperator::get_arith_operand(expr, ctx, left, right, expr_datum, is_null))) {
-    LOG_WARN("evaluate params failed", K(ret));
-  } else if (!number_left &&
-             OB_FAIL(ObArithExprOperator::get_arith_operand(expr, ctx, right, left, expr_datum, is_null))) {
-    LOG_WARN("evaluate params failed", K(ret));
-  } else if (false == is_null) {
-    number::ObNumber left_nmb(left->get_number());
-    const int64_t right_i = right->get_datetime();
+  return def_batch_arith_op_by_datum_func<ObIntervalDSTimestampTZAddFunc<false>>(
+      BATCH_EVAL_FUNC_ARG_LIST);
+}
+
+int ObExprAdd::add_timestamptz_intervalds_batch(BATCH_EVAL_FUNC_ARG_DECL)
+{
+  return def_batch_arith_op_by_datum_func<ObIntervalDSTimestampTZAddFunc<true>>(
+      BATCH_EVAL_FUNC_ARG_LIST);
+}
+
+template <bool SWAP_L_R>
+struct ObIntervalDSTimestampLTZAdd
+{
+  int operator()(ObDatum &res, const ObDatum &l, const ObDatum &r) const
+  {
+    int ret = OB_SUCCESS;
+    ObOTimestampData result_v;
+    ret = !SWAP_L_R
+        ? ObTimeConverter::otimestamp_add_nsecond(r.get_otimestamp_tiny(),
+                                                  l.get_interval_ds().get_nsecond(),
+                                                  l.get_interval_ds().get_fs(),
+                                                  result_v)
+        : ObTimeConverter::otimestamp_add_nsecond(l.get_otimestamp_tiny(),
+                                                  r.get_interval_ds().get_nsecond(),
+                                                  r.get_interval_ds().get_fs(),
+                                                  result_v);
+    if (OB_FAIL(ret)) {
+      LOG_WARN("calc with timestamp value failed", K(ret), K(l), K(r));
+    } else {
+      res.set_otimestamp_tiny(result_v);
+    }
+    return ret;
+  }
+};
+
+//Left is intervalDS type. Right is timestamp LTZ or Nano
+int ObExprAdd::add_intervalds_timestamp_tiny_common(EVAL_FUNC_ARG_DECL, bool interval_left)
+{
+  return interval_left
+      ? def_arith_eval_func<ObIntervalDSTimestampLTZAdd<false>>(EVAL_FUNC_ARG_LIST)
+      : def_arith_eval_func<ObIntervalDSTimestampLTZAdd<true>>(EVAL_FUNC_ARG_LIST);
+}
+
+int ObExprAdd::add_intervalds_timestamp_tiny_batch(BATCH_EVAL_FUNC_ARG_DECL)
+{
+  return def_batch_arith_op_by_datum_func<ObIntervalDSTimestampLTZAdd<false>>(
+      BATCH_EVAL_FUNC_ARG_LIST);
+}
+
+int ObExprAdd::add_timestamp_tiny_intervalds_batch(BATCH_EVAL_FUNC_ARG_DECL)
+{
+  return def_batch_arith_op_by_datum_func<ObIntervalDSTimestampLTZAdd<true>>(
+      BATCH_EVAL_FUNC_ARG_LIST);
+}
+
+template <bool SWAP_L_R>
+struct ObNumberDatetimeAddFunc
+{
+  int operator()(ObDatum &res, const ObDatum &l, const ObDatum &r) const
+  {
+    int ret = OB_SUCCESS;
+    number::ObNumber left_nmb((!SWAP_L_R ? l : r).get_number());
+    const int64_t right_i = (!SWAP_L_R ? r : l).get_datetime();
     int64_t int_part = 0;
     int64_t dec_part = 0;
-    if (!left_nmb.is_int_parts_valid_int64(int_part, dec_part)) {
+    if (!left_nmb.is_int_parts_valid_int64(int_part,dec_part)) {
       ret = OB_INVALID_DATE_FORMAT;
       LOG_WARN("invalid date format", K(ret), K(left_nmb));
     } else {
-      const int64_t left_i =
-          static_cast<int64_t>(int_part * USECS_PER_DAY) +
-          (left_nmb.is_negative() ? -1 : 1) *
-              static_cast<int64_t>(static_cast<double>(dec_part) / NSECS_PER_SEC * static_cast<double>(USECS_PER_DAY));
+      const int64_t left_i = static_cast<int64_t>(int_part * USECS_PER_DAY)
+                            + (left_nmb.is_negative() ? -1  : 1 )
+                                * static_cast<int64_t>(static_cast<double>(dec_part)
+                                / NSECS_PER_SEC * static_cast<double>(USECS_PER_DAY));
       int64_t round_value = left_i + right_i;
       ObTimeConverter::round_datetime(OB_MAX_DATE_PRECISION, round_value);
-      expr_datum.set_datetime(round_value);
+      res.set_datetime(round_value);
       ObTime ob_time;
-      if (OB_UNLIKELY(expr_datum.get_datetime() > DATETIME_MAX_VAL || expr_datum.get_datetime() < DATETIME_MIN_VAL) ||
-          (OB_FAIL(ObTimeConverter::datetime_to_ob_time(expr_datum.get_datetime(), NULL, ob_time))) ||
-          (OB_FAIL(ObTimeConverter::validate_oracle_date(ob_time)))) {
+      if (OB_UNLIKELY(res.get_datetime() > DATETIME_MAX_VAL
+        || res.get_datetime() < DATETIME_MIN_VAL)
+        || (OB_FAIL(ObTimeConverter::datetime_to_ob_time(res.get_datetime(), NULL, ob_time)))
+        || (OB_FAIL(ObTimeConverter::validate_oracle_date(ob_time)))) {
         char expr_str[OB_MAX_TWO_OPERATOR_EXPR_LENGTH];
         int64_t pos = 0;
         ret = OB_OPERATE_OVERFLOW;
         pos = 0;
         databuff_printf(expr_str,
-            OB_MAX_TWO_OPERATOR_EXPR_LENGTH,
-            pos,
-            "'(%ld + %ld)'",
-            number_left ? left_i : right_i,
-            number_left ? right_i : left_i);
+                        OB_MAX_TWO_OPERATOR_EXPR_LENGTH,
+                        pos,
+                        "'(%ld + %ld)'",
+                        !SWAP_L_R ? left_i : right_i,
+                        !SWAP_L_R ? right_i : left_i);
         LOG_USER_ERROR(OB_OPERATE_OVERFLOW, "DATE", expr_str);
       }
     }
+    return ret;
   }
-  return ret;
+};
+
+//left is NumberType, right is DateTimeType.
+int ObExprAdd::add_number_datetime_common(EVAL_FUNC_ARG_DECL, bool number_left)
+{
+  return number_left
+      ? def_arith_eval_func<ObNumberDatetimeAddFunc<false>>(EVAL_FUNC_ARG_LIST)
+      : def_arith_eval_func<ObNumberDatetimeAddFunc<true>>(EVAL_FUNC_ARG_LIST);
 }
 
-// both left and right are datetimeType
-int ObExprAdd::add_datetime_datetime(const ObExpr& expr, ObEvalCtx& ctx, ObDatum& expr_datum)
+int ObExprAdd::add_number_datetime_batch(BATCH_EVAL_FUNC_ARG_DECL)
 {
-  int ret = OB_SUCCESS;
-  ObDatum* left = NULL;
-  ObDatum* right = NULL;
-  bool is_null = false;
-  if (OB_FAIL(ObArithExprOperator::get_arith_operand(expr, ctx, left, right, expr_datum, is_null))) {
-    LOG_WARN("evaluate params failed", K(ret));
-  } else if (false == is_null) {
-    const int64_t left_i = left->get_datetime();
-    const int64_t right_i = right->get_datetime();
+  return def_batch_arith_op_by_datum_func<ObNumberDatetimeAddFunc<false>>(
+      BATCH_EVAL_FUNC_ARG_LIST);
+}
+
+int ObExprAdd::add_datetime_number_batch(BATCH_EVAL_FUNC_ARG_DECL)
+{
+  return def_batch_arith_op_by_datum_func<ObNumberDatetimeAddFunc<true>>(
+      BATCH_EVAL_FUNC_ARG_LIST);
+}
+
+struct ObDatetimeDatetimeAddFunc
+{
+  int operator()(ObDatum &res, const ObDatum &l, const ObDatum &r) const
+  {
+    int ret = OB_SUCCESS;
+    const int64_t left_i = l.get_datetime();
+    const int64_t right_i = r.get_datetime();
     int64_t round_value = left_i + right_i;
     ObTimeConverter::round_datetime(OB_MAX_DATE_PRECISION, round_value);
-    expr_datum.set_datetime(round_value);
+    res.set_datetime(round_value);
     ObTime ob_time;
-    if (OB_UNLIKELY(expr_datum.get_datetime() > DATETIME_MAX_VAL || expr_datum.get_datetime() < DATETIME_MIN_VAL) ||
-        (OB_FAIL(ObTimeConverter::datetime_to_ob_time(expr_datum.get_datetime(), NULL, ob_time))) ||
-        (OB_FAIL(ObTimeConverter::validate_oracle_date(ob_time)))) {
+    if (OB_UNLIKELY(res.get_datetime() > DATETIME_MAX_VAL
+        || res.get_datetime() < DATETIME_MIN_VAL)
+        || (OB_FAIL(ObTimeConverter::datetime_to_ob_time(res.get_datetime(), NULL, ob_time)))
+        || (OB_FAIL(ObTimeConverter::validate_oracle_date(ob_time)))) {
       char expr_str[OB_MAX_TWO_OPERATOR_EXPR_LENGTH];
       int64_t pos = 0;
       ret = OB_OPERATE_OVERFLOW;
       pos = 0;
-      databuff_printf(expr_str, OB_MAX_TWO_OPERATOR_EXPR_LENGTH, pos, "'(%ld + %ld)'", left_i, right_i);
+      databuff_printf(expr_str,
+                      OB_MAX_TWO_OPERATOR_EXPR_LENGTH,
+                      pos,
+                      "'(%ld + %ld)'", left_i, right_i);
       LOG_USER_ERROR(OB_OPERATE_OVERFLOW, "DATE", expr_str);
     }
+    return ret;
   }
-  return ret;
+};
+
+//both left and right are datetimeType
+int ObExprAdd::add_datetime_datetime(EVAL_FUNC_ARG_DECL)
+{
+  return def_arith_eval_func<ObDatetimeDatetimeAddFunc>(EVAL_FUNC_ARG_LIST);
 }
 
-}  // namespace sql
-}  // namespace oceanbase
+int ObExprAdd::add_datetime_datetime_batch(BATCH_EVAL_FUNC_ARG_DECL)
+{
+  return def_batch_arith_op_by_datum_func<ObDatetimeDatetimeAddFunc>(
+      BATCH_EVAL_FUNC_ARG_LIST);
+}
+
+template<typename T>
+struct ObDecimalIntBatchAddRaw : public ObArithOpRawType<T, T, T>
+{
+  static void raw_op(T &res, const T &l, const T &r)
+  {
+    res = l + r;
+  }
+
+  static int raw_check(const T &res, const T &l, const T &r)
+  {
+    return OB_SUCCESS;
+  }
+};
+
+struct ObDecimalIntBatchAddRawWithCheck : public ObDecimalIntBatchAddRaw<int512_t>
+{
+  static int raw_check(const int512_t &res, const int512_t &l, const int512_t &r)
+  {
+    int ret = OB_SUCCESS;
+    if (OB_UNLIKELY(res <= wide::ObDecimalIntConstValue::MYSQL_DEC_INT_MIN
+                    || res >= wide::ObDecimalIntConstValue::MYSQL_DEC_INT_MAX)) {
+      char expr_str[OB_MAX_TWO_OPERATOR_EXPR_LENGTH];
+      ret = OB_OPERATE_OVERFLOW;
+      int64_t pos = 0;
+      databuff_printf(expr_str, OB_MAX_TWO_OPERATOR_EXPR_LENGTH, pos, "");
+      LOG_USER_ERROR(OB_OPERATE_OVERFLOW, "DECIMAL", expr_str);
+      LOG_WARN("decimal int out of range", K(ret));
+    }
+    return ret;
+  }
+};
+
+#define DECINC_ADD_EVAL_FUNC_DECL(TYPE) \
+int ObExprAdd::add_decimal##TYPE(EVAL_FUNC_ARG_DECL)      \
+{                                            \
+  return def_arith_eval_func<ObArithOpWrap<ObDecimalIntBatchAddRaw<TYPE##_t>>>(EVAL_FUNC_ARG_LIST); \
+}                                            \
+int ObExprAdd::add_decimal##TYPE##_batch(BATCH_EVAL_FUNC_ARG_DECL)      \
+{                                            \
+  return def_batch_arith_op<ObArithOpWrap<ObDecimalIntBatchAddRaw<TYPE##_t>>>(BATCH_EVAL_FUNC_ARG_LIST); \
+}                                             \
+int ObExprAdd::add_decimal##TYPE##_vector(VECTOR_EVAL_FUNC_ARG_DECL)      \
+{                                            \
+  return def_fixed_len_vector_arith_op<ObVectorArithOpWrap<ObDecimalIntBatchAddRaw<TYPE##_t>>>(VECTOR_EVAL_FUNC_ARG_LIST); \
+}
+
+
+DECINC_ADD_EVAL_FUNC_DECL(int32)
+DECINC_ADD_EVAL_FUNC_DECL(int64)
+DECINC_ADD_EVAL_FUNC_DECL(int128)
+DECINC_ADD_EVAL_FUNC_DECL(int256)
+DECINC_ADD_EVAL_FUNC_DECL(int512)
+
+int ObExprAdd::add_decimalint512_with_check(EVAL_FUNC_ARG_DECL)
+{
+  return def_arith_eval_func<ObArithOpWrap<ObDecimalIntBatchAddRawWithCheck>>(EVAL_FUNC_ARG_LIST);
+}
+
+int ObExprAdd::add_decimalint512_with_check_batch(BATCH_EVAL_FUNC_ARG_DECL)
+{
+  return def_batch_arith_op<ObArithOpWrap<ObDecimalIntBatchAddRawWithCheck>>(
+    BATCH_EVAL_FUNC_ARG_LIST);
+}
+
+int ObExprAdd::add_decimalint512_with_check_vector(VECTOR_EVAL_FUNC_ARG_DECL)
+{
+  return def_fixed_len_vector_arith_op<ObVectorArithOpWrap<ObDecimalIntBatchAddRawWithCheck>>(
+    VECTOR_EVAL_FUNC_ARG_LIST);
+}
+
+#undef DECINC_ADD_EVAL_FUNC_DECL
+
+template<typename T>
+struct ObDecimalOracleAddFunc
+{
+  int operator()(ObDatum &res, const ObDatum &l, const ObDatum &r, const int64_t scale,
+                 ObNumStackOnceAlloc &alloc) const
+  {
+    int ret = OB_SUCCESS;
+    const T res_int = *reinterpret_cast<const T *>(l.ptr_) + *reinterpret_cast<const T *>(r.ptr_);
+    number::ObNumber res_num;
+    if (OB_FAIL(wide::to_number(res_int, scale, alloc, res_num))) {
+      LOG_WARN("fail to cast decima int to number", K(ret), K(scale));
+    } else {
+      res.set_number(res_num);
+      alloc.free();  // for batch function reuse alloc
+    }
+    return ret;
+  }
+};
+
+template<typename T>
+struct ObDecimalOracleVectorAddFunc
+{
+  template <typename ResVector, typename LeftVector, typename RightVector>
+  int operator()(ResVector &res_vec, const LeftVector &l_vec, const RightVector &r_vec,
+                 const int64_t idx, const int64_t scale, ObNumStackOnceAlloc &alloc) const
+  {
+    int ret = OB_SUCCESS;
+    const T res_int = *reinterpret_cast<const T *>(l_vec.get_payload(idx))
+                      + *reinterpret_cast<const T *>(r_vec.get_payload(idx));
+    number::ObNumber res_num;
+    if (OB_FAIL(wide::to_number(res_int, scale, alloc, res_num))) {
+      LOG_WARN("fail to cast decima int to number", K(ret), K(scale));
+    } else {
+      res_vec.set_number(idx, res_num);
+      alloc.free();  // for batch function reuse alloc
+    }
+    return ret;
+  }
+};
+
+
+#define DECINC_ADD_EVAL_FUNC_ORA_DECL(TYPE) \
+int ObExprAdd::add_decimal##TYPE##_oracle(EVAL_FUNC_ARG_DECL)      \
+{                                            \
+  ObNumStackOnceAlloc tmp_alloc;                                \
+  const int64_t scale = expr.args_[0]->datum_meta_.scale_;      \
+  return def_arith_eval_func<ObDecimalOracleAddFunc<TYPE##_t>>(EVAL_FUNC_ARG_LIST, scale, tmp_alloc); \
+}                                            \
+int ObExprAdd::add_decimal##TYPE##_oracle_batch(BATCH_EVAL_FUNC_ARG_DECL)      \
+{                                            \
+  ObNumStackOnceAlloc tmp_alloc;                                \
+  const int64_t scale = expr.args_[0]->datum_meta_.scale_;      \
+  return def_batch_arith_op_by_datum_func<ObDecimalOracleAddFunc<TYPE##_t>>(BATCH_EVAL_FUNC_ARG_LIST, scale, tmp_alloc); \
+}                                            \
+int ObExprAdd::add_decimal##TYPE##_oracle_vector(VECTOR_EVAL_FUNC_ARG_DECL)      \
+{                                            \
+  ObNumStackOnceAlloc tmp_alloc;                                \
+  const int64_t scale = expr.args_[0]->datum_meta_.scale_;      \
+  return def_fixed_len_vector_arith_op_func<ObDecimalOracleVectorAddFunc<TYPE##_t>,\
+                                            ObArithTypedBase<TYPE##_t, TYPE##_t, TYPE##_t>>(VECTOR_EVAL_FUNC_ARG_LIST, scale, tmp_alloc); \
+}
+
+DECINC_ADD_EVAL_FUNC_ORA_DECL(int32)
+DECINC_ADD_EVAL_FUNC_ORA_DECL(int64)
+DECINC_ADD_EVAL_FUNC_ORA_DECL(int128)
+
+#undef DECINC_ADD_EVAL_FUNC_ORA_DECL
+
+template<typename T>
+struct ObArrayAddFunc : public ObNestedArithOpBaseFunc
+{
+  int operator()(ObIArrayType &res, const ObIArrayType &l, const ObIArrayType &r) const
+  {
+    int ret = OB_SUCCESS;
+
+    if (l.get_format() != r.get_format() || res.get_format() != r.get_format()) {
+      ret = OB_ERR_ARRAY_TYPE_MISMATCH;
+      LOG_WARN("nested type is mismatch", K(ret), K(l.get_format()), K(r.get_format()), K(res.get_format()));
+    } else if (l.size() != r.size()) {
+        ret = OB_ERR_ARRAY_TYPE_MISMATCH;
+        LOG_WARN("nested size is mismatch", K(ret), K(l.size()), K(r.size()));
+    } else if (l.get_format() != ArrayFormat::Vector && MEMCMP(l.get_nullbitmap(), r.get_nullbitmap(), sizeof(uint8_t) * l.size())) {
+        ret = OB_ERR_ARRAY_TYPE_MISMATCH;
+        LOG_WARN("nested nullbitmap is mismatch", K(ret));
+    } else if (l.get_format() == ArrayFormat::Nested_Array) {
+      // compare array dimension
+      const ObArrayNested &left = static_cast<const ObArrayNested&>(l);
+      const ObArrayNested &right = static_cast<const ObArrayNested&>(r);
+      ObArrayNested &nest_res = static_cast<ObArrayNested&>(res);
+      if (MEMCMP(left.get_nullbitmap(), right.get_nullbitmap(), sizeof(uint8_t) * left.size()) != 0) {
+        ret = OB_ERR_ARRAY_TYPE_MISMATCH;
+        LOG_WARN("nested nullbitmap is mismatch", K(ret));
+      } else if (MEMCMP(left.get_offsets(), right.get_offsets(), sizeof(uint32_t) * left.size()) != 0) {
+        ret = OB_ERR_ARRAY_TYPE_MISMATCH;
+        LOG_WARN("nested offsets is mismatch", K(ret));
+      } else if (OB_FAIL(res.set_null_bitmaps(left.get_nullbitmap(), left.size()))) {
+        LOG_WARN("nested nullbitmap copy failed", K(ret));
+      } else if (OB_FAIL(res.set_offsets(left.get_offsets(), left.size()))) {
+        LOG_WARN("nested offset copy failed", K(ret));
+      } else if (OB_FAIL(operator()(*nest_res.get_child_array(), *left.get_child_array(), *right.get_child_array()))) {
+        LOG_WARN("nested child array add failed", K(ret));
+      }
+    } else if (l.get_format() != ArrayFormat::Fixed_Size && l.get_format() != ArrayFormat::Vector) {
+      ret = OB_ERR_ARRAY_TYPE_MISMATCH;
+      LOG_WARN("invaid array type", K(ret), K(l.get_format()));
+    } else {
+      T *res_data = NULL;
+      if (l.get_format() != ArrayFormat::Vector && OB_FAIL(res.set_null_bitmaps(l.get_nullbitmap(), l.size()))) {
+        LOG_WARN("array nullbitmap copy failed", K(ret));
+      } else if (OB_FAIL(static_cast<ObArrayBase<T> &>(res).get_reserved_data(l.size(), res_data))) {
+        LOG_WARN("array get resered data failed", K(ret));
+      } else {
+        T *left_data = reinterpret_cast<T *>(l.get_data());
+        T *right_data = reinterpret_cast<T *>(r.get_data());
+        for (int64_t i = 0; i < l.size() && OB_SUCC(ret); ++i) {
+          res_data[i] = left_data[i] + right_data[i];
+          if (OB_FAIL(ObArrayExprUtils::raw_check_add(res_data[i], left_data[i], right_data[i]))) {
+            LOG_WARN("array add check failed", K(ret));
+          }
+        }
+      }
+    }
+    return ret;
+  }
+};
+
+#define COLLECTION_ADD_EVAL_FUNC_DECL(TYPE) \
+int ObExprAdd::add_collection_collection_##TYPE(EVAL_FUNC_ARG_DECL)      \
+{                                            \
+  return def_arith_eval_func<ObNestedArithOpWrap<ObArrayAddFunc<TYPE>>>(EVAL_FUNC_ARG_LIST, expr, ctx); \
+}                                            \
+int ObExprAdd::add_collection_collection_##TYPE##_batch(BATCH_EVAL_FUNC_ARG_DECL)      \
+{                                            \
+  return def_batch_arith_op_by_datum_func<ObNestedArithOpWrap<ObArrayAddFunc<TYPE>>>(BATCH_EVAL_FUNC_ARG_LIST, expr, ctx); \
+}                                             \
+int ObExprAdd::add_collection_collection_##TYPE##_vector(VECTOR_EVAL_FUNC_ARG_DECL)      \
+{                                            \
+  return def_nested_vector_arith_op_func<ObNestedVectorArithOpFunc<ObArrayAddFunc<TYPE>>>(VECTOR_EVAL_FUNC_ARG_LIST, expr, ctx);  \
+}
+
+COLLECTION_ADD_EVAL_FUNC_DECL(int8_t)
+COLLECTION_ADD_EVAL_FUNC_DECL(int16_t)
+COLLECTION_ADD_EVAL_FUNC_DECL(int32_t)
+COLLECTION_ADD_EVAL_FUNC_DECL(int64_t)
+COLLECTION_ADD_EVAL_FUNC_DECL(uint64_t)
+COLLECTION_ADD_EVAL_FUNC_DECL(float)
+COLLECTION_ADD_EVAL_FUNC_DECL(double)
+
+}
+}

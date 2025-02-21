@@ -13,122 +13,33 @@
 #define USING_LOG_PREFIX SQL_OPT
 
 #include "ob_log_temp_table_transformation.h"
-#include "ob_opt_est_cost.h"
+#include "sql/optimizer/ob_join_order.h"
 
 using namespace oceanbase;
 using namespace sql;
 using namespace oceanbase::common;
 using namespace oceanbase::sql::log_op_def;
 
-ObLogTempTableTransformation::ObLogTempTableTransformation(ObLogPlan& plan) : ObLogicalOperator(plan)
-{}
+ObLogTempTableTransformation::ObLogTempTableTransformation(ObLogPlan &plan)
+  : ObLogicalOperator(plan)
+{
+}
 
 ObLogTempTableTransformation::~ObLogTempTableTransformation()
-{}
-
-int ObLogTempTableTransformation::copy_without_child(ObLogicalOperator*& out)
 {
-  int ret = OB_SUCCESS;
-  ObLogicalOperator* op = NULL;
-  ObLogTempTableTransformation* temp_table_op = NULL;
-  out = NULL;
-  if (OB_FAIL(clone(op))) {
-    LOG_WARN("failed to clone ObLogAppend op", K(ret));
-  } else if (OB_ISNULL(temp_table_op = static_cast<ObLogTempTableTransformation*>(op))) {
-    ret = OB_ERR_UNEXPECTED;
-    LOG_WARN("get unexpected null", K(ret));
-  } else {
-    out = temp_table_op;
-  }
-  return ret;
-}
-
-int ObLogTempTableTransformation::allocate_exchange_post(AllocExchContext* ctx)
-{
-  int ret = OB_SUCCESS;
-  bool is_basic = false;
-  ObExchangeInfo exch_info;
-  ObLogicalOperator* last_child = NULL;
-  if (OB_ISNULL(ctx) || OB_ISNULL(last_child = get_child(get_num_of_child() - 1))) {
-    ret = OB_ERR_UNEXPECTED;
-    LOG_WARN("get unexpected null", K(ctx), K(ret));
-  } else if (OB_FAIL(compute_basic_sharding_info(ctx, is_basic))) {
-    LOG_WARN("failed to compute basic sharding info", K(ret));
-  } else if (is_basic) {
-    /*do nothing*/
-  } else if (OB_FAIL(sharding_info_.copy_with_part_keys(last_child->get_sharding_info()))) {
-    LOG_WARN("failed to copy sharding info from children", K(ret));
-  } else {
-    for (int64_t i = 0; OB_SUCC(ret) && i < get_num_of_child() - 1; i++) {
-      ObLogicalOperator* child = NULL;
-      if (OB_ISNULL(child = get_child(i))) {
-        ret = OB_ERR_UNEXPECTED;
-        LOG_WARN("get unexpected null", K(child), K(ret));
-      } else if (child->get_sharding_info().is_sharding() &&
-                 OB_FAIL(allocate_exchange_nodes_below(i, *ctx, exch_info))) {
-        LOG_WARN("failed to allocate exchange nodes below", K(ret));
-      } else { /*do nothing*/
-      }
-    }
-  }
-  return ret;
-}
-
-int ObLogTempTableTransformation::allocate_exchange(AllocExchContext* ctx, ObExchangeInfo& exch_info)
-{
-  int ret = OB_SUCCESS;
-  ObLogicalOperator* last_child = NULL;
-  if (OB_ISNULL(last_child = get_child(get_num_of_child() - 1))) {
-    ret = OB_ERR_UNEXPECTED;
-    LOG_WARN("child is null", K(ret));
-  } else if (OB_FAIL(last_child->allocate_exchange(ctx, exch_info))) {
-    LOG_WARN("failed to allocate exchange", K(ret));
-  } else { /*do nothing*/
-  }
-  return ret;
-}
-
-int ObLogTempTableTransformation::transmit_local_ordering()
-{
-  int ret = OB_SUCCESS;
-  reset_local_ordering();
-  ObLogicalOperator* last_child = NULL;
-  if (OB_ISNULL(last_child = get_child(get_num_of_child() - 1))) {
-    ret = OB_ERR_UNEXPECTED;
-    LOG_WARN("last_child is null", K(ret));
-  } else if (OB_FAIL(set_local_ordering(last_child->get_local_ordering()))) {
-    LOG_WARN("failed to set local ordering", K(ret));
-  } else { /*do nothing*/
-  }
-  return ret;
-}
-
-int ObLogTempTableTransformation::transmit_op_ordering()
-{
-  int ret = OB_SUCCESS;
-  ObLogicalOperator* last_child = NULL;
-  if (OB_ISNULL(last_child = get_child(get_num_of_child() - 1))) {
-    ret = OB_ERR_UNEXPECTED;
-    LOG_WARN("last_child is null", K(ret));
-  } else if (OB_FAIL(set_op_ordering(last_child->get_op_ordering()))) {
-    LOG_WARN("failed to set op ordering", K(ret));
-  } else if (OB_FAIL(transmit_local_ordering())) {
-    LOG_WARN("failed to set local ordering", K(ret));
-  } else { /*do nothing.*/
-  }
-  return ret;
 }
 
 int ObLogTempTableTransformation::compute_op_ordering()
 {
   int ret = OB_SUCCESS;
-  ObLogicalOperator* last_child = NULL;
+  ObLogicalOperator *last_child = NULL;
   if (OB_ISNULL(last_child = get_child(get_num_of_child() - 1))) {
     ret = OB_ERR_UNEXPECTED;
     LOG_WARN("last_child is null", K(ret));
   } else if (OB_FAIL(set_op_ordering(last_child->get_op_ordering()))) {
     LOG_WARN("failed to set op ordering", K(ret));
-  } else { /*do nothing.*/
+  } else {
+    is_local_order_ = last_child->get_is_local_order();
   }
   return ret;
 }
@@ -136,7 +47,7 @@ int ObLogTempTableTransformation::compute_op_ordering()
 int ObLogTempTableTransformation::compute_fd_item_set()
 {
   int ret = OB_SUCCESS;
-  ObLogicalOperator* last_child = NULL;
+  ObLogicalOperator *last_child = NULL;
   if (OB_ISNULL(last_child = get_child(get_num_of_child() - 1))) {
     ret = OB_ERR_UNEXPECTED;
     LOG_WARN("get unexpected null", K(ret));
@@ -149,27 +60,35 @@ int ObLogTempTableTransformation::compute_fd_item_set()
 int ObLogTempTableTransformation::est_cost()
 {
   int ret = OB_SUCCESS;
-  ObLogicalOperator* last_child = get_child(get_num_of_child() - 1);
+  double op_cost = 0.0;
+  double child_cost = 0.0;
+  double card = 0.0;
+  for (int64_t i = 0; OB_SUCC(ret) && i < get_num_of_child(); i++) {
+    if (OB_ISNULL(get_child(i))) {
+      ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("get unexpected null", K(ret));
+    } else {
+      child_cost += get_child(i)->get_cost();
+      card = get_child(i)->get_card();
+    }
+  }
+  if (OB_SUCC(ret)) {
+    set_op_cost(op_cost);
+    set_cost(op_cost + child_cost);
+    set_card(card);
+  }
+  return ret;
+}
+
+int ObLogTempTableTransformation::est_width()
+{
+  int ret = OB_SUCCESS;
+  ObLogicalOperator *last_child = get_child(get_num_of_child() - 1);
   if (OB_ISNULL(last_child)) {
     ret = OB_ERR_UNEXPECTED;
-    LOG_WARN("get unexpected null", K(ret));
+    LOG_WARN("get unexpected null", K(last_child), K(ret));
   } else {
-    double child_cost = 0.0;
-    double op_cost = ObOptEstCost::cost_subplan_scan(last_child->get_card(), last_child->get_width());
-    for (int64_t i = 0; OB_SUCC(ret) && i < get_num_of_child(); i++) {
-      if (OB_ISNULL(get_child(i))) {
-        ret = OB_ERR_UNEXPECTED;
-        LOG_WARN("get unexpected null", K(ret));
-      } else {
-        child_cost += get_child(i)->get_cost();
-      }
-    }
-    if (OB_SUCC(ret)) {
-      set_op_cost(op_cost);
-      set_cost(op_cost + child_cost);
-      set_card(last_child->get_card());
-      set_width(last_child->get_width());
-    }
+    set_width(last_child->get_width());
   }
   return ret;
 }
@@ -180,6 +99,73 @@ int ObLogTempTableTransformation::allocate_startup_expr_post()
   int64_t last_child = get_num_of_child() - 1;
   if (OB_FAIL(ObLogicalOperator::allocate_startup_expr_post(last_child))) {
     LOG_WARN("failed to allocate startup expr post", K(ret));
+  }
+  return ret;
+}
+
+int ObLogTempTableTransformation::compute_op_parallel_and_server_info()
+{
+  int ret = OB_SUCCESS;
+  ObLogicalOperator *last_child = get_child(get_num_of_child() - 1);
+  if (OB_ISNULL(last_child)) {
+    ret = OB_ERR_UNEXPECTED;
+    LOG_WARN("get unexpected null", K(last_child), K(ret));
+  } else if (OB_FAIL(get_server_list().assign(last_child->get_server_list()))) {
+    LOG_WARN("failed to assign server list", K(ret));
+  } else {
+    set_parallel(last_child->get_parallel());
+    set_server_cnt(last_child->get_server_cnt());
+    if (is_single()) {
+      set_available_parallel(last_child->get_available_parallel());
+    }
+  }
+  return ret;
+}
+
+int ObLogTempTableTransformation::est_ambient_card()
+{
+  int ret = OB_SUCCESS;
+  if (OB_FAIL(inner_est_ambient_card_by_child(get_num_of_child() - 1))) {
+    LOG_WARN("failed to est ambient cards by last child", K(ret), K(get_type()));
+  }
+  return ret;
+}
+
+
+int ObLogTempTableTransformation::do_re_est_cost(EstimateCostInfo &param, double &card, double &op_cost, double &cost)
+{
+  int ret = OB_SUCCESS;
+  card = 0.0;
+  op_cost = 0.0;
+  cost = 0.0;
+  ObLogicalOperator *child = NULL;
+  EstimateCostInfo child_param;
+  double child_card = 0.0;
+  double child_cost = 0.0;
+  for (int64_t i = 0; OB_SUCC(ret) && i < get_num_of_child(); i++) {
+    child_param.reset();
+    child_param.override_ = param.override_;
+    child_param.need_row_count_ = (get_num_of_child() - 1 ) == i ? param.need_row_count_ : -1;
+    if (OB_ISNULL(child = get_child(i))) {
+      ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("get unexpected null", K(ret));
+    } else if (OB_FAIL(child->re_est_cost(child_param, card, child_cost))) {
+      LOG_WARN("failed to re est child cost", K(ret));
+    } else {
+      cost += child_cost;
+    }
+  }
+  return ret;
+}
+
+int ObLogTempTableTransformation::get_card_without_filter(double &card)
+{
+  int ret = OB_SUCCESS;
+  ObLogicalOperator *child_op = NULL;
+  if (OB_NOT_NULL(child_op = get_child(get_num_of_child() - 1))) {
+    card = child_op->get_card();
+  } else {
+    card = get_card();
   }
   return ret;
 }

@@ -13,21 +13,23 @@
 #define USING_LOG_PREFIX SQL_RESV
 #include "sql/resolver/ddl/ob_create_profile_stmt.h"
 
-#include "share/ob_define.h"
-#include "lib/string/ob_string.h"
-#include "lib/string/ob_strings.h"
-#include "lib/utility/ob_print_utils.h"
 
 using namespace oceanbase;
 using namespace oceanbase::common;
 using namespace oceanbase::sql;
 
-ObUserProfileStmt::ObUserProfileStmt(ObIAllocator* name_pool)
-    : ObDDLStmt(name_pool, stmt::T_USER_PROFILE), create_profile_arg_()
-{}
+ObUserProfileStmt::ObUserProfileStmt(ObIAllocator *name_pool)
+    : ObDDLStmt(name_pool, stmt::T_USER_PROFILE),
+      create_profile_arg_()
+{
+}
 
-ObUserProfileStmt::ObUserProfileStmt() : ObDDLStmt(NULL, stmt::T_USER_PROFILE), create_profile_arg_()
-{}
+ObUserProfileStmt::ObUserProfileStmt()
+    : ObDDLStmt(NULL, stmt::T_USER_PROFILE),
+      create_profile_arg_()
+{
+}
 
 ObUserProfileStmt::~ObUserProfileStmt()
-{}
+{
+}

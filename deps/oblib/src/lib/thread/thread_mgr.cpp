@@ -11,13 +11,27 @@
  */
 
 #include "lib/thread/thread_mgr.h"
-#include "lib/alloc/memory_dump.h"
-#include "lib/io/ob_io_manager.h"
-#include "lib/lock/ob_latch.h"
 
 namespace oceanbase {
 using namespace common;
 namespace lib {
+
+TGHelper *&get_tenant_tg_helper()
+{
+  static thread_local TGHelper *tenant_tg_helper;
+  return tenant_tg_helper;
+}
+
+void set_tenant_tg_helper(TGHelper *tg_helper)
+{
+  get_tenant_tg_helper() = tg_helper;
+}
+
+// define TGConfig
+#define TG_DEF(id, name, type, arg...) const ThreadCountPair TGConfig::id = ThreadCountPair(arg);
+#include "lib/thread/thread_define.h"
+#undef TG_DEF
+
 CreateFunc create_funcs_[] = {nullptr};
 bool create_func_inited_ = false;
 
@@ -28,17 +42,20 @@ void __attribute__((weak)) init_create_func()
 
 void lib_init_create_func()
 {
-#define TG_DEF(id, name, desc, scope, type, args...)            \
-  create_funcs_[TGDefIDs::id] = []() {                          \
-    auto ret = OB_NEW(TGCLSMap<TGType::type>::CLS, "tg", args); \
-    ret->attr_ = {#name, desc, TGScope::scope, TGType::type};   \
-    return ret;                                                 \
-  };
-#include "lib/thread/thread_define.h"
-#undef TG_DEF
+  #define TG_DEF(id, name, type, args...)                           \
+    create_funcs_[TGDefIDs::id] = []() {                            \
+      TG_##type *ret = OB_NEW(TG_##type, SET_USE_500("tg"), args);  \
+      if (NULL != ret) {                                            \
+        ret->attr_ = {#name, TGType::type};                         \
+      }                                                             \
+      return ret;                                                   \
+    };
+  #include "lib/thread/thread_define.h"
+  #undef TG_DEF
 }
 
-TGMgr::TGMgr() : bs_(MAX_ID, bs_buf_)
+TGMgr::TGMgr()
+  : bs_(MAX_ID, bs_buf_)
 {
   int ret = OB_SUCCESS;
   for (int i = 0; i < MAX_ID; i++) {
@@ -46,13 +63,7 @@ TGMgr::TGMgr() : bs_(MAX_ID, bs_buf_)
   }
   for (int i = 0; OB_SUCC(ret) && i < TGDefIDs::END; i++) {
     int tg_id = -1;
-    ret = create_tg(i, tg_id);
-    if (OB_FAIL(ret)) {
-    } else if (tg_id < 0) {
-      // do-nothing
-    } else {
-      default_tg_id_map_[i] = tg_id;
-    }
+    ret = create_tg(i, tg_id, 0);
   }
   abort_unless(OB_SUCCESS == ret);
 }
@@ -60,16 +71,22 @@ TGMgr::TGMgr() : bs_(MAX_ID, bs_buf_)
 TGMgr::~TGMgr()
 {
   for (int i = 0; i < MAX_ID; i++) {
-    destroy_tg(i);
+    destroy_tg(i, true);
   }
 }
 
-void TGMgr::destroy_tg(int tg_id)
+void TGMgr::destroy_tg(int tg_id, bool is_exist)
 {
   if (tg_id != -1) {
-    ITG*& tg = tgs_[tg_id];
+    ITG *&tg = tgs_[tg_id];
     if (tg != nullptr) {
-      OB_LOG(INFO, "destroy tg", K(tg_id), KP(tg), K(tg->attr_));
+      if (tg->tg_helper_ != nullptr && !is_exist) {
+        tg->tg_helper_->tg_destroy_cb(tg_id);
+      }
+      OB_LOG(INFO, "destroy tg",
+             K(tg_id),
+             KP(tg),
+             K(tg->attr_));
       tg->stop();
       tg->wait();
       OB_DELETE(ITG, "", tg);
@@ -79,10 +96,10 @@ void TGMgr::destroy_tg(int tg_id)
   }
 }
 
-int TGMgr::alloc_tg_id()
+int TGMgr::alloc_tg_id(int start)
 {
   common::ObLatchMutexGuard guard(lock_, common::ObLatchIds::DEFAULT_MUTEX);
-  int tg_id = bs_.find_first_significant(0);
+  int tg_id = bs_.find_first_significant(start);
   bs_.unset(tg_id);
   return tg_id;
 }
@@ -93,5 +110,5 @@ void TGMgr::free_tg_id(int tg_id)
   bs_.set(tg_id);
 }
 
-}  // namespace lib
-}  // namespace oceanbase
+}  // lib
+}  // oceanbase

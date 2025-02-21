@@ -13,98 +13,45 @@
 #define USING_LOG_PREFIX SQL_ENG
 #include "sql/engine/expr/ob_expr_timestamp.h"
 
-#include "lib/ob_name_def.h"
-#include "lib/timezone/ob_time_convert.h"
-#include "sql/engine/ob_physical_plan_ctx.h"
 #include "sql/engine/ob_exec_context.h"
-#include "share/system_variable/ob_system_variable.h"
 
-namespace oceanbase {
+namespace oceanbase
+{
 using namespace common;
 using namespace share;
-namespace sql {
-ObExprSysTimestamp::ObExprSysTimestamp(ObIAllocator& alloc)
-    : ObFuncExprOperator(alloc, T_FUN_SYS_SYSTIMESTAMP, N_SYSTIMESTAMP, 0, NOT_ROW_DIMENSION)
-{}
+namespace sql
+{
+ObExprSysTimestamp::ObExprSysTimestamp(ObIAllocator &alloc)
+    : ObFuncExprOperator(alloc, T_FUN_SYS_SYSTIMESTAMP, N_SYSTIMESTAMP, 0, NOT_VALID_FOR_GENERATED_COL, NOT_ROW_DIMENSION)
+{
+}
 ObExprSysTimestamp::~ObExprSysTimestamp()
-{}
+{
+}
 
-int ObExprSysTimestamp::calc_result_type0(ObExprResType& type, ObExprTypeCtx& type_ctx) const
+int ObExprSysTimestamp::calc_result_type0(ObExprResType &type, ObExprTypeCtx &type_ctx) const
 {
   UNUSED(type_ctx);
   type.set_timestamp_tz();
   return OB_SUCCESS;
 }
 
-int ObExprSysTimestamp::calc_result0(ObObj& result, ObExprCtx& expr_ctx) const
+int ObExprSysTimestamp::eval_systimestamp(const ObExpr &expr, ObEvalCtx &ctx,
+    ObDatum &expr_datum)
 {
   int ret = OB_SUCCESS;
   int64_t utc_timestamp = 0;
   ObTimeZoneInfoWrap tz_info_wrap;
-  const ObTimeZoneInfo* cur_tz_info = get_timezone_info(expr_ctx.my_session_);
-  if (OB_ISNULL(expr_ctx.phy_plan_ctx_) || OB_ISNULL(expr_ctx.my_session_) || OB_ISNULL(cur_tz_info)) {
-    ret = OB_ERR_UNEXPECTED;
-    LOG_WARN("expr_ctx.phy_plan_ctx_ or expr_ctx.my_session_ is null", K(expr_ctx.my_session_), K(cur_tz_info), K(ret));
-  } else if (OB_UNLIKELY(!expr_ctx.phy_plan_ctx_->has_cur_time())) {
-    ret = OB_ERR_UNEXPECTED;
-    LOG_WARN("physical plan context don't have time value", K(ret));
-  } else {
-    utc_timestamp = expr_ctx.phy_plan_ctx_->get_cur_time().get_datetime();
-    ObString sys_time_zone;
-    const ObString OLD_SERVER_SYSTIMEZONE("CST");
-    if (OB_FAIL(expr_ctx.my_session_->get_sys_variable(share::SYS_VAR_SYSTEM_TIME_ZONE, sys_time_zone))) {
-      LOG_WARN("Get sys variable error", K(ret));
-    } else if (0 == sys_time_zone.case_compare(OLD_SERVER_SYSTIMEZONE)) {
-      LOG_DEBUG("sys_time_zone is CST, maybe from old server, use local value instead",
-          K(sys_time_zone),
-          "local value",
-          ObSpecialSysVarValues::system_time_zone_str_);
-      sys_time_zone = ObSpecialSysVarValues::system_time_zone_str_;
-    }
-
-    if (OB_SUCC(ret)) {
-      if (OB_FAIL(tz_info_wrap.init_time_zone(
-              sys_time_zone, OB_INVALID_VERSION, *(const_cast<ObTZInfoMap*>(cur_tz_info->get_tz_info_map()))))) {
-        LOG_WARN("tz_info_wrap init_time_zone fail", KR(ret), K(sys_time_zone));
-      } else {
-        cur_tz_info = tz_info_wrap.get_time_zone_info();
-        LOG_DEBUG("succ to get tz_info", K(sys_time_zone), K(cur_tz_info));
-      }
-    }
-  }
-
-  if (OB_SUCC(ret)) {
-    int64_t dt_value = 0;
-    int64_t odate_value = 0;
-    ObOTimestampData timestamp_value;
-    if (OB_FAIL(ObTimeConverter::timestamp_to_datetime(utc_timestamp, cur_tz_info, dt_value))) {
-      LOG_WARN("failed to convert timestamp to datetime", K(ret));
-    } else if (FALSE_IT(ObTimeConverter::datetime_to_odate(dt_value, odate_value))) {
-    } else if (OB_FAIL(ObTimeConverter::odate_to_otimestamp(
-                   odate_value, cur_tz_info, ObTimestampTZType, timestamp_value))) {
-      LOG_WARN("failed to convert timestamp to datetime", K(ret));
-    } else {
-      result.set_timestamp_tz(timestamp_value);
-    }
-  }
-  return ret;
-}
-
-int ObExprSysTimestamp::eval_systimestamp(const ObExpr& expr, ObEvalCtx& ctx, ObDatum& expr_datum)
-{
-  int ret = OB_SUCCESS;
-  UNUSED(expr);
-  int64_t utc_timestamp = 0;
-  ObTimeZoneInfoWrap tz_info_wrap;
-  const ObTimeZoneInfo* cur_tz_info = get_timezone_info(ctx.exec_ctx_.get_my_session());
-  if (OB_ISNULL(ctx.exec_ctx_.get_physical_plan_ctx()) || OB_ISNULL(ctx.exec_ctx_.get_my_session()) ||
-      OB_ISNULL(cur_tz_info)) {
+  ObSolidifiedVarsGetter helper(expr, ctx, ctx.exec_ctx_.get_my_session());
+  const ObTimeZoneInfo *cur_tz_info = NULL;
+  if (OB_FAIL(helper.get_time_zone_info(cur_tz_info))) {
+    LOG_WARN("get tz info failed", K(ret));
+  } else if (OB_ISNULL(ctx.exec_ctx_.get_physical_plan_ctx())
+             || OB_ISNULL(ctx.exec_ctx_.get_my_session())
+             || OB_ISNULL(cur_tz_info)) {
     ret = OB_ERR_UNEXPECTED;
     LOG_WARN("phy_plan_ctx_ or my_session_ or cur_tz_info is null",
-        "phy_plan_ctx",
-        ctx.exec_ctx_.get_physical_plan_ctx(),
-        K(cur_tz_info),
-        K(ret));
+             "phy_plan_ctx", ctx.exec_ctx_.get_physical_plan_ctx(), K(cur_tz_info), K(ret));
   } else if (OB_UNLIKELY(!ctx.exec_ctx_.get_physical_plan_ctx()->has_cur_time())) {
     ret = OB_ERR_UNEXPECTED;
     LOG_WARN("physical plan context don't have current time value");
@@ -112,19 +59,18 @@ int ObExprSysTimestamp::eval_systimestamp(const ObExpr& expr, ObEvalCtx& ctx, Ob
     utc_timestamp = ctx.exec_ctx_.get_physical_plan_ctx()->get_cur_time().get_datetime();
     ObString sys_time_zone;
     const ObString OLD_SERVER_SYSTIMEZONE("CST");
-    if (OB_FAIL(ctx.exec_ctx_.get_my_session()->get_sys_variable(share::SYS_VAR_SYSTEM_TIME_ZONE, sys_time_zone))) {
+    if (OB_FAIL(ctx.exec_ctx_.get_my_session()->get_sys_variable(share::SYS_VAR_SYSTEM_TIME_ZONE,
+        sys_time_zone))) {
       LOG_WARN("Get sys variable error", K(ret));
     } else if (0 == sys_time_zone.case_compare(OLD_SERVER_SYSTIMEZONE)) {
       LOG_DEBUG("sys_time_zone is CST, maybe from old server, use local value instead",
-          K(sys_time_zone),
-          "local value",
-          ObSpecialSysVarValues::system_time_zone_str_);
+                K(sys_time_zone), "local value", ObSpecialSysVarValues::system_time_zone_str_);
       sys_time_zone = ObSpecialSysVarValues::system_time_zone_str_;
     }
 
     if (OB_SUCC(ret)) {
-      if (OB_FAIL(tz_info_wrap.init_time_zone(
-              sys_time_zone, OB_INVALID_VERSION, *(const_cast<ObTZInfoMap*>(cur_tz_info->get_tz_info_map()))))) {
+      if (OB_FAIL(tz_info_wrap.init_time_zone(sys_time_zone,
+          OB_INVALID_VERSION, *(const_cast<ObTZInfoMap *>(cur_tz_info->get_tz_info_map()))))) {
         LOG_WARN("tz_info_wrap init_time_zone fail", KR(ret), K(sys_time_zone));
       } else {
         cur_tz_info = tz_info_wrap.get_time_zone_info();
@@ -137,11 +83,15 @@ int ObExprSysTimestamp::eval_systimestamp(const ObExpr& expr, ObEvalCtx& ctx, Ob
     int64_t dt_value = 0;
     int64_t odate_value = 0;
     ObOTimestampData timestamp_value;
-    if (OB_FAIL(ObTimeConverter::timestamp_to_datetime(utc_timestamp, cur_tz_info, dt_value))) {
+    if (OB_FAIL(ObTimeConverter::timestamp_to_datetime(utc_timestamp,
+                                                       cur_tz_info,
+                                                       dt_value))) {
       LOG_WARN("failed to convert timestamp to datetime", K(ret));
     } else if (FALSE_IT(ObTimeConverter::datetime_to_odate(dt_value, odate_value))) {
-    } else if (OB_FAIL(ObTimeConverter::odate_to_otimestamp(
-                   odate_value, cur_tz_info, ObTimestampTZType, timestamp_value))) {
+    } else if (OB_FAIL(ObTimeConverter::odate_to_otimestamp(odate_value,
+                                                            cur_tz_info,
+                                                            ObTimestampTZType,
+                                                            timestamp_value))) {
       LOG_WARN("failed to convert timestamp to datetime", K(ret));
     } else {
       expr_datum.set_otimestamp_tz(timestamp_value);
@@ -150,7 +100,8 @@ int ObExprSysTimestamp::eval_systimestamp(const ObExpr& expr, ObEvalCtx& ctx, Ob
   return ret;
 }
 
-int ObExprSysTimestamp::cg_expr(ObExprCGCtx& op_cg_ctx, const ObRawExpr& raw_expr, ObExpr& rt_expr) const
+int ObExprSysTimestamp::cg_expr(ObExprCGCtx &op_cg_ctx, const ObRawExpr &raw_expr,
+    ObExpr &rt_expr) const
 {
   UNUSED(raw_expr);
   UNUSED(op_cg_ctx);
@@ -158,62 +109,38 @@ int ObExprSysTimestamp::cg_expr(ObExprCGCtx& op_cg_ctx, const ObRawExpr& raw_exp
   return OB_SUCCESS;
 }
 
-ObExprLocalTimestamp::ObExprLocalTimestamp(ObIAllocator& alloc)
-    : ObFuncExprOperator(alloc, T_FUN_SYS_LOCALTIMESTAMP, N_LOCALTIMESTAMP, 0, NOT_ROW_DIMENSION)
-{}
-ObExprLocalTimestamp::~ObExprLocalTimestamp()
-{}
+DEF_SET_LOCAL_SESSION_VARS(ObExprSysTimestamp, raw_expr) {
+  int ret = OB_SUCCESS;
+  SET_LOCAL_SYSVAR_CAPACITY(1);
+  EXPR_ADD_LOCAL_SYSVAR(share::SYS_VAR_TIME_ZONE);
+  return ret;
+}
 
-int ObExprLocalTimestamp::calc_result_type0(ObExprResType& type, ObExprTypeCtx& type_ctx) const
+ObExprLocalTimestamp::ObExprLocalTimestamp(ObIAllocator &alloc)
+    : ObFuncExprOperator(alloc, T_FUN_SYS_LOCALTIMESTAMP, N_LOCALTIMESTAMP, 0, NOT_VALID_FOR_GENERATED_COL, NOT_ROW_DIMENSION)
 {
-  // https://docs.oracle.com/cd/B19306_01/server.102/b14200/functions079.htm
+}
+ObExprLocalTimestamp::~ObExprLocalTimestamp()
+{
+}
+
+int ObExprLocalTimestamp::calc_result_type0(ObExprResType &type, ObExprTypeCtx &type_ctx) const
+{
+  //https://docs.oracle.com/cd/B19306_01/server.102/b14200/functions079.htm
   UNUSED(type_ctx);
   type.set_timestamp_nano();
   return OB_SUCCESS;
 }
 
-int ObExprLocalTimestamp::calc_result0(ObObj& result, ObExprCtx& expr_ctx) const
+int ObExprLocalTimestamp::eval_localtimestamp(const ObExpr &expr, ObEvalCtx &ctx,
+    ObDatum &expr_datum)
 {
   int ret = OB_SUCCESS;
-  if (OB_ISNULL(expr_ctx.phy_plan_ctx_) || OB_ISNULL(expr_ctx.my_session_)) {
-    ret = OB_ERR_UNEXPECTED;
-    LOG_WARN("expr_ctx.phy_plan_ctx_ or expr_ctx.my_session_ is null", K(ret));
-  } else if (OB_UNLIKELY(!expr_ctx.phy_plan_ctx_->has_cur_time())) {
-    ret = OB_ERR_UNEXPECTED;
-    LOG_WARN("physical plan context don't have curr time value");
-  } else {
-    int64_t utc_value = expr_ctx.phy_plan_ctx_->get_cur_time_tardy_value();
-    int64_t dt_value = 0;
-    int64_t odate_value = 0;
-    ObOTimestampData ts_value;
-    if (OB_FAIL(ObTimeConverter::timestamp_to_datetime(utc_value,
-            get_timezone_info(expr_ctx.my_session_),  // TODO:change this to sys timezone
-            dt_value))) {
-      LOG_WARN("failed to convert timestamp to datetime", K(ret));
-    } else if (FALSE_IT(ObTimeConverter::trunc_datetime(result_type_.get_scale(), dt_value))) {
-    } else if (FALSE_IT(ObTimeConverter::datetime_to_odate(dt_value, odate_value))) {
-    } else if (OB_FAIL(ObTimeConverter::odate_to_otimestamp(odate_value,
-                   get_timezone_info(expr_ctx.my_session_),  // TODO:change this to sys timezone
-                   ObTimestampNanoType,
-                   ts_value))) {
-      LOG_WARN("failed to convert timestamp to datetime", K(ret));
-    } else {
-      result.set_otimestamp_value(ObTimestampNanoType, ts_value);
-    }
-  }
-  return ret;
-}
-
-int ObExprLocalTimestamp::eval_localtimestamp(const ObExpr& expr, ObEvalCtx& ctx, ObDatum& expr_datum)
-{
-  int ret = OB_SUCCESS;
-  UNUSED(expr);
-  if (OB_ISNULL(ctx.exec_ctx_.get_physical_plan_ctx()) || OB_ISNULL(ctx.exec_ctx_.get_my_session())) {
+  if (OB_ISNULL(ctx.exec_ctx_.get_physical_plan_ctx())
+      || OB_ISNULL(ctx.exec_ctx_.get_my_session())) {
     ret = OB_ERR_UNEXPECTED;
     LOG_WARN("phy_plan_ctx_ or my_session_ or cur_tz_info is null",
-        "phy_plan_ctx",
-        ctx.exec_ctx_.get_physical_plan_ctx(),
-        K(ret));
+             "phy_plan_ctx", ctx.exec_ctx_.get_physical_plan_ctx(), K(ret));
   } else if (OB_UNLIKELY(!ctx.exec_ctx_.get_physical_plan_ctx()->has_cur_time())) {
     ret = OB_ERR_UNEXPECTED;
     LOG_WARN("physical plan context don't have current time value");
@@ -222,13 +149,15 @@ int ObExprLocalTimestamp::eval_localtimestamp(const ObExpr& expr, ObEvalCtx& ctx
     int64_t dt_value = 0;
     int64_t odate_value = 0;
     ObOTimestampData ts_value;
-    if (OB_FAIL(ObTimeConverter::timestamp_to_datetime(
-            utc_value, get_timezone_info(ctx.exec_ctx_.get_my_session()), dt_value))) {
+    ObSolidifiedVarsGetter helper(expr, ctx, ctx.exec_ctx_.get_my_session());
+    const common::ObTimeZoneInfo *tz_info = NULL;
+    if (OB_FAIL(helper.get_time_zone_info(tz_info))) {
+      LOG_WARN("get tz info failed", K(ret));
+    } else if (OB_FAIL(ObTimeConverter::timestamp_to_datetime(utc_value, tz_info, dt_value))) {
       LOG_WARN("failed to convert timestamp to datetime", K(ret));
     } else if (FALSE_IT(ObTimeConverter::trunc_datetime(expr.datum_meta_.scale_, dt_value))) {
     } else if (FALSE_IT(ObTimeConverter::datetime_to_odate(dt_value, odate_value))) {
-    } else if (OB_FAIL(ObTimeConverter::odate_to_otimestamp(
-                   odate_value, get_timezone_info(ctx.exec_ctx_.get_my_session()), ObTimestampNanoType, ts_value))) {
+    } else if (OB_FAIL(ObTimeConverter::odate_to_otimestamp(odate_value, tz_info, ObTimestampNanoType, ts_value))) {
       LOG_WARN("failed to convert timestamp to datetime", K(ret));
     } else {
       expr_datum.set_otimestamp_tiny(ts_value);
@@ -237,7 +166,8 @@ int ObExprLocalTimestamp::eval_localtimestamp(const ObExpr& expr, ObEvalCtx& ctx
   return ret;
 }
 
-int ObExprLocalTimestamp::cg_expr(ObExprCGCtx& op_cg_ctx, const ObRawExpr& raw_expr, ObExpr& rt_expr) const
+int ObExprLocalTimestamp::cg_expr(ObExprCGCtx &op_cg_ctx, const ObRawExpr &raw_expr,
+    ObExpr &rt_expr) const
 {
   UNUSED(raw_expr);
   UNUSED(op_cg_ctx);
@@ -245,7 +175,14 @@ int ObExprLocalTimestamp::cg_expr(ObExprCGCtx& op_cg_ctx, const ObRawExpr& raw_e
   return OB_SUCCESS;
 }
 
-int ObExprToTimestamp::set_my_result_from_ob_time(ObExprCtx& expr_ctx, ObTime& ob_time, common::ObObj& result) const
+DEF_SET_LOCAL_SESSION_VARS(ObExprLocalTimestamp, raw_expr) {
+  int ret = OB_SUCCESS;
+  SET_LOCAL_SYSVAR_CAPACITY(1);
+  EXPR_ADD_LOCAL_SYSVAR(share::SYS_VAR_TIME_ZONE);
+  return ret;
+}
+
+int ObExprToTimestamp::set_my_result_from_ob_time(ObExprCtx &expr_ctx, ObTime &ob_time, common::ObObj &result) const
 {
   int ret = OB_SUCCESS;
   UNUSED(expr_ctx);
@@ -259,7 +196,7 @@ int ObExprToTimestamp::set_my_result_from_ob_time(ObExprCtx& expr_ctx, ObTime& o
   return ret;
 }
 
-int ObExprToTimestampTZ::set_my_result_from_ob_time(ObExprCtx& expr_ctx, ObTime& ob_time, common::ObObj& result) const
+int ObExprToTimestampTZ::set_my_result_from_ob_time(ObExprCtx &expr_ctx, ObTime &ob_time, common::ObObj &result) const
 {
   int ret = OB_SUCCESS;
   ObTimeConvertCtx time_cvrt_ctx(get_timezone_info(expr_ctx.my_session_), false);
@@ -277,7 +214,7 @@ int ObExprToTimestampTZ::set_my_result_from_ob_time(ObExprCtx& expr_ctx, ObTime&
 
 
 ObExprTimestamp::ObExprTimestamp(ObIAllocator &alloc)
-    : ObFuncExprOperator(alloc, T_FUN_SYS_TIMESTAMP, N_TIMESTAMP, ONE_OR_TWO, NOT_ROW_DIMENSION)
+    : ObFuncExprOperator(alloc, T_FUN_SYS_TIMESTAMP, N_TIMESTAMP, ONE_OR_TWO, VALID_FOR_GENERATED_COL, NOT_ROW_DIMENSION)
 {
 }
 
@@ -296,8 +233,10 @@ int ObExprTimestamp::calc_result_typeN(ObExprResType &type,
     LOG_WARN("invalid argument count of funtion timestmap", K(ret));
   } else {
     //param will be casted to ObDatetimeType before calculation
-    type.set_type(ObDateTimeType);
-    types_array[0].set_calc_type(ObDateTimeType);
+    bool use_mysql_compatible = type_ctx.enable_mysql_compatible_dates()
+                                && types_array[0].get_type() != ObDateTimeType && 2 != param_num;
+    type.set_type(use_mysql_compatible ? ObMySQLDateTimeType : ObDateTimeType);
+    types_array[0].set_calc_type(type.get_type());
     if (2 == param_num) {
       types_array[1].set_calc_type(ObTimeType);
     }
@@ -315,36 +254,6 @@ int ObExprTimestamp::calc_result_typeN(ObExprResType &type,
   return ret;
 }
 
-int ObExprTimestamp::calc_resultN(ObObj &result,
-                                  const common::ObObj *objs_array,
-                                  int64_t param_num,
-                                  ObExprCtx &expr_ctx) const
-{
-  int ret = OB_SUCCESS;
-  if (OB_UNLIKELY(objs_array[0].is_null())) {
-    result.set_null();
-  } else {
-    TYPE_CHECK(objs_array[0], ObDateTimeType);
-    if (OB_FAIL(ret)) {
-    } else if (1 == param_num) {
-      result = objs_array[0];
-    } else if (2 == param_num) {
-      if (objs_array[1].is_null()) {
-        result.set_null();
-      } else if (ObTimeType != objs_array[1].get_type()) {
-        ret = OB_INVALID_ARGUMENT;
-        LOG_WARN("expect time type param", K(ret), K(objs_array[1]));
-      } else {
-        int64_t datetime = objs_array[0].get_datetime();
-        int64_t time = objs_array[1].get_time();
-        result.set_datetime(datetime + time);
-      }
-    }
-  }
-  UNUSED(expr_ctx);
-  return ret;
-}
-
 int ObExprTimestamp::cg_expr(ObExprCGCtx &expr_cg_ctx, const ObRawExpr &raw_expr,
                     ObExpr &rt_expr) const
 {
@@ -353,7 +262,7 @@ int ObExprTimestamp::cg_expr(ObExprCGCtx &expr_cg_ctx, const ObRawExpr &raw_expr
   UNUSED(raw_expr);
   if (1 == rt_expr.arg_cnt_) {
     ObObjType type = rt_expr.args_[0]->datum_meta_.type_;
-    CK(ObNullType == type || ObDateTimeType == type);
+    CK(ObNullType == type || ObDateTimeType == type || ObMySQLDateTimeType == type);
     if (OB_SUCC(ret)) {
       rt_expr.eval_func_ = ObExprTimestamp::calc_timestamp1;
     }
@@ -401,5 +310,5 @@ int ObExprTimestamp::calc_timestamp2(const ObExpr &expr, ObEvalCtx &ctx, ObDatum
   return ret;
 }
 
-}  // namespace sql
-}  // namespace oceanbase
+} //namespace sql
+} //namespace oceanbase

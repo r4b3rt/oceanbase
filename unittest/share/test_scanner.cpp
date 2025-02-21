@@ -14,17 +14,16 @@
 #include <gtest/gtest.h>
 #include "lib/utility/ob_test_util.h"
 using namespace oceanbase::common;
-class TestScanner : public ::testing::Test {
+class TestScanner: public ::testing::Test
+{
 public:
   TestScanner();
   virtual ~TestScanner();
   virtual void SetUp();
   virtual void TearDown();
-
 private:
   // disallow copy
   DISALLOW_COPY_AND_ASSIGN(TestScanner);
-
 protected:
   // function members
 protected:
@@ -32,16 +31,20 @@ protected:
 };
 
 TestScanner::TestScanner()
-{}
+{
+}
 
 TestScanner::~TestScanner()
-{}
+{
+}
 
 void TestScanner::SetUp()
-{}
+{
+}
 
 void TestScanner::TearDown()
-{}
+{
+}
 
 TEST_F(TestScanner, basic_test)
 {
@@ -69,14 +72,14 @@ TEST_F(TestScanner, basic_test)
   for (int i = 0; i < 1024; ++i) {
     OK(it.get_next_row(row2));
     ASSERT_EQ(3, row2.count_);
-    _OB_LOG(INFO, "row=%s", S(row2));
+    ObCStringHelper helper;
+    _OB_LOG(INFO, "row=%s", helper.convert(row2));
   }
 }
 
 TEST_F(TestScanner, serialization)
 {
   ObScanner scanner;
-  scanner.set_mem_size_limit(1024);
   scanner.set_affected_rows(10);
   scanner.set_last_insert_id_to_client(111);
   scanner.set_last_insert_id_session(121);
@@ -88,7 +91,7 @@ TEST_F(TestScanner, serialization)
   scanner.set_row_duplicated_count(2000);
   scanner.set_extend_info("fine,thank you, and you");
   scanner.set_is_result_accurate(false);
-  scanner.init();
+  ASSERT_EQ(OB_SUCCESS, scanner.init(1024));
 
   ObObj objs[3];
   ObNewRow row;
@@ -104,7 +107,7 @@ TEST_F(TestScanner, serialization)
 
   ModuleArena allocator;
   int64_t buf_size = scanner.get_serialize_size();
-  char* buf = (char*)allocator.alloc(buf_size);
+  char *buf = (char *)allocator.alloc(buf_size);
   int64_t pos = 0;
   ASSERT_EQ(OB_SUCCESS, scanner.serialize(buf, buf_size, pos));
   ASSERT_EQ(buf_size, pos);
@@ -136,12 +139,13 @@ TEST_F(TestScanner, serialization)
   for (int i = 0; i < 10; ++i) {
     OK(it.get_next_row(row2));
     ASSERT_EQ(3, row2.count_);
-    _OB_LOG(INFO, "row=%s", S(row2));
+    ObCStringHelper helper;
+    _OB_LOG(INFO, "row=%s", helper.convert(row2));
   }
 }
 
-int main(int argc, char** argv)
+int main(int argc, char **argv)
 {
-  ::testing::InitGoogleTest(&argc, argv);
+  ::testing::InitGoogleTest(&argc,argv);
   return RUN_ALL_TESTS();
 }

@@ -11,9 +11,7 @@
  */
 
 #define USING_LOG_PREFIX SQL_ENG
-#include "lib/ob_name_def.h"
 #include "sql/engine/expr/ob_expr_makedate.h"
-#include "sql/engine/ob_exec_context.h"
 
 namespace oceanbase
 {
@@ -22,7 +20,7 @@ namespace sql
 {
 
 ObExprMakedate::ObExprMakedate(ObIAllocator &alloc)
-    : ObFuncExprOperator(alloc, T_FUN_SYS_MAKEDATE, N_MAKEDATE, 2, NOT_ROW_DIMENSION)
+    : ObFuncExprOperator(alloc, T_FUN_SYS_MAKEDATE, N_MAKEDATE, 2, VALID_FOR_GENERATED_COL, NOT_ROW_DIMENSION)
 {
 }
 
@@ -42,23 +40,6 @@ int ObExprMakedate::calc_result_type2(ObExprResType &type,
   day.set_calc_type(ObIntType);
   return ret;
 }
-
-
-int ObExprMakedate::calc_result2(ObObj &result,
-                                   const ObObj &year,
-                                   const ObObj &day,
-                                   ObExprCtx &expr_ctx) const
-{
-  UNUSED(expr_ctx);
-  int ret = OB_SUCCESS;
-  if (OB_UNLIKELY(year.is_null() || day.is_null())) {
-    result.set_null();
-  } else if (OB_FAIL(calc(result, year.get_int(), day.get_int()))) {
-    LOG_WARN("calc make date failed", K(ret));
-  }
-  return ret;
-}
-
 
 int ObExprMakedate::cg_expr(ObExprCGCtx &op_cg_ctx,
                               const ObRawExpr &raw_expr,

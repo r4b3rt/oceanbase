@@ -12,18 +12,13 @@
 
 #define USING_LOG_PREFIX COMMON
 
-#include <gtest/gtest.h>
 #include <gmock/gmock.h>
-#include "share/ob_debug_sync.h"
-#include "lib/string/ob_sql_string.h"
-#include "lib/container/ob_array.h"
-#include "lib/container/ob_array_iterator.h"
 #include "rpc/mock_ob_common_rpc_proxy.h"
-#include "share/config/ob_server_config.h"
-#include <pthread.h>
 
-namespace oceanbase {
-namespace common {
+namespace oceanbase
+{
+namespace common
+{
 using namespace obrpc;
 using testing::_;
 using testing::Return;
@@ -202,38 +197,32 @@ TEST(common, ObDSSessionActions)
   ASSERT_TRUE(aa.is_empty());
 }
 
-class Timer {
+class Timer
+{
 public:
-  Timer()
-  {
-    begin_ = ::oceanbase::common::ObTimeUtility::current_time();
-  }
-  int64_t used() const
-  {
-    return ::oceanbase::common::ObTimeUtility::current_time() - begin_;
-  }
-
+  Timer() { begin_ = ::oceanbase::common::ObTimeUtility::current_time(); }
+  int64_t used() const { return ::oceanbase::common::ObTimeUtility::current_time() - begin_; }
 public:
   int64_t begin_;
 };
 
-static ObDSEventControl global_event_control;  // avoid large stack object
+static ObDSEventControl global_event_control; // avoid large stack object
 #define WAIT_TIME 200000
 #define WAIT_TIME_SAFE (WAIT_TIME * 9 / 10)
 
 #define TO_STRING_(x) #x
 #define TO_STRING(x) "" TO_STRING_(x)
 
-void* run_wait(void* arg)
+void *run_wait(void *arg)
 {
-  ObDSEventControl* ec = static_cast<ObDSEventControl*>(arg);
+  ObDSEventControl *ec = static_cast<ObDSEventControl *>(arg);
   ec->wait("multi-thread-event", WAIT_TIME, true);
   return NULL;
 }
 
 TEST(common, ObDSEventControl)
 {
-  ObDSEventControl& ec = global_event_control;
+  ObDSEventControl &ec = global_event_control;
   ASSERT_NE(OB_SUCCESS, ec.signal(""));
 
   ObSqlString event;
@@ -312,7 +301,7 @@ TEST(debug_sync, ObDebugSync)
   ASSERT_NE(&GDS.rpc_spread_actions(), GDS.thread_local_actions());
 
   // test debug sync parser
-  const bool L = false;  // local
+  const bool L = false; // local
   ASSERT_EQ(OB_SUCCESS, GDS.add_debug_sync("  reset   ", L, sa));
   ASSERT_EQ(OB_SUCCESS, GDS.add_debug_sync("  now  clear    ", L, sa));
   ASSERT_EQ(OB_SUCCESS, GDS.add_debug_sync("now  signal x", L, sa));
@@ -323,8 +312,7 @@ TEST(debug_sync, ObDebugSync)
   ASSERT_EQ(OB_SUCCESS, GDS.add_debug_sync("  now  wait_for x-y  no_clear_event execute 2 ", L, sa));
   ASSERT_EQ(OB_SUCCESS, GDS.add_debug_sync("  now  wait_for x-y  timeout 1024 no_clear_event execute 2 ", L, sa));
   ASSERT_EQ(OB_SUCCESS, GDS.add_debug_sync("  now  wait_for x-y  no_clear_event timeout 1024 execute 2 ", L, sa));
-  ASSERT_EQ(
-      OB_SUCCESS, GDS.add_debug_sync("  now  signal xxx wait_for x-y  timeout 0 no_clear_event execute 2 ", L, sa));
+  ASSERT_EQ(OB_SUCCESS, GDS.add_debug_sync("  now  signal xxx wait_for x-y  timeout 0 no_clear_event execute 2 ", L, sa));
 
   ASSERT_NE(OB_SUCCESS, GDS.add_debug_sync("  reset a", L, sa));
   ASSERT_NE(OB_SUCCESS, GDS.add_debug_sync("  signal b ", L, sa));
@@ -373,11 +361,7 @@ TEST(debug_sync, ObDebugSync)
   DEBUG_SYNC(MAJOR_FREEZE_BEFORE_SYS_COORDINATE_COMMIT);
   DEBUG_SYNC(MAJOR_FREEZE_BEFORE_SYS_COORDINATE_COMMIT);
 
-  ASSERT_EQ(OB_SUCCESS,
-      GDS.add_debug_sync("MAJOR_FREEZE_BEFORE_SYS_COORDINATE_COMMIT signal def wait_for xyz TIMEOUT " TO_STRING(
-                             WAIT_TIME) " execute 3",
-          L,
-          sa));
+  ASSERT_EQ(OB_SUCCESS, GDS.add_debug_sync("MAJOR_FREEZE_BEFORE_SYS_COORDINATE_COMMIT signal def wait_for xyz TIMEOUT " TO_STRING(WAIT_TIME) " execute 3", L, sa));
 
   {
     // get xyz
@@ -418,7 +402,7 @@ TEST(debug_sync, ObDebugSync)
   }
 
   // global actions
-  const bool G = true;  // global
+  const bool G = true; // global
   {
     ASSERT_EQ(OB_SUCCESS, GDS.add_debug_sync("reset", L, sa));
     EXPECT_CALL(rpc, broadcast_ds_action(_, _)).Times(3).WillRepeatedly(Return(OB_SUCCESS));
@@ -437,11 +421,32 @@ TEST(debug_sync, ObDebugSync)
   }
 }
 
-}  // namespace common
-}  // namespace oceanbase
-
-int main(int argc, char** argv)
+TEST(debug_sync, debug_sync_action_overflow)
 {
-  ::testing::InitGoogleTest(&argc, argv);
+  ObDSActionArray dsa;
+  ObDebugSyncAction action;
+  action.sync_point_ = NOW;
+  action.signal_ = "a";
+  action.wait_ = "b";
+  action.execute_ = 1;
+  ASSERT_TRUE(action.is_valid());
+  for (int i = 0; i < ObDSActionArray::MAX_DEBUG_SYNC_CACHED_POINT; i++) {
+    action.sync_point_ = (oceanbase::common::ObDebugSyncPoint)(i + 1);
+    ASSERT_EQ(OB_SUCCESS, dsa.add_action(action));
+    ASSERT_TRUE(dsa.is_active((oceanbase::common::ObDebugSyncPoint)(i + 1 )));
+  }
+  action.sync_point_ = (oceanbase::common::ObDebugSyncPoint)(ObDSActionArray::MAX_DEBUG_SYNC_CACHED_POINT + 1);
+  ASSERT_EQ(OB_SIZE_OVERFLOW, dsa.add_action(action));
+  ASSERT_FALSE(dsa.is_active((oceanbase::common::ObDebugSyncPoint)(ObDSActionArray::MAX_DEBUG_SYNC_CACHED_POINT + 1)));
+}
+
+}
+}
+
+int main(int argc, char **argv)
+{
+  oceanbase::common::ObLogger::get_logger().set_log_level("INFO");
+  OB_LOGGER.set_log_level("INFO");
+  ::testing::InitGoogleTest(&argc,argv);
   return RUN_ALL_TESTS();
 }

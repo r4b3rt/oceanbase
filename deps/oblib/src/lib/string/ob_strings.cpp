@@ -13,16 +13,19 @@
 #define USING_LOG_PREFIX LIB
 
 #include "lib/string/ob_strings.h"
-#include "lib/utility/utility.h"
-namespace oceanbase {
-namespace common {
+namespace oceanbase
+{
+namespace common
+{
 ObStrings::ObStrings()
-{}
+{
+}
 
 ObStrings::~ObStrings()
-{}
+{
+}
 
-int ObStrings::add_string(const ObString& str, int64_t* idx /*=NULL*/)
+int ObStrings::add_string(const ObString &str, int64_t *idx/*=NULL*/)
 {
   int ret = OB_SUCCESS;
   ObString stored_str;
@@ -38,7 +41,7 @@ int ObStrings::add_string(const ObString& str, int64_t* idx /*=NULL*/)
   return ret;
 }
 
-int ObStrings::get_string(int64_t idx, ObString& str) const
+int ObStrings::get_string(int64_t idx, ObString &str) const
 {
   int ret = OB_SUCCESS;
   if (idx < 0 || idx >= strs_.count()) {
@@ -96,7 +99,7 @@ DEFINE_DESERIALIZE(ObStrings)
   return ret;
 }
 
-int64_t ObStrings::to_string(char* buf, const int64_t buf_len) const
+int64_t ObStrings::to_string(char *buf, const int64_t buf_len) const
 {
   int64_t pos = 0;
   if (OB_ISNULL(buf) || buf_len <= 0) {
@@ -106,5 +109,5 @@ int64_t ObStrings::to_string(char* buf, const int64_t buf_len) const
   }
   return pos;
 }
-}  // namespace common
-}  // namespace oceanbase
+} //end common
+} //end oceanbase

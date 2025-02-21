@@ -11,12 +11,12 @@
  */
 
 #include <gtest/gtest.h>
-#include "lib/ob_define.h"
-#include <sys/time.h>
 #include "lib/time/ob_time_utility.h"
 
-namespace oceanbase {
-namespace common {
+namespace oceanbase
+{
+namespace common
+{
 
 TEST(TestCurrentTime, common)
 {
@@ -62,10 +62,10 @@ TEST(TestCurrentTimeCoarse, common)
   ASSERT_EQ(true, t3 > t2);
 }
 
-}  // namespace common
-}  // namespace oceanbase
+}//common
+}//oceanbase
 
-int main(int argc, char** argv)
+int main(int argc, char **argv)
 {
   testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

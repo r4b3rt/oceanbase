@@ -12,8 +12,6 @@
 
 #include "observer/virtual_table/ob_all_virtual_server_object_pool.h"
 #include <observer/ob_server_utils.h>
-#include <lib/objectpool/ob_server_object_pool.h>
-#include <storage/transaction/ob_trans_part_ctx.h>
 
 using namespace oceanbase::common;
 using namespace oceanbase::observer;
@@ -32,14 +30,14 @@ void ObAllVirtualServerObjectPool::reset()
   ObVirtualTableScannerIterator::reset();
 }
 
-int ObAllVirtualServerObjectPool::inner_get_next_row(ObNewRow*& row)
+int ObAllVirtualServerObjectPool::inner_get_next_row(ObNewRow *&row)
 {
   int ret = OB_SUCCESS;
 
   const char* object_type = NULL;
-  ObPoolArenaHead* arena_head = NULL;
+  ObPoolArenaHead *arena_head = NULL;
   ObString ipstr;
-  ObObj* cells = NULL;
+  ObObj *cells = NULL;
   if (iter_.is_end()) {
     ret = OB_ITER_END;
   } else if (OB_ISNULL(cells = cur_row_.cells_)) {
@@ -136,3 +134,4 @@ int ObAllVirtualServerObjectPool::inner_get_next_row(ObNewRow*& row)
 
   return ret;
 }
+

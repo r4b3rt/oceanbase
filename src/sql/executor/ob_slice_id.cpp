@@ -10,16 +10,16 @@
  * See the Mulan PubL v2 for more details.
  */
 
-#include "share/ob_define.h"
 #include "sql/executor/ob_slice_id.h"
-#include "lib/utility/serialization.h"
 
-namespace oceanbase {
+namespace oceanbase
+{
 using namespace common;
 
-namespace sql {
+namespace sql
+{
 
 OB_SERIALIZE_MEMBER(ObSliceID, ob_task_id_, slice_id_);
 
-}  // namespace sql
-}  // namespace oceanbase
+}/* ns */
+}/* ns oceanbase */

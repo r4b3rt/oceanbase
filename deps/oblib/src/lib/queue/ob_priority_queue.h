@@ -13,31 +13,26 @@
 #ifndef OCEANBASE_QUEUE_OB_PRIORITY_QUEUE_
 #define OCEANBASE_QUEUE_OB_PRIORITY_QUEUE_
 
-#include "lib/lock/ob_seq_sem.h"
 #include "lib/queue/ob_link_queue.h"
 #include "lib/lock/ob_scond.h"
+#include "lib/ash/ob_active_session_guard.h"
 
-namespace oceanbase {
-namespace common {
+namespace oceanbase
+{
+namespace common
+{
 
 template <int PRIOS>
-class ObPriorityQueue {
+class ObPriorityQueue
+{
 public:
   enum { PRIO_CNT = PRIOS };
 
-  ObPriorityQueue() : sem_(), queue_(), size_(0), limit_(INT64_MAX)
-  {}
-  ~ObPriorityQueue()
-  {}
+  ObPriorityQueue() : sem_(), queue_(), size_(0), limit_(INT64_MAX) {}
+  ~ObPriorityQueue() {}
 
-  void set_limit(int64_t limit)
-  {
-    limit_ = limit;
-  }
-  inline int64_t size() const
-  {
-    return ATOMIC_LOAD(&size_);
-  }
+  void set_limit(int64_t limit) { limit_ = limit; }
+  inline int64_t size() const { return ATOMIC_LOAD(&size_); }
 
   int push(ObLink* data, int priority)
   {
@@ -50,7 +45,7 @@ public:
     } else if (OB_FAIL(queue_[priority].push(data))) {
       // do nothing
     } else {
-      ret = sem_.post();
+      IGNORE_RETURN sem_.signal();
     }
     if (OB_FAIL(ret)) {
       (void)ATOMIC_FAA(&size_, -1);
@@ -68,7 +63,7 @@ public:
     } else if (OB_FAIL(queue_[priority].push_front(data))) {
       // do nothing
     } else {
-      ret = sem_.post();
+      IGNORE_RETURN sem_.signal();
     }
     if (OB_FAIL(ret)) {
       (void)ATOMIC_FAA(&size_, -1);
@@ -83,14 +78,17 @@ public:
       ret = OB_INVALID_ARGUMENT;
       COMMON_LOG(ERROR, "timeout is invalid", K(ret), K(timeout_us));
     } else {
-      if (0 == sem_.wait(timeout_us)) {
-        for (int i = 0; OB_ENTRY_NOT_EXIST == ret && i < PRIO_CNT; i++) {
-          if (OB_SUCCESS == queue_[i].pop(data)) {
-            ret = OB_SUCCESS;
-          }
+      for(int i = 0; OB_ENTRY_NOT_EXIST == ret  && i < PRIO_CNT; i++) {
+        if (OB_SUCCESS == queue_[i].pop(data)) {
+          ret = OB_SUCCESS;
         }
       }
       if (OB_FAIL(ret)) {
+        auto key = sem_.get_key();
+        {
+          common::ObBKGDSessInActiveGuard inactive_guard;
+          sem_.wait(key, timeout_us);
+        }
         data = NULL;
       } else {
         (void)ATOMIC_FAA(&size_, -1);
@@ -99,41 +97,63 @@ public:
     return ret;
   }
 
+  void destroy()
+  {
+    clear();
+  }
+
+  void clear()
+  {
+    ObLink* p = NULL;
+    while(OB_SUCCESS == pop(p, 0))
+      ;
+  }
+
+  ObLinkQueue* get_queue(const int i)
+  {
+    return &queue_[i];
+  }
+
+  int64_t get_prio_cnt() const
+  {
+    return PRIO_CNT;
+  }
 private:
-  ObSeqSem sem_;
+  SimpleCond sem_;
   ObLinkQueue queue_[PRIO_CNT];
   int64_t size_ CACHE_ALIGNED;
   int64_t limit_ CACHE_ALIGNED;
   DISALLOW_COPY_AND_ASSIGN(ObPriorityQueue);
 };
 
-template <int HIGH_HIGH_PRIOS, int HIGH_PRIOS=0, int LOW_PRIOS=0>
-class ObPriorityQueue2 {
+template <int HIGH_PRIOS, int NORMAL_PRIOS=0, int LOW_PRIOS=0>
+class ObPriorityQueue2
+{
 public:
-  enum { PRIO_CNT = HIGH_HIGH_PRIOS + HIGH_PRIOS + LOW_PRIOS };
+  enum { PRIO_CNT = HIGH_PRIOS + NORMAL_PRIOS + LOW_PRIOS };
 
-  ObPriorityQueue2() : queue_(), size_(0), limit_(INT64_MAX)
-  {}
-  ~ObPriorityQueue2()
-  {}
+  ObPriorityQueue2() : queue_(), size_(0), limit_(INT64_MAX) {}
+  ~ObPriorityQueue2() {}
 
-  void set_limit(int64_t limit)
-  {
-    limit_ = limit;
-  }
-  inline int64_t size() const
-  {
-    return ATOMIC_LOAD(&size_);
-  }
+  void set_limit(int64_t limit) { limit_ = limit; }
+  inline int64_t size() const { return ATOMIC_LOAD(&size_); }
   int64_t queue_size(const int i) const
   {
     return queue_[i].size();
   }
-  int64_t to_string(char* buf, const int64_t buf_len) const
+  int64_t get_prio_cnt() const
+  {
+    return PRIO_CNT;
+  }
+  ObLinkQueue* get_queue(const int i)
+  {
+    return &queue_[i];
+  }
+  int64_t to_string(char *buf, const int64_t buf_len) const
   {
     int64_t pos = 0;
     common::databuff_printf(buf, buf_len, pos, "total_size=%ld ", size());
-    for (int i = 0; i < PRIO_CNT; i++) {
+    for(int i = 0; i < PRIO_CNT; i++) {
       common::databuff_printf(buf, buf_len, pos, "queue[%d]=%ld ", i, queue_[i].size());
     }
     return pos;
@@ -142,7 +162,15 @@ public:
   int push(ObLink* data, int priority)
   {
     int ret = OB_SUCCESS;
-    if (ATOMIC_FAA(&size_, 1) > limit_) {
+    int64_t extra;
+    if (priority < HIGH_PRIOS) {
+      extra = 2048;
+    } else if (priority < NORMAL_PRIOS + HIGH_PRIOS) {
+      extra = 1024;
+    } else {
+      extra = 0;
+    }
+    if (ATOMIC_FAA(&size_, 1) > limit_ + extra) {
       ret = OB_SIZE_OVERFLOW;
     } else if (OB_UNLIKELY(NULL == data) || OB_UNLIKELY(priority < 0) || OB_UNLIKELY(priority >= PRIO_CNT)) {
       ret = OB_INVALID_ARGUMENT;
@@ -150,9 +178,9 @@ public:
     } else if (OB_FAIL(queue_[priority].push(data))) {
       // do nothing
     } else {
-      if (priority < HIGH_HIGH_PRIOS) {
+      if (priority < HIGH_PRIOS) {
         cond_.signal(1, 0);
-      } else if (priority < HIGH_PRIOS + HIGH_HIGH_PRIOS) {
+      } else if (priority < NORMAL_PRIOS + HIGH_PRIOS) {
         cond_.signal(1, 1);
       } else {
         cond_.signal(1, 2);
@@ -170,14 +198,14 @@ public:
     return do_pop(data, PRIO_CNT, timeout_us);
   }
 
-  int pop_high(ObLink*& data, int64_t timeout_us)
+  int pop_normal(ObLink*& data, int64_t timeout_us)
   {
-    return do_pop(data, HIGH_HIGH_PRIOS + HIGH_PRIOS, timeout_us);
+    return do_pop(data, HIGH_PRIOS + NORMAL_PRIOS, timeout_us);
   }
 
-  int pop_high_high(ObLink*& data, int64_t timeout_us)
+  int pop_high(ObLink*& data, int64_t timeout_us)
   {
-    return do_pop(data, HIGH_HIGH_PRIOS, timeout_us);
+    return do_pop(data, HIGH_PRIOS, timeout_us);
   }
 
 private:
@@ -188,19 +216,20 @@ private:
       ret = OB_INVALID_ARGUMENT;
       COMMON_LOG(ERROR, "timeout is invalid", K(ret), K(timeout_us));
     } else {
-      if (plimit <= HIGH_HIGH_PRIOS) {
+      if (plimit <= HIGH_PRIOS) {
         cond_.prepare(0);
-      } else if (plimit <= HIGH_PRIOS + HIGH_HIGH_PRIOS) {
+      } else if (plimit <= NORMAL_PRIOS + HIGH_PRIOS) {
         cond_.prepare(1);
       } else {
         cond_.prepare(2);
       }
-      for (int i = 0; OB_ENTRY_NOT_EXIST == ret  && i < plimit; i++) {
+      for(int i = 0; OB_ENTRY_NOT_EXIST == ret  && i < plimit; i++) {
         if (OB_SUCCESS == queue_[i].pop(data)) {
           ret = OB_SUCCESS;
         }
       }
       if (OB_FAIL(ret)) {
+        ObBKGDSessInActiveGuard inactive_guard;
         cond_.wait(timeout_us);
         data = NULL;
       } else {
@@ -216,7 +245,7 @@ private:
   int64_t limit_ CACHE_ALIGNED;
   DISALLOW_COPY_AND_ASSIGN(ObPriorityQueue2);
 };
-}  // end namespace common
-}  // end namespace oceanbase
+} // end namespace common
+} // end namespace oceanbase
 
-#endif  // OCEANBASE_QUEUE_OB_PRIORITY_QUEUE_
+#endif // OCEANBASE_QUEUE_OB_PRIORITY_QUEUE_

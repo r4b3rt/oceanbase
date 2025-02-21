@@ -15,86 +15,90 @@
 
 #include "lib/lock/ob_thread_cond.h"
 #include "lib/net/ob_addr.h"
-#include "lib/hash/ob_hashmap.h"
+#include "lib/thread/ob_reentrant_thread.h"//block_run
+
 #include "rootserver/ob_rs_reentrant_thread.h"
 
-namespace oceanbase {
-namespace share {
-class ObPartitionTableOperator;
-namespace schema {
+namespace oceanbase
+{
+namespace share
+{
+class ObLSTableOperator;
+class ObLSInfo;
+namespace schema
+{
 class ObMultiVersionSchemaService;
 }
-}  // namespace share
-namespace obrpc {
+}
+namespace obrpc
+{
 class ObSrvRpcProxy;
 }
-namespace rootserver {
+namespace rootserver
+{
 class ObServerManager;
-
-/// Check whether have partitions on non-alive servers.
-class ObEmptyServerCheckRound {
-public:
-  const static int64_t PT_SYNC_TIMEOUT = 10L * 60 * 1000 * 1000;  // 10 minutes
-  explicit ObEmptyServerCheckRound(volatile bool& stop);
-  virtual ~ObEmptyServerCheckRound();
-
-  int init(ObServerManager& server_mgr, obrpc::ObSrvRpcProxy& rpc_proxy, share::ObPartitionTableOperator& pt_operator,
-      share::schema::ObMultiVersionSchemaService& schema_service);
-
-  // check server is empty with %cond locked
-  int check(common::ObThreadCond& cond);
-  int pt_sync_finish(const common::ObAddr& server, const int64_t version);
-
-private:
-  int wait_pt_sync_finish(common::ObThreadCond& cond);
-  int update_with_partition_flag();
-
-private:
-  bool inited_;
-  volatile bool& stop_;
-  int64_t version_;
-  obrpc::ObSrvRpcProxy* rpc_proxy_;
-  ObServerManager* server_mgr_;
-  share::ObPartitionTableOperator* pt_operator_;
-  share::schema::ObMultiVersionSchemaService* schema_service_;
-  // alive servers for sync partition table, value is sync finish times.
-  common::hash::ObHashMap<common::ObAddr, int64_t, common::hash::NoPthreadDefendMode> alive_servers_;
-  // empty server to be checked, value is last heartbeat time.
-  common::hash::ObHashMap<common::ObAddr, int64_t, common::hash::NoPthreadDefendMode> empty_servers_;
-
-  DISALLOW_COPY_AND_ASSIGN(ObEmptyServerCheckRound);
-};
-
+class ObUnitManager;
+class ObServerZoneOpService;
 /// Empty server checker thread.
-class ObEmptyServerChecker : public ObRsReentrantThread {
+class ObEmptyServerChecker : public ObRsReentrantThread
+{
 public:
-  ObEmptyServerChecker();
-  virtual ~ObEmptyServerChecker();
+  ObEmptyServerChecker(): inited_(false),
+                          need_check_(true),
+                          empty_servers_(),
+                          server_mgr_(NULL),
+                          unit_mgr_(NULL),
+                          lst_operator_(NULL),
+                          schema_service_(NULL),
+                          server_zone_op_service_(NULL) {};
+  virtual ~ObEmptyServerChecker() {};
 
   virtual void run3() override;
-  virtual int blocking_run() override
-  {
-    BLOCKING_RUN_IMPLEMENT();
-  }
+  virtual int blocking_run() { BLOCKING_RUN_IMPLEMENT(); }
 
-  int init(ObServerManager& server_mgr, obrpc::ObSrvRpcProxy& rpc_proxy, share::ObPartitionTableOperator& pt_operator,
-      share::schema::ObMultiVersionSchemaService& schema_service);
+  int init(ObServerManager &server_mgr,
+      ObUnitManager &unit_mgr,
+      share::ObLSTableOperator &lst_operator,
+      share::schema::ObMultiVersionSchemaService &schema_service,
+      ObServerZoneOpService &server_zone_op_service);
 
   virtual void wakeup();
-  virtual void stop() override;
-  virtual int notify_check();
-  virtual int pt_sync_finish(const common::ObAddr& server, const int64_t version);
+  virtual void stop();
+  /**
+   * @description:
+   *    check if the given tenant has ls replicas on servers
+   * @param[in] tenant_id the tenant which need to be checked
+   * @param[in] servers on which the tenant might have ls replicas
+   * @param[out] exists true if at least one of the servers has tenant ls replicas
+   * @return return code
+   */
+  static int check_if_tenant_ls_replicas_exist_in_servers(
+    const uint64_t tenant_id,
+    const common::ObArray<common::ObAddr> &servers,
+    bool &exist);
+private:
+   int try_delete_server_();
+   int check_server_empty_();
+   static int check_server_emtpy_by_ls_(
+      const share::ObLSInfo &ls_info,
+      common::ObArray<common::ObAddr> &empty_servers);
+   //TODO no need check, check in unit_mgr now
+   int check_server_empty_in_unit(const common::ObAddr &addr, bool &is_empty);
 
 private:
   bool inited_;
   bool need_check_;
-  ObEmptyServerCheckRound check_round_;
-  common::ObThreadCond cond_;
+  common::ObArray<common::ObAddr> empty_servers_;
+  ObServerManager *server_mgr_;
+  ObUnitManager *unit_mgr_;
+  share::ObLSTableOperator *lst_operator_;
+  share::schema::ObMultiVersionSchemaService *schema_service_;
+  ObServerZoneOpService *server_zone_op_service_;
 
   DISALLOW_COPY_AND_ASSIGN(ObEmptyServerChecker);
 };
 
-}  // end namespace rootserver
-}  // end namespace oceanbase
+} // end namespace rootserver
+} // end namespace oceanbase
 
-#endif  // OCEANBASE_ROOTSERVER_OB_EMPTY_SERVER_CHECKER_H_
+#endif // OCEANBASE_ROOTSERVER_OB_EMPTY_SERVER_CHECKER_H_

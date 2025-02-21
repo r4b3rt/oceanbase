@@ -16,29 +16,37 @@
 namespace oceanbase {
 namespace blocksstable {
 
-ObMicroBlockRowExister::ObMicroBlockRowExister()
-{}
-
-ObMicroBlockRowExister::~ObMicroBlockRowExister()
-{}
-
-int ObMicroBlockRowExister::is_exist(const common::ObStoreRowkey& rowkey, const ObFullMacroBlockMeta& macro_meta,
-    const ObMicroBlockData& block_data, const storage::ObSSTableRowkeyHelper* rowkey_helper, bool& exist, bool& found)
+int ObMicroBlockRowExister::init(
+    const storage::ObTableIterParam &param,
+    storage::ObTableAccessContext &context,
+    const blocksstable::ObSSTable *sstable)
 {
   int ret = OB_SUCCESS;
-  if (OB_UNLIKELY(!is_inited_)) {
-    ret = OB_NOT_INIT;
-    LOG_WARN("the micro block row exister has not been inited, ", K(ret));
-  } else if (OB_FAIL(prepare_reader(macro_meta))) {
-    LOG_WARN("failed to prepare reader", K(ret));
-  } else if (OB_FAIL(reader_->exist_row(
-                 context_->pkey_.get_tenant_id(), block_data, rowkey, macro_meta, rowkey_helper, exist, found))) {
-    LOG_WARN("failed to check exist row, ", K(ret), K(rowkey));
-  } else {
-    LOG_DEBUG("Success to check exist row, ", K(rowkey), K(exist), K(found));
+  if (OB_FAIL(ObIMicroBlockRowFetcher::init(param, context, sstable))) {
+    LOG_WARN("fail to init", K(ret));
   }
   return ret;
 }
 
-}  // namespace blocksstable
-}  // namespace oceanbase
+int ObMicroBlockRowExister::is_exist(
+    const ObDatumRowkey &rowkey,
+    const ObMicroBlockData &block_data,
+    bool &exist,
+    bool &found)
+{
+  int ret = OB_SUCCESS;
+  if (IS_NOT_INIT) {
+    ret = OB_NOT_INIT;
+    LOG_WARN("the micro block row exister has not been inited", K(ret));
+  } else if (OB_FAIL(prepare_reader(block_data.get_store_type()))) {
+    LOG_WARN("failed to prepare reader", K(ret), K(block_data));
+  } else if (OB_FAIL(reader_->exist_row(block_data, rowkey, *read_info_, exist, found))) {
+    LOG_WARN("failed to check exist row", K(ret), K(rowkey));
+  } else {
+    LOG_DEBUG("Success to check exist row", K(rowkey), K(exist), K(found));
+  }
+  return ret;
+}
+
+}
+}

@@ -12,39 +12,26 @@
 
 #define USING_LOG_PREFIX SQL_EXE
 #include "ob_expr_from_days.h"
-#include "sql/session/ob_sql_session_info.h"
 using namespace oceanbase::common;
 using namespace oceanbase::sql;
 
-namespace oceanbase {
-namespace sql {
+namespace oceanbase
+{
+namespace sql
+{
 
-ObExprFromDays::ObExprFromDays(ObIAllocator& alloc)
-    : ObFuncExprOperator(alloc, T_FUN_SYS_FROM_DAYS, N_FROM_DAYS, 1, NOT_ROW_DIMENSION){};
+ObExprFromDays::ObExprFromDays(ObIAllocator &alloc)
+    : ObFuncExprOperator(alloc, T_FUN_SYS_FROM_DAYS, N_FROM_DAYS, 1, VALID_FOR_GENERATED_COL, NOT_ROW_DIMENSION)
+{
+};
 
 ObExprFromDays::~ObExprFromDays()
-{}
-
-int ObExprFromDays::calc_result1(ObObj& result, const ObObj& text, ObExprCtx& expr_ctx) const
 {
-  int ret = OB_SUCCESS;
-  if (text.is_null()) {
-    result.set_null();
-  } else {
-    TYPE_CHECK(text, ObInt32Type);
-    // max: 9999-12-31 min:0000-00-00
-    int32_t value = text.get_int32();
-    if (value >= MIN_DAYS_OF_DATE && value <= MAX_DAYS_OF_DATE) {
-      result.set_date(value - DAYS_FROM_ZERO_TO_BASE);
-    } else {
-      result.set_date(ObTimeConverter::ZERO_DATE);
-    }
-  }
-  UNUSED(expr_ctx);
-  return ret;
 }
 
-int ObExprFromDays::cg_expr(ObExprCGCtx& op_cg_ctx, const ObRawExpr& raw_expr, ObExpr& rt_expr) const
+int ObExprFromDays::cg_expr(ObExprCGCtx &op_cg_ctx,
+                              const ObRawExpr &raw_expr,
+                              ObExpr &rt_expr) const
 {
   UNUSED(op_cg_ctx);
   UNUSED(raw_expr);
@@ -58,14 +45,15 @@ int ObExprFromDays::cg_expr(ObExprCGCtx& op_cg_ctx, const ObRawExpr& raw_expr, O
   } else {
     CK(ObInt32Type == rt_expr.args_[0]->datum_meta_.type_);
     rt_expr.eval_func_ = ObExprFromDays::calc_fromdays;
+    rt_expr.eval_vector_func_ = ObExprFromDays::calc_fromdays_vector;
   }
   return ret;
 }
 
-int ObExprFromDays::calc_fromdays(const ObExpr& expr, ObEvalCtx& ctx, ObDatum& expr_datum)
+int ObExprFromDays::calc_fromdays(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &expr_datum)
 {
   int ret = OB_SUCCESS;
-  ObDatum* param_datum = NULL;
+  ObDatum *param_datum = NULL;
   if (OB_FAIL(expr.args_[0]->eval(ctx, param_datum))) {
     LOG_WARN("eval param value failed", K(ret));
   } else if (OB_UNLIKELY(param_datum->is_null())) {
@@ -73,7 +61,8 @@ int ObExprFromDays::calc_fromdays(const ObExpr& expr, ObEvalCtx& ctx, ObDatum& e
   } else {
     // max: 9999-12-31 min:0000-00-00
     int32_t value = param_datum->get_int32();
-    if (value >= MIN_DAYS_OF_DATE && value <= MAX_DAYS_OF_DATE) {
+    if (value >= MIN_DAYS_OF_DATE
+        && value <= MAX_DAYS_OF_DATE) {
       expr_datum.set_date(value - DAYS_FROM_ZERO_TO_BASE);
     } else {
       expr_datum.set_date(ObTimeConverter::ZERO_DATE);
@@ -82,5 +71,85 @@ int ObExprFromDays::calc_fromdays(const ObExpr& expr, ObEvalCtx& ctx, ObDatum& e
   return ret;
 }
 
-}  // namespace sql
-}  // namespace oceanbase
+template <typename ArgVec, typename ResVec>
+int vector_fromdays(const ObExpr &expr, ObEvalCtx &ctx, const ObBitVector &skip, const EvalBound &bound)
+{
+  int ret = OB_SUCCESS;
+  ArgVec *arg_vec = static_cast<ArgVec *>(expr.args_[0]->get_vector(ctx));
+  ResVec *res_vec = static_cast<ResVec *>(expr.get_vector(ctx));
+  ObBitVector &eval_flags = expr.get_evaluated_flags(ctx);
+  bool no_skip_no_null =
+    bound.get_all_rows_active() && eval_flags.accumulate_bit_cnt(bound) == 0 && !arg_vec->has_null();
+
+  if (no_skip_no_null) {
+    for (int64_t idx = bound.start(); OB_SUCC(ret) && idx < bound.end(); ++idx) {
+      int32_t value = arg_vec->get_int32(idx);
+      if (value >= MIN_DAYS_OF_DATE && value <= MAX_DAYS_OF_DATE) {
+        res_vec->set_date(idx, value - DAYS_FROM_ZERO_TO_BASE);
+      } else {
+        res_vec->set_date(idx, ObTimeConverter::ZERO_DATE);
+      }
+    }
+    eval_flags.set_all(bound.start(), bound.end());
+  } else {
+    for (int64_t idx = bound.start(); OB_SUCC(ret) && idx < bound.end(); ++idx) {
+      if (skip.at(idx) || eval_flags.at(idx)) {
+        continue;
+      } else if (arg_vec->is_null(idx)) {
+        res_vec->set_null(idx);
+        eval_flags.set(idx);
+        continue;
+      }
+      int32_t value = arg_vec->get_int32(idx);
+      if (value >= MIN_DAYS_OF_DATE && value <= MAX_DAYS_OF_DATE) {
+        res_vec->set_date(idx, value - DAYS_FROM_ZERO_TO_BASE);
+      } else {
+        res_vec->set_date(idx, ObTimeConverter::ZERO_DATE);
+      }
+      eval_flags.set(idx);
+    }
+  }
+  return ret;
+}
+int ObExprFromDays::calc_fromdays_vector(const ObExpr &expr, ObEvalCtx &ctx, const ObBitVector &skip, const EvalBound &bound)
+{
+  int ret = OB_SUCCESS;
+  if (OB_FAIL(expr.args_[0]->eval_vector(ctx, skip, bound))) {
+    LOG_WARN("fail to eval date_format param", K(ret));
+  } else {
+    VectorFormat arg_format = expr.args_[0]->get_format(ctx);
+    VectorFormat res_format = expr.get_format(ctx);
+    if (VEC_UNIFORM_CONST == arg_format && VEC_UNIFORM_CONST == res_format) {
+      ret = vector_fromdays<IntegerUniCVec, DateUniCVec>(expr, ctx, skip, bound);
+    } else if (VEC_UNIFORM_CONST == arg_format && VEC_FIXED == res_format) {
+      ret = vector_fromdays<IntegerUniCVec, DateFixedVec>(expr, ctx, skip, bound);
+    } else if (VEC_UNIFORM_CONST == arg_format && VEC_UNIFORM == res_format) {
+      ret = vector_fromdays<IntegerUniCVec, DateUniVec>(expr, ctx, skip, bound);
+    } else if (VEC_UNIFORM == arg_format && VEC_UNIFORM_CONST == res_format) {
+      ret = vector_fromdays<IntegerUniVec, DateUniCVec>(expr, ctx, skip, bound);
+    } else if (VEC_UNIFORM == arg_format && VEC_FIXED == res_format) {
+      ret = vector_fromdays<IntegerUniVec, DateFixedVec>(expr, ctx, skip, bound);
+    } else if (VEC_UNIFORM == arg_format && VEC_UNIFORM == res_format) {
+      ret = vector_fromdays<IntegerUniVec, DateUniVec>(expr, ctx, skip, bound);
+    } else if (VEC_FIXED == arg_format && VEC_FIXED == res_format) {
+      ret = vector_fromdays<IntegerFixedVec, DateFixedVec>(expr, ctx, skip, bound);
+    } else if (VEC_FIXED == arg_format && VEC_UNIFORM_CONST == res_format) {
+      ret = vector_fromdays<IntegerFixedVec, DateUniCVec>(expr, ctx, skip, bound);
+    } else if (VEC_FIXED == arg_format && VEC_UNIFORM == res_format) {
+      ret = vector_fromdays<IntegerFixedVec, DateUniVec>(expr, ctx, skip, bound);
+    } else {
+      ret = vector_fromdays<ObVectorBase, ObVectorBase>(expr, ctx, skip, bound);
+    }
+
+    if (OB_FAIL(ret)) {
+      LOG_WARN("expr calculation failed", K(ret));
+    }
+  }
+  return ret;
+}
+
+#undef CHECK_SKIP_NULL
+#undef BATCH_CALC
+
+} //namespace sql
+} //namespace oceanbase

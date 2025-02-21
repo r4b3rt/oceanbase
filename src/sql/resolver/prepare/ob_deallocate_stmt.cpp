@@ -10,10 +10,16 @@
  * See the Mulan PubL v2 for more details.
  */
 
-#include "sql/resolver/prepare/ob_deallocate_stmt.h"
+#include "ob_deallocate_stmt.h"
+#include "deps/oblib/src/lib/container/ob_se_array.h"
 
 using namespace oceanbase::common;
 using namespace oceanbase::sql;
-namespace oceanbase {
-namespace sql {}  // namespace sql
-}  // namespace oceanbase
+namespace oceanbase
+{
+namespace sql
+{
+
+}// end of sql
+}//end of oceanbase
+

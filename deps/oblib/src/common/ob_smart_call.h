@@ -15,107 +15,127 @@
 
 #include "common/ob_common_utility.h"
 #include "lib/utility/utility.h"
-#include "lib/coro/context/fcontext.hpp"
-#include "lib/coro/co_protected_stack_allocator.h"
+#include "lib/other/recursion.h"
+#include "lib/thread/protected_stack_allocator.h"
 
-namespace oceanbase {
-namespace common {
-namespace context_detail = boost::context::detail;
-
-static constexpr int64_t ALL_STACK_LIMIT = 10L << 20;
-static constexpr int64_t STACK_PER_EXTEND = 2L << 20;
-static constexpr int64_t STACK_RESERVED_SIZE = 128L << 10;
-extern RLOCAL(int64_t, all_stack_size);
-
-struct SContext {
-  typedef int (*Func)(void*);
-  Func func_;
-  void* arg_;
-};
-
-inline void SStart(context_detail::transfer_t from)
+namespace oceanbase
 {
-  auto sctx = reinterpret_cast<SContext*>(from.data);
-  int64_t ret = sctx->func_(sctx->arg_);
-  context_detail::jump_fcontext(from.fctx, (void*)ret);
-  OB_ASSERT(0);
-}
+namespace common
+{
+static constexpr int64_t ALL_STACK_LIMIT = 10L << 20;
+static constexpr int64_t STACK_PER_EXTEND = (2L << 20) - ACHUNK_PRESERVE_SIZE * 2;
+static constexpr int64_t STACK_RESERVED_SIZE = 128L << 10;
+RLOCAL_EXTERN(int64_t, all_stack_size);
 
-inline int call_with_new_stack(SContext& sctx)
+int jump_call(void * arg_, int(*func_) (void*), void* stack_addr);
+
+inline int call_with_new_stack(void * arg_, int(*func_) (void*), void *stack_addr, size_t stack_size)
 {
   int ret = OB_SUCCESS;
-  OB_LOG(INFO, "smart_call", K(lbt()));
-  void* ori_stack_addr = nullptr;
+#if defined(__x86_64__) || defined(__aarch64__)
+  void *ori_stack_addr = nullptr;
   size_t ori_stack_size = 0;
-  void* stack_addr = nullptr;
-  const int64_t stack_size = STACK_PER_EXTEND;
   if (OB_FAIL(get_stackattr(ori_stack_addr, ori_stack_size))) {
-  } else if (FALSE_IT(all_stack_size = 0 == all_stack_size ? ori_stack_size : all_stack_size)) {
-  } else if (all_stack_size + STACK_PER_EXTEND > ALL_STACK_LIMIT) {
-    ret = OB_SIZE_OVERFLOW;
-  } else if (OB_ISNULL(stack_addr = lib::g_stack_allocer.alloc(OB_SERVER_TENANT_ID, stack_size))) {
-    ret = OB_ALLOCATE_MEMORY_FAILED;
   } else {
-    all_stack_size += stack_size;
-    context_detail::fcontext_t fctx = make_fcontext((char*)stack_addr + stack_size, stack_size, SStart);
-
     // To prevent the check_stack_overflow call before the jump
     // Do not introduce other code between the two set_stackattr
     set_stackattr(stack_addr, stack_size);
-    context_detail::transfer_t transfer = context_detail::jump_fcontext(fctx, &sctx);
+    ret = jump_call(arg_, func_, (char *)stack_addr + stack_size);
     set_stackattr(ori_stack_addr, ori_stack_size);
-
-    ret = reinterpret_cast<int64_t>(transfer.data);
-    lib::g_stack_allocer.dealloc(stack_addr);
-    all_stack_size -= stack_size;
   }
-  OB_LOG(INFO, "smart_call finish");
+#else
+  ret = func_(arg_);
+#endif
   return ret;
 }
 
+inline int alloc_stack(const size_t stack_size, void *&stack_addr)
+{
+  int ret = OB_SUCCESS;
+  void *ori_stack_addr = nullptr;
+  size_t ori_stack_size = 0;
+  stack_addr = nullptr;
+  uint64_t tenant_id = GET_TENANT_ID() == 0 ? 500 : GET_TENANT_ID();
+  if (OB_FAIL(get_stackattr(ori_stack_addr, ori_stack_size))) {
+  } else if (FALSE_IT(all_stack_size = 0 == all_stack_size ?
+    ori_stack_size : all_stack_size)) {
+  } else if (all_stack_size + stack_size > ALL_STACK_LIMIT) {
+    ret = OB_SIZE_OVERFLOW;
+  } else if (OB_ISNULL(stack_addr = lib::g_stack_allocer.smart_call_alloc(tenant_id, stack_size))) {
+    ret = OB_ALLOCATE_MEMORY_FAILED;
+  } else {
+    all_stack_size += stack_size;
+  }
+  return ret;
+}
+
+inline void dealloc_stack(void *stack_addr, size_t stack_size)
+{
+  lib::g_stack_allocer.dealloc(stack_addr);
+  all_stack_size -= stack_size;
+}
+
+
 #ifndef OB_USE_ASAN
-#define SMART_CALL(func)                                                   \
-  ({                                                                       \
-    int ret = OB_SUCCESS;                                                  \
-    bool is_overflow = false;                                              \
-    if (OB_FAIL(check_stack_overflow(is_overflow, STACK_RESERVED_SIZE))) { \
-    } else if (!is_overflow) {                                             \
-      ret = func;                                                          \
-    } else {                                                               \
-      std::function<int()> f = [&]() {                                     \
-        int ret = OB_SUCCESS;                                              \
-        try {                                                              \
-          in_try_stmt = true;                                              \
-          ret = func;                                                      \
-          in_try_stmt = false;                                             \
-        } catch (OB_BASE_EXCEPTION & except) {                             \
-          ret = except.get_errno();                                        \
-          in_try_stmt = false;                                             \
-        }                                                                  \
-        return ret;                                                        \
-      };                                                                   \
-      SContext sctx;                                                       \
-      sctx.func_ = [](void* arg) { return (*(decltype(f)*)(arg))(); };     \
-      sctx.arg_ = &f;                                                      \
-      ret = call_with_new_stack(sctx);                                     \
-    }                                                                      \
-    ret;                                                                   \
+#define CALL_WITH_NEW_STACK(func, stack_addr, stack_size)                 \
+  ({                                                                      \
+    int ret = OB_SUCCESS;                                                 \
+    std::function<int()> f = [&]() {                                      \
+      int ret = OB_SUCCESS;                                               \
+      try {                                                               \
+        in_try_stmt = true;                                               \
+        ret = func;                                                       \
+        in_try_stmt = false;                                              \
+      } catch (OB_BASE_EXCEPTION &except) {                               \
+        ret = except.get_errno();                                         \
+        in_try_stmt = false;                                              \
+      }                                                                   \
+      return ret;                                                         \
+    };                                                                    \
+    int(*func_) (void*) = [](void *arg) { return (*(decltype(f)*)(arg))(); };\
+    void * arg_ = &f;                                                     \
+    ret = call_with_new_stack(arg_, func_, stack_addr, stack_size);       \
+    ret;                                                                  \
+  })
+#define SMART_CALL(func)                                                    \
+  ({                                                                        \
+    int ret = OB_SUCCESS;                                                   \
+    bool is_overflow = false;                                               \
+    RECURSION_CHECKER_GUARD;                                                \
+    if (OB_FAIL(check_stack_overflow(is_overflow, STACK_RESERVED_SIZE))) {  \
+    } else if (!is_overflow) {                                              \
+      ret = func;                                                           \
+    } else {                                                                \
+      const size_t stack_size = STACK_PER_EXTEND;                           \
+      void *stack_addr = nullptr;                                           \
+      if (OB_SUCC(alloc_stack(stack_size, stack_addr))) {                   \
+        ret = CALL_WITH_NEW_STACK(func, stack_addr, stack_size);            \
+        dealloc_stack(stack_addr, stack_size);                              \
+      }                                                                     \
+    }                                                                       \
+    ret;                                                                    \
   })
 #else
-#define SMART_CALL(func)                                                   \
-  ({                                                                       \
-    int ret = OB_SUCCESS;                                                  \
-    bool is_overflow = false;                                              \
-    if (OB_FAIL(check_stack_overflow(is_overflow, STACK_RESERVED_SIZE))) { \
-    } else if (!is_overflow) {                                             \
-      ret = func;                                                          \
-    } else {                                                               \
-      ret = OB_STACK_OVERFLOW;                                             \
-    }                                                                      \
-    ret;                                                                   \
+#define CALL_WITH_NEW_STACK(func, stack_addr, stack_size)   \
+  ({                                                        \
+    int ret = OB_SUCCESS;                                   \
+    ret = func;                                             \
+    ret;                                                    \
+  })
+#define SMART_CALL(func)                                                    \
+  ({                                                                        \
+    int ret = OB_SUCCESS;                                                   \
+    bool is_overflow = false;                                               \
+    if (OB_FAIL(check_stack_overflow(is_overflow, STACK_RESERVED_SIZE))) {  \
+    } else if (!is_overflow) {                                              \
+      ret = func;                                                           \
+    } else {                                                                \
+      ret = OB_SIZE_OVERFLOW;                                               \
+   }                                                                        \
+    ret;                                                                    \
   })
 #endif
-}  // end of namespace common
-}  // end of namespace oceanbase
+} // end of namespace common
+} // end of namespace oceanbase
 
 #endif /* _OCEANBASE_SMART_CALL_ */

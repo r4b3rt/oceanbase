@@ -18,8 +18,16 @@ class SqlItem:
     self.action_sql = action_sql
     self.rollback_sql = rollback_sql
 
+current_cluster_version = "4.3.5.1"
+current_data_version = "4.3.5.1"
 g_succ_sql_list = []
 g_commit_sql_list = []
+
+def get_current_cluster_version():
+  return current_cluster_version
+
+def get_current_data_version():
+  return current_data_version
 
 def refresh_commit_sql_list():
   global g_succ_sql_list
@@ -97,15 +105,74 @@ def check_is_update_sql(sql):
         and word_list[1].lower().startswith('@') and ':=' == word_list[2].lower()):
       raise MyError('sql must be update, key_word="{0}", sql="{1}"'.format(key_word, sql))
 
-def set_parameter(cur, parameter, value):
+def get_min_cluster_version(cur):
+  min_cluster_version = 0
+  sql = """select distinct value from oceanbase.GV$OB_PARAMETERS where name='min_observer_version'"""
+  logging.info(sql)
+  cur.execute(sql)
+  results = cur.fetchall()
+  if len(results) != 1:
+    logging.exception('min_observer_version is not sync')
+    raise MyError('min_observer_version is not sync')
+  elif len(results[0]) != 1:
+    logging.exception('column cnt not match')
+    raise MyError('column cnt not match')
+  else:
+    min_cluster_version = get_version(results[0][0])
+  return min_cluster_version
+
+def set_parameter(cur, parameter, value, timeout = 0):
   sql = """alter system set {0} = '{1}'""".format(parameter, value)
   logging.info(sql)
   cur.execute(sql)
-  wait_parameter_sync(cur, parameter, value)
+  wait_parameter_sync(cur, False, parameter, value, timeout)
 
-def get_ori_enable_ddl(cur):
+def set_session_timeout(cur, seconds):
+  sql = "set @@session.ob_query_timeout = {0}".format(seconds * 1000 * 1000)
+  logging.info(sql)
+  cur.execute(sql)
+
+def set_default_timeout_by_tenant(cur, timeout, timeout_per_tenant, min_timeout):
+  if timeout > 0:
+    logging.info("use timeout from opt, timeout(s):{0}".format(timeout))
+  else:
+    query_cur = QueryCursor(cur)
+    tenant_id_list = fetch_tenant_ids(query_cur)
+    cal_timeout = len(tenant_id_list) * timeout_per_tenant
+    timeout = (cal_timeout if cal_timeout > min_timeout else min_timeout)
+    logging.info("use default timeout caculated by tenants, "
+                 "timeout(s):{0}, tenant_count:{1}, "
+                 "timeout_per_tenant(s):{2}, min_timeout(s):{3}"
+                 .format(timeout, len(tenant_id_list), timeout_per_tenant, min_timeout))
+
+  return timeout
+
+def set_tenant_parameter(cur, parameter, value, timeout = 0, only_sys_tenant = False):
+
+  tenants_list = []
+  if only_sys_tenant:
+    tenants_list = ['sys']
+  elif get_min_cluster_version(cur) < get_version("4.2.1.0"):
+    tenants_list = ['all']
+  else:
+    tenants_list = ['sys', 'all_user', 'all_meta']
+
+  query_timeout = set_default_timeout_by_tenant(cur, timeout, 10, 60)
+
+  set_session_timeout(cur, query_timeout)
+
+  for tenants in tenants_list:
+    sql = """alter system set {0} = '{1}' tenant = '{2}'""".format(parameter, value, tenants)
+    logging.info(sql)
+    cur.execute(sql)
+
+  set_session_timeout(cur, 10)
+
+  wait_parameter_sync(cur, True, parameter, value, timeout, only_sys_tenant)
+
+def get_ori_enable_ddl(cur, timeout):
   ori_value_str = fetch_ori_enable_ddl(cur)
-  wait_parameter_sync(cur, 'enable_ddl', ori_value_str)
+  wait_parameter_sync(cur, False, 'enable_ddl', ori_value_str, timeout)
   ori_value = (ori_value_str == 'True')
   return ori_value
 
@@ -122,27 +189,95 @@ def fetch_ori_enable_ddl(cur):
     ori_value = 'True'
   elif len(result) != 1 or len(result[0]) != 1:
     logging.exception('result cnt not match')
-    raise e
+    raise MyError('result cnt not match')
   elif result[0][0].lower() in ["1", "true", "on", "yes", 't']:
     ori_value = 'True'
   elif result[0][0].lower() in ["0", "false", "off", "no", 'f']:
     ori_value = 'False'
   else:
     logging.exception("""result value is invalid, result:{0}""".format(result[0][0]))
-    raise e
+    raise MyError("""result value is invalid, result:{0}""".format(result[0][0]))
   return ori_value
 
-def wait_parameter_sync(cur, key, value):
-  sql = """select count(*) as cnt from oceanbase.__all_virtual_sys_parameter_stat
-           where name = '{0}' and value != '{1}'""".format(key, value)
-  times = 10
-  while times > 0:
+# print(version like "x.x.x.x")
+def print_version(version):
+  version = int(version)
+  major = (version >> 32) & 0xffffffff
+  minor = (version >> 16) & 0xffff
+  major_patch = (version >> 8) & 0xff
+  minor_patch = version & 0xff
+  version_str = "{0}.{1}.{2}.{3}".format(major, minor, major_patch, minor_patch)
+
+# version str should like "x.x.x.x"
+def get_version(version_str):
+  versions = version_str.split(".")
+
+  if len(versions) != 4:
+    logging.exception("""version:{0} is invalid""".format(version_str))
+    raise MyError("""version:{0} is invalid""".format(version_str))
+
+  major = int(versions[0])
+  minor = int(versions[1])
+  major_patch = int(versions[2])
+  minor_patch = int(versions[3])
+
+  if major > 0xffffffff or minor > 0xffff or major_patch > 0xff or minor_patch > 0xff:
+    logging.exception("""version:{0} is invalid""".format(version_str))
+    raise MyError("""version:{0} is invalid""".format(version_str))
+
+  version = (major << 32) | (minor << 16) | (major_patch << 8) | (minor_patch)
+  return version
+
+def check_server_version_by_cluster(cur):
+  sql = """select distinct(substring_index(build_version, '_', 1)) from __all_server""";
+  logging.info(sql)
+  cur.execute(sql)
+  result = cur.fetchall()
+  if len(result) != 1:
+    raise MyError("servers build_version not match")
+  else:
+    logging.info("check server version success")
+
+def check_parameter(cur, is_tenant_config, key, value):
+  table_name = "GV$OB_PARAMETERS" if not is_tenant_config else "__all_virtual_tenant_parameter_info"
+  sql = """select * from oceanbase.{0}
+           where name = '{1}' and value = '{2}'""".format(table_name, key, value)
+  logging.info(sql)
+  cur.execute(sql)
+  result = cur.fetchall()
+  bret = False
+  if len(result) > 0:
+    bret = True
+  else:
+    bret = False
+  return bret
+
+def wait_parameter_sync(cur, is_tenant_config, key, value, timeout, only_sys_tenant = False):
+  table_name = "GV$OB_PARAMETERS" if not is_tenant_config else "__all_virtual_tenant_parameter_info"
+  extra_sql = " and tenant_id = 1" if is_tenant_config and only_sys_tenant else ""
+  sql = """select count(*) as cnt from oceanbase.{0}
+           where name = '{1}' and value != '{2}'{3}""".format(table_name, key, value, extra_sql)
+
+  wait_timeout = 0
+  query_timeout = 0
+  if not is_tenant_config or timeout > 0:
+    wait_timeout = (timeout if timeout > 0 else 60)
+    query_timeout = wait_timeout
+  else:
+    # is_tenant_config & timeout not set
+    wait_timeout = set_default_timeout_by_tenant(cur, timeout, 10, 60)
+    query_timeout = set_default_timeout_by_tenant(cur, timeout, 2, 60)
+
+  set_session_timeout(cur, query_timeout)
+
+  times = wait_timeout / 5
+  while times >= 0:
     logging.info(sql)
     cur.execute(sql)
     result = cur.fetchall()
     if len(result) != 1 or len(result[0]) != 1:
       logging.exception('result cnt not match')
-      raise e
+      raise MyError('result cnt not match')
     elif result[0][0] == 0:
       logging.info("""{0} is sync, value is {1}""".format(key, value))
       break
@@ -150,10 +285,115 @@ def wait_parameter_sync(cur, key, value):
       logging.info("""{0} is not sync, value should be {1}""".format(key, value))
 
     times -= 1
-    if times == 0:
+    if times == -1:
       logging.exception("""check {0}:{1} sync timeout""".format(key, value))
-      raise e
+      raise MyError("""check {0}:{1} sync timeout""".format(key, value))
     time.sleep(5)
+
+  set_session_timeout(cur, 10)
+
+def do_begin_upgrade(cur, timeout):
+
+  if not check_parameter(cur, False, "enable_upgrade_mode", "True"):
+    action_sql = "alter system begin upgrade"
+    rollback_sql = "alter system end upgrade"
+    logging.info(action_sql)
+
+    cur.execute(action_sql)
+
+    global g_succ_sql_list
+    g_succ_sql_list.append(SqlItem(action_sql, rollback_sql))
+
+  wait_parameter_sync(cur, False, "enable_upgrade_mode", "True", timeout)
+
+
+def do_begin_rolling_upgrade(cur, timeout):
+
+  if not check_parameter(cur, False, "_upgrade_stage", "DBUPGRADE"):
+    action_sql = "alter system begin rolling upgrade"
+    rollback_sql = "alter system end upgrade"
+
+    logging.info(action_sql)
+    cur.execute(action_sql)
+
+    global g_succ_sql_list
+    g_succ_sql_list.append(SqlItem(action_sql, rollback_sql))
+
+  wait_parameter_sync(cur, False, "_upgrade_stage", "DBUPGRADE", timeout)
+
+
+def do_end_rolling_upgrade(cur, timeout):
+
+  # maybe in upgrade_post_check stage or never run begin upgrade
+  if check_parameter(cur, False, "enable_upgrade_mode", "False"):
+    return
+
+  current_cluster_version = get_current_cluster_version()
+  if not check_parameter(cur, False, "_upgrade_stage", "POSTUPGRADE") or not check_parameter(cur, False, "min_observer_version", current_cluster_version):
+    action_sql = "alter system end rolling upgrade"
+    rollback_sql = "alter system end upgrade"
+
+    logging.info(action_sql)
+    cur.execute(action_sql)
+
+    global g_succ_sql_list
+    g_succ_sql_list.append(SqlItem(action_sql, rollback_sql))
+
+  wait_parameter_sync(cur, False, "min_observer_version", current_data_version, timeout)
+  wait_parameter_sync(cur, False, "_upgrade_stage", "POSTUPGRADE", timeout)
+
+
+def do_end_upgrade(cur, timeout):
+
+  if not check_parameter(cur, False, "enable_upgrade_mode", "False"):
+    action_sql = "alter system end upgrade"
+    rollback_sql = ""
+
+    logging.info(action_sql)
+    cur.execute(action_sql)
+
+    global g_succ_sql_list
+    g_succ_sql_list.append(SqlItem(action_sql, rollback_sql))
+
+  wait_parameter_sync(cur, False, "enable_upgrade_mode", "False", timeout)
+
+def do_suspend_merge(cur, timeout):
+  tenants_list = []
+  if get_min_cluster_version(cur) < get_version("4.2.1.0"):
+    tenants_list = ['all']
+  else:
+    tenants_list = ['sys', 'all_user', 'all_meta']
+
+  query_timeout = set_default_timeout_by_tenant(cur, timeout, 10, 60)
+
+  set_session_timeout(cur, query_timeout)
+
+  for tenants in tenants_list:
+    action_sql = "alter system suspend merge tenant = {0}".format(tenants)
+    rollback_sql = "alter system resume merge tenant = {0}".format(tenants)
+    logging.info(action_sql)
+    cur.execute(action_sql)
+
+  set_session_timeout(cur, 10)
+
+def do_resume_merge(cur, timeout):
+  tenants_list = []
+  if get_min_cluster_version(cur) < get_version("4.2.1.0"):
+    tenants_list = ['all']
+  else:
+    tenants_list = ['sys', 'all_user', 'all_meta']
+
+  query_timeout = set_default_timeout_by_tenant(cur, timeout, 10, 60)
+
+  set_session_timeout(cur, query_timeout)
+
+  for tenants in tenants_list:
+    action_sql = "alter system resume merge tenant = {0}".format(tenants)
+    rollback_sql = "alter system suspend merge tenant = {0}".format(tenants)
+    logging.info(action_sql)
+    cur.execute(action_sql)
+
+  set_session_timeout(cur, 10)
 
 class Cursor:
   __cursor = None
@@ -166,12 +406,12 @@ class Cursor:
       if True == print_when_succ:
         logging.info('succeed to execute sql: %s, rowcount = %d', sql, rowcount)
       return rowcount
-    except mysql.connector.Error, e:
+    except mysql.connector.Error as e:
       logging.exception('mysql connector error, fail to execute sql: %s', sql)
-      raise e
-    except Exception, e:
+      raise
+    except Exception as e:
       logging.exception('normal error, fail to execute sql: %s', sql)
-      raise e
+      raise
   def exec_query(self, sql, print_when_succ = True):
     try:
       self.__cursor.execute(sql)
@@ -180,12 +420,12 @@ class Cursor:
       if True == print_when_succ:
         logging.info('succeed to execute query: %s, rowcount = %d', sql, rowcount)
       return (self.__cursor.description, results)
-    except mysql.connector.Error, e:
+    except mysql.connector.Error as e:
       logging.exception('mysql connector error, fail to execute sql: %s', sql)
-      raise e
-    except Exception, e:
+      raise
+    except Exception as e:
       logging.exception('normal error, fail to execute sql: %s', sql)
-      raise e
+      raise
 
 class DDLCursor:
   _cursor = None
@@ -196,9 +436,9 @@ class DDLCursor:
       # 这里检查是不是ddl，不是ddl就抛错
       check_is_ddl_sql(sql)
       return self._cursor.exec_sql(sql, print_when_succ)
-    except Exception, e:
+    except Exception as e:
       logging.exception('fail to execute ddl: %s', sql)
-      raise e
+      raise
 
 class QueryCursor:
   _cursor = None
@@ -209,9 +449,9 @@ class QueryCursor:
       # 这里检查是不是query，不是query就抛错
       check_is_query_sql(sql)
       return self._cursor.exec_query(sql, print_when_succ)
-    except Exception, e:
+    except Exception as e:
       logging.exception('fail to execute dml query: %s', sql)
-      raise e
+      raise
 
 class DMLCursor(QueryCursor):
   def exec_update(self, sql, print_when_succ = True):
@@ -219,9 +459,9 @@ class DMLCursor(QueryCursor):
       # 这里检查是不是update，不是update就抛错
       check_is_update_sql(sql)
       return self._cursor.exec_sql(sql, print_when_succ)
-    except Exception, e:
+    except Exception as e:
       logging.exception('fail to execute dml update: %s', sql)
-      raise e
+      raise
 
 class BaseDDLAction():
   __ddl_cursor = None
@@ -269,14 +509,6 @@ class BaseEachTenantDMLAction():
     rollback_sql = self.get_each_tenant_rollback_sql(tenant_id)
     self.__dml_cursor.exec_update(action_sql)
     g_succ_sql_list.append(SqlItem(action_sql, rollback_sql))
-  def change_tenant(self, tenant_id):
-    self._cursor.exec_sql("alter system change tenant tenant_id = {0}".format(tenant_id))
-    (desc, results) = self._query_cursor.exec_query("select effective_tenant_id()")
-    if (1 != len(results) or 1 != len(results[0])):
-      raise MyError("results cnt not match")
-    elif (tenant_id != results[0][0]):
-      raise MyError("change tenant failed, effective_tenant_id:{0}, tenant_id:{1}"
-                    .format(results[0][0], tenant_id))
 
 class BaseEachTenantDDLAction():
   __dml_cursor = None
@@ -321,13 +553,16 @@ def reflect_action_cls_list(action_module, action_name_prefix):
   action_cls_list.sort(actions_cls_compare)
   return action_cls_list
 
-def fetch_observer_version(query_cur):
-  (desc, results) = query_cur.exec_query("""select distinct value from __all_virtual_sys_parameter_stat where name='min_observer_version'""")
-  if len(results) != 1:
+def fetch_observer_version(cur):
+  sql = """select distinct value from __all_virtual_sys_parameter_stat where name='min_observer_version'"""
+  logging.info(sql)
+  cur.execute(sql)
+  result = cur.fetchall()
+  if len(result) != 1:
     raise MyError('query results count is not 1')
   else:
-    logging.info('get observer version success, version = {0}'.format(results[0][0]))
-  return results[0][0]
+    logging.info('get observer version success, version = {0}'.format(result[0][0]))
+  return result[0][0]
 
 def fetch_tenant_ids(query_cur):
   try:
@@ -336,218 +571,7 @@ def fetch_tenant_ids(query_cur):
     for r in results:
       tenant_id_list.append(r[0])
     return tenant_id_list
-  except Exception, e:
+  except Exception as e:
     logging.exception('fail to fetch distinct tenant ids')
-    raise e
+    raise
 
-def check_current_cluster_is_primary(query_cur):
-  try:
-    sql = """SELECT * FROM v$ob_cluster
-             WHERE cluster_role = "PRIMARY"
-             AND cluster_status = "VALID"
-             AND (switchover_status = "NOT ALLOWED" OR switchover_status = "TO STANDBY") """
-    (desc, results) = query_cur.exec_query(sql)
-    is_primary = len(results) > 0
-    return is_primary
-  except Exception, e:
-    logging.exception("""fail to check current is primary""")
-    raise e
-
-def fetch_standby_cluster_infos(conn, query_cur, user, pwd):
-  try:
-    is_primary = check_current_cluster_is_primary(query_cur)
-    if not is_primary:
-      logging.exception("""should be primary cluster""")
-      raise e
-
-    standby_cluster_infos = []
-    sql = """SELECT cluster_id, rootservice_list from v$ob_standby_status"""
-    (desc, results) = query_cur.exec_query(sql)
-
-    for r in results:
-      standby_cluster_info = {}
-      if 2 != len(r):
-        logging.exception("length not match")
-        raise e
-      standby_cluster_info['cluster_id'] = r[0]
-      standby_cluster_info['user'] = user
-      standby_cluster_info['pwd'] = pwd
-      # construct ip/port
-      address = r[1].split(";")[0] # choose first address in rs_list
-      standby_cluster_info['ip'] = str(address.split(":")[0])
-      standby_cluster_info['port'] = address.split(":")[2]
-      # append
-      standby_cluster_infos.append(standby_cluster_info)
-      logging.info("""cluster_info :  cluster_id = {0}, ip = {1}, port = {2}"""
-                   .format(standby_cluster_info['cluster_id'],
-                           standby_cluster_info['ip'],
-                           standby_cluster_info['port']))
-    conn.commit()
-    # check standby cluster
-    for standby_cluster_info in standby_cluster_infos:
-      # connect
-      logging.info("""create connection : cluster_id = {0}, ip = {1}, port = {2}"""
-                   .format(standby_cluster_info['cluster_id'],
-                           standby_cluster_info['ip'],
-                           standby_cluster_info['port']))
-
-      tmp_conn = mysql.connector.connect(user     =  standby_cluster_info['user'],
-                                         password =  standby_cluster_info['pwd'],
-                                         host     =  standby_cluster_info['ip'],
-                                         port     =  standby_cluster_info['port'],
-                                         database =  'oceanbase',
-                                         raise_on_warnings = True)
-
-      tmp_cur = tmp_conn.cursor(buffered=True)
-      tmp_conn.autocommit = True
-      tmp_query_cur = QueryCursor(tmp_cur)
-      is_primary = check_current_cluster_is_primary(tmp_query_cur)
-      if is_primary:
-        logging.exception("""primary cluster changed : cluster_id = {0}, ip = {1}, port = {2}"""
-                          .format(standby_cluster_info['cluster_id'],
-                                  standby_cluster_info['ip'],
-                                  standby_cluster_info['port']))
-        raise e
-      # close
-      tmp_cur.close()
-      tmp_conn.close()
-
-    return standby_cluster_infos
-  except Exception, e:
-    logging.exception('fail to fetch standby cluster info')
-    raise e
-
-
-def check_ddl_and_dml_sync(conn, query_cur, standby_cluster_infos, tenant_ids):
-  try:
-    conn.commit()
-    # check if need check ddl and dml sync
-    is_primary = check_current_cluster_is_primary(query_cur)
-    if not is_primary:
-      logging.exception("""should be primary cluster""")
-      raise e
-
-    # fetch sys stats
-    sys_infos = []
-    sql = """SELECT tenant_id,
-                    refreshed_schema_version,
-                    min_sys_table_scn,
-                    min_user_table_scn
-             FROM oceanbase.v$ob_cluster_stats
-             ORDER BY tenant_id desc"""
-    (desc, results) = query_cur.exec_query(sql)
-    if len(tenant_ids) != len(results):
-      logging.exception("result not match")
-      raise e
-    else:
-      for i in range(len(results)):
-        if len(results[i]) != 4:
-          logging.exception("length not match")
-          raise e
-        elif results[i][0] != tenant_ids[i]:
-          logging.exception("tenant_id not match")
-          raise e
-        else:
-          sys_info = {}
-          sys_info['tenant_id'] = results[i][0]
-          sys_info['refreshed_schema_version'] = results[i][1]
-          sys_info['min_sys_table_scn'] = results[i][2]
-          sys_info['min_user_table_scn'] = results[i][3]
-          logging.info("sys info : {0}".format(sys_info))
-          sys_infos.append(sys_info)
-    conn.commit()
-
-    # check ddl and dml by cluster
-    for standby_cluster_info in standby_cluster_infos:
-      check_ddl_and_dml_sync_by_cluster(standby_cluster_info, sys_infos)
-
-  except Exception, e:
-    logging.exception("fail to check ddl and dml sync")
-    raise e
-
-def check_ddl_and_dml_sync_by_cluster(standby_cluster_info, sys_infos):
-  try:
-    # connect
-    logging.info("start to check ddl and dml sync by cluster: cluster_id = {0}"
-                 .format(standby_cluster_info['cluster_id']))
-    logging.info("create connection : cluster_id = {0}, ip = {1}, port = {2}"
-                 .format(standby_cluster_info['cluster_id'],
-                         standby_cluster_info['ip'],
-                         standby_cluster_info['port']))
-    tmp_conn = mysql.connector.connect(user     =  standby_cluster_info['user'],
-                                       password =  standby_cluster_info['pwd'],
-                                       host     =  standby_cluster_info['ip'],
-                                       port     =  standby_cluster_info['port'],
-                                       database =  'oceanbase',
-                                       raise_on_warnings = True)
-    tmp_cur = tmp_conn.cursor(buffered=True)
-    tmp_conn.autocommit = True
-    tmp_query_cur = QueryCursor(tmp_cur)
-    is_primary = check_current_cluster_is_primary(tmp_query_cur)
-    if is_primary:
-      logging.exception("""primary cluster changed : cluster_id = {0}, ip = {1}, port = {2}"""
-                        .format(standby_cluster_info['cluster_id'],
-                                standby_cluster_info['ip'],
-                                standby_cluster_info['port']))
-      raise e
-
-    for sys_info in sys_infos:
-      check_ddl_and_dml_sync_by_tenant(tmp_query_cur, sys_info)
-
-    # close
-    tmp_cur.close()
-    tmp_conn.close()
-    logging.info("""check_ddl_and_dml_sync_by_cluster success : cluster_id = {0}, ip = {1}, port = {2}"""
-                    .format(standby_cluster_info['cluster_id'],
-                            standby_cluster_info['ip'],
-                            standby_cluster_info['port']))
-
-  except Exception, e:
-    logging.exception("""fail to check ddl and dml sync : cluster_id = {0}, ip = {1}, port = {2}"""
-                         .format(standby_cluster_info['cluster_id'],
-                                 standby_cluster_info['ip'],
-                                 standby_cluster_info['port']))
-    raise e
-
-def check_ddl_and_dml_sync_by_tenant(query_cur, sys_info):
-  try:
-    times = 1800 # 30min
-    logging.info("start to check ddl and dml sync by tenant : {0}".format(sys_info))
-    start_time = time.time()
-    sql = ""
-    if 1 == sys_info['tenant_id'] :
-      # 备库系统租户DML不走物理同步，需要升级脚本负责写入，系统租户仅校验DDL同步
-      sql = """SELECT count(*)
-               FROM oceanbase.v$ob_cluster_stats
-               WHERE tenant_id = {0}
-                     AND refreshed_schema_version >= {1}
-            """.format(sys_info['tenant_id'],
-                       sys_info['refreshed_schema_version'])
-    else:
-      sql = """SELECT count(*)
-               FROM oceanbase.v$ob_cluster_stats
-               WHERE tenant_id = {0}
-                     AND refreshed_schema_version >= {1}
-                     AND min_sys_table_scn >= {2}
-                     AND min_user_table_scn >= {3}
-            """.format(sys_info['tenant_id'],
-                       sys_info['refreshed_schema_version'],
-                       sys_info['min_sys_table_scn'],
-                       sys_info['min_user_table_scn'])
-    while times > 0 :
-      (desc, results) = query_cur.exec_query(sql)
-      if len(results) == 1 and results[0][0] == 1:
-        break;
-      time.sleep(1)
-      times -= 1
-    if times == 0:
-      logging.exception("check ddl and dml sync timeout! : {0}, cost = {1}"
-                    .format(sys_info, time.time() - start_time))
-      raise e
-    else:
-      logging.info("check ddl and dml sync success! : {0}, cost = {1}"
-                   .format(sys_info, time.time() - start_time))
-
-  except Exception, e:
-    logging.exception("fail to check ddl and dml sync : {0}".format(sys_info))
-    raise e

@@ -10,67 +10,117 @@
  * See the Mulan PubL v2 for more details.
  */
 
-#ifndef OB_MICRO_BLOCK_ROW_GETTER_H_
-#define OB_MICRO_BLOCK_ROW_GETTER_H_
+#ifndef OB_STORAGE_BLOCKSSTABLE_OB_MICRO_BLOCK_ROW_GETTER_H_
+#define OB_STORAGE_BLOCKSSTABLE_OB_MICRO_BLOCK_ROW_GETTER_H_
 
-#include "storage/blocksstable/ob_block_sstable_struct.h"
-#include "storage/blocksstable/ob_micro_block_row_scanner.h"
-#include "storage/blocksstable/ob_imicro_block_reader.h"
-#include "storage/blocksstable/ob_sparse_micro_block_reader.h"
+#include "storage/blocksstable/ob_micro_block_reader.h"
+#include "storage/blocksstable/encoding/ob_micro_block_decoder.h"
+#include "ob_datum_row.h"
+#include "ob_row_cache.h"
 
-namespace oceanbase {
-namespace blocksstable {
+namespace oceanbase
+{
+namespace storage {
+struct ObSSTableReadHandle;
+}
+
+namespace blocksstable
+{
+class ObMacroBlockReader;
+class ObCSEncodeBlockGetReader;
+
 class ObIMicroBlockRowFetcher {
 public:
   ObIMicroBlockRowFetcher();
   virtual ~ObIMicroBlockRowFetcher();
-  virtual int init(const storage::ObTableIterParam& param, storage::ObTableAccessContext& context,
-      const storage::ObSSTable* sstable);
-
+  virtual int init(
+      const storage::ObTableIterParam &param,
+      storage::ObTableAccessContext &context,
+      const blocksstable::ObSSTable *sstable);
+  virtual int switch_context(
+      const storage::ObTableIterParam &param,
+      storage::ObTableAccessContext &context,
+      const blocksstable::ObSSTable *sstable);
+  OB_INLINE int64_t get_average_row_length() const
+  {
+    return nullptr != reader_ && 0 < reader_->row_count()  ?
+      reader_->original_data_length() / reader_->row_count() : 0;
+  }
 protected:
-  int prepare_reader(const ObFullMacroBlockMeta& macro_meta);
-  const storage::ObTableIterParam* param_;
-  storage::ObTableAccessContext* context_;
-  const storage::ObSSTable* sstable_;
-  ObIMicroBlockGetReader* reader_;
-  ObMicroBlockGetReader* flat_reader_;
-  ObMultiVersionBlockGetReader* multi_version_reader_;
-  ObSparseMicroBlockGetReader* sparse_reader_;
-  bool is_multi_version_;
+  int prepare_reader(const ObRowStoreType store_type);
+  const storage::ObTableIterParam *param_;
+  storage::ObTableAccessContext *context_;
+  const blocksstable::ObSSTable *sstable_;
+  ObIMicroBlockGetReader *reader_;
+  ObMicroBlockGetReader *flat_reader_;
+  ObEncodeBlockGetReader *encode_reader_;
+  ObCSEncodeBlockGetReader *cs_encode_reader_;
+  const ObITableReadInfo *read_info_;
+  ObIAllocator *long_life_allocator_;
   bool is_inited_;
 };
 
-class ObMicroBlockRowGetter : public ObIMicroBlockRowFetcher {
+class ObMicroBlockRowGetter : public ObIMicroBlockRowFetcher
+{
 public:
-  ObMicroBlockRowGetter();
-  virtual ~ObMicroBlockRowGetter();
-  virtual int init(const storage::ObTableIterParam& param, storage::ObTableAccessContext& context,
-      const storage::ObSSTable* sstable);
-  int get_row(const common::ObStoreRowkey& rowkey, const MacroBlockId macro_id, const int64_t file_id,
-      const ObFullMacroBlockMeta& macro_meta, const ObMicroBlockData& block_data,
-      const storage::ObSSTableRowkeyHelper* rowkey_helper, const storage::ObStoreRow*& row);
-  int get_cached_row(const common::ObStoreRowkey& rowkey, const ObFullMacroBlockMeta& macro_meta,
-      const ObRowCacheValue& value, const storage::ObStoreRow*& row);
-  int get_not_exist_row(const common::ObStoreRowkey& rowkey, const storage::ObStoreRow*& row);
-
+  ObMicroBlockRowGetter() : row_(), cache_project_row_() {};
+  virtual ~ObMicroBlockRowGetter() {};
+  virtual int init(
+      const storage::ObTableIterParam &param,
+      storage::ObTableAccessContext &context,
+      const blocksstable::ObSSTable *sstable) override;
+  int get_row(
+      ObSSTableReadHandle &get_handle,
+      const ObDatumRow *&store_row,
+      ObMacroBlockReader *block_reader);
+  virtual int switch_context(
+      const storage::ObTableIterParam &param,
+      storage::ObTableAccessContext &context,
+      const blocksstable::ObSSTable *sstable) override;
 private:
-  int project_row(const ObStoreRowkey& rowkey, const ObRowCacheValue& value, const ObColumnMap& column_map,
-      const storage::ObStoreRow*& row);
-  int project_cache_row(const ObStoreRowkey& rowkey, const ObRowCacheValue& value, const ObColumnMap& column_map,
-      const storage::ObStoreRow*& row);
-  int project_cache_sparse_row(const ObStoreRowkey& rowkey, const ObRowCacheValue& value, const ObColumnMap& column_map,
-      const storage::ObStoreRow*& row);
-
+  int get_block_row(ObSSTableReadHandle &read_handle, ObMacroBlockReader &block_reader, const ObDatumRow *&store_row);
+  int get_cached_row(const ObDatumRowkey &rowkey, const ObRowCacheValue &value, const ObDatumRow *&row);
+  int get_not_exist_row(const ObDatumRowkey &rowkey, const ObDatumRow *&row);
+  int project_cache_row(const ObRowCacheValue &value, ObDatumRow &row);
+  int inner_get_row(
+      const MacroBlockId &macro_id,
+      const ObDatumRowkey &rowkey,
+      const ObMicroBlockData &block_data,
+      const ObDatumRow *&row);
 private:
-  common::ObArenaAllocator allocator_;
-  ObColumnMap column_map_;
-  storage::ObStoreRow row_;
-  char obj_buf_[common::OB_ROW_MAX_COLUMNS_COUNT * sizeof(common::ObObj)];
-  storage::ObStoreRow full_row_;
-  char full_row_obj_buf_[common::OB_ROW_MAX_COLUMNS_COUNT * sizeof(common::ObObj)];
+  ObDatumRow row_;
+  ObDatumRow cache_project_row_;
 };
 
-}  // namespace blocksstable
-}  // namespace oceanbase
+class ObMicroBlockCGRowGetter : public ObIMicroBlockRowFetcher
+{
+public:
+  ObMicroBlockCGRowGetter() : row_() {};
+  virtual ~ObMicroBlockCGRowGetter() {};
+  virtual int init(
+      const storage::ObTableIterParam &param,
+      storage::ObTableAccessContext &context,
+      const blocksstable::ObSSTable *sstable) override;
+  virtual int switch_context(
+      const storage::ObTableIterParam &param,
+      storage::ObTableAccessContext &context,
+      const blocksstable::ObSSTable *sstable) override;
+  int get_row(
+      ObSSTableReadHandle &read_handle,
+      ObMacroBlockReader &block_reader,
+      const uint32_t row_idx,
+      const ObDatumRow *&store_row);
+private:
+  int get_block_row(ObSSTableReadHandle &read_handle,
+                    ObMacroBlockReader &block_reader,
+                    const uint32_t row_idx,
+                    const ObDatumRow *&row);
+  int get_not_exist_row(const ObDatumRow *&row);
 
-#endif /* OB_MICRO_BLOCK_ROW_GETTER_H_ */
+private:
+  ObDatumRow row_;
+};
+
+}
+}
+#endif //OB_STORAGE_BLOCKSSTABLE_OB_MICRO_BLOCK_ROW_GETTER_H_

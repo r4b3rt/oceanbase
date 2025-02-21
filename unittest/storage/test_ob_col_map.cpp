@@ -11,15 +11,15 @@
  */
 
 #include "storage/ob_col_map.h"
-#include "lib/allocator/page_arena.h"
-#include <gtest/gtest.h>
 #include <gmock/gmock.h>
 
-namespace oceanbase {
+namespace oceanbase
+{
 using namespace common;
 using namespace storage;
 
-namespace unittest {
+namespace unittest
+{
 void test_col_map(const int64_t col_count)
 {
   int ret = OB_SUCCESS;
@@ -61,10 +61,10 @@ TEST(TestObColMap, test_col_map_final_level)
   test_col_map(col_count);
 }
 
-}  // namespace unittest
-}  // namespace oceanbase
+} // namespace unittest
+} // namespace oceanbase
 
-int main(int argc, char** argv)
+int main(int argc, char **argv)
 {
   OB_LOGGER.set_file_name("test_ob_col_map.log");
   OB_LOGGER.set_log_level("WARN");

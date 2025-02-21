@@ -13,25 +13,32 @@
 #define USING_LOG_PREFIX SQL_RESV
 
 #include "sql/resolver/ddl/ob_create_synonym_stmt.h"
-#include "common/object/ob_obj_type.h"
-#include "share/schema/ob_column_schema.h"
 
 using namespace oceanbase::sql;
 using namespace oceanbase::common;
 using namespace oceanbase::share::schema;
 
-namespace oceanbase {
-namespace sql {
+namespace oceanbase
+{
+namespace sql
+{
 
-ObCreateSynonymStmt::ObCreateSynonymStmt(ObIAllocator* name_pool)
-    : ObDDLStmt(name_pool, stmt::T_CREATE_SYNONYM), create_synonym_arg_()
-{}
+ObCreateSynonymStmt::ObCreateSynonymStmt(ObIAllocator *name_pool)
+    : ObDDLStmt(name_pool, stmt::T_CREATE_SYNONYM),
+      create_synonym_arg_()
+{
+}
 
-ObCreateSynonymStmt::ObCreateSynonymStmt() : ObDDLStmt(stmt::T_CREATE_SYNONYM), create_synonym_arg_()
-{}
+ObCreateSynonymStmt::ObCreateSynonymStmt()
+    : ObDDLStmt(stmt::T_CREATE_SYNONYM),
+      create_synonym_arg_()
+{
+}
 
 ObCreateSynonymStmt::~ObCreateSynonymStmt()
-{}
+{
+}
 
-}  // namespace sql
-}  // namespace oceanbase
+
+} // namespace sql
+} // namespace oceanbase

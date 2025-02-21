@@ -168,22 +168,12 @@
 #endif
 
 #include <math.h>
-#include <stdlib.h>
-#include <string.h>
 #include <fcntl.h>
-#include <stddef.h>
 
-#include <stdio.h>
 
-#include <assert.h>
-#include <errno.h>
 #include <sys/types.h>
-#include <time.h>
-#include <limits.h>
-#include <syscall.h>
-#include <signal.h>
 #include <sys/eventfd.h>
-#include "easy_log.h"
+#include "io/easy_log.h"
 
 int64_t ev_loop_warn_threshold = 10 * 1000;
 __thread int64_t ev_malloc_count = 0;
@@ -531,8 +521,6 @@ EV_CPP(extern "C" {
   #define ev_mb() __asm__ __volatile ("mfence" ::: "memory")
 #elif defined(__aarch64__)
   #define ev_mb() __asm__ __volatile ("dsb sy" ::: "memory")  //for ARM
-#elif defined(__sw_64__) || defined(__loongarch64)
-#define ev_mb() __sync_synchronize()
 #else
     #error arch unsupported
 #endif
@@ -562,6 +550,8 @@ EV_CPP(extern "C" {
 #endif
 
     /*****************************************************************************/
+
+static inline int64_t current_time();
 
 #ifdef __linux
 # include <sys/utsname.h>
@@ -611,6 +601,7 @@ EV_CPP(extern "C" {
 #endif
 
     static void ( *syserr_cb)(const char *msg);
+    int64_t ob_update_loop_ts();
 
     void
     ev_set_syserr_cb (void (*cb)(const char *msg))
@@ -1115,8 +1106,12 @@ EV_CPP(extern "C" {
         unsigned long           arg = 1;
         ioctlsocket (EV_FD_TO_WIN32_HANDLE (fd), FIONBIO, &arg);
 #else
-        fcntl (fd, F_SETFD, FD_CLOEXEC);
-        fcntl (fd, F_SETFL, O_NONBLOCK);
+        if (fcntl (fd, F_SETFD, FD_CLOEXEC) < 0) {
+            easy_error_log("libev F_SETFD FD_CLOEXEC failed, errno:%d", errno);
+        }
+        if (fcntl (fd, F_SETFL, O_NONBLOCK) < 0) {
+            easy_error_log("libev F_SETFL O_NONBLOCK failed, errno:%d", errno);
+        }
 #endif
     }
 
@@ -1274,8 +1269,8 @@ EV_CPP(extern "C" {
 #endif
         WL                      head;
     } ANSIG;
-    //whitescan for safety hole check
-    static ANSIG signals [EV_NSIG];
+
+    static ANSIG signals [EV_NSIG - 1];
 
     /*****************************************************************************/
 
@@ -1303,8 +1298,12 @@ EV_CPP(extern "C" {
 
                 fd_intern (evpipe [0]);
                 fd_intern (evpipe [1]);
-                fcntl (evpipe [0], F_SETFL, O_NONBLOCK | O_NOATIME);
-                fcntl (evpipe [1], F_SETFL, O_NONBLOCK | O_NOATIME);
+                if (fcntl (evpipe [0], F_SETFL, O_NONBLOCK | O_NOATIME)) {
+                    easy_error_log("libev F_SETFL O_NONBLOCK | O_NOATIME for evpipe[0] failed, errno:%d", errno);
+                }
+                if (fcntl (evpipe [1], F_SETFL, O_NONBLOCK | O_NOATIME)) {
+                    easy_error_log("libev F_SETFL O_NONBLOCK | O_NOATIME for evpipe[1] failed, errno:%d", errno);
+                }
                 ev_io_set (&pipe_w, evpipe [0], EV_READ);
             }
 
@@ -1407,7 +1406,7 @@ EV_CPP(extern "C" {
     {
         WL                      w;
 
-        if (expect_false (signum <= 0 || signum > EV_NSIG))
+        if (expect_false (signum <= 0 || signum >= EV_NSIG))
             return;
 
         --signum;
@@ -2100,16 +2099,6 @@ EV_CPP(extern "C" {
         return count;
     }
 
-#ifndef EASY_DEFINED_CURR_TIME
-  static inline int64_t current_time() {
-    struct timeval t;
-    if (gettimeofday(&t, NULL) < 0) {
-      easy_error_log("get time of day failed");
-    }
-    return ((t.tv_sec) * 1000000 + t.tv_usec);
-  }
-#endif
-
     void noinline
     ev_invoke_pending (EV_P)
     {
@@ -2353,6 +2342,14 @@ EV_CPP(extern "C" {
         }
     }
 
+  inline int64_t current_time()
+  {
+    struct timeval t;
+    if (gettimeofday(&t, NULL) < 0) {
+      easy_error_log("get time of day failed");
+    }
+    return ((t.tv_sec) * 1000000 + t.tv_usec);
+  }
 
     void
     ev_run (EV_P_ int flags)
@@ -2368,6 +2365,7 @@ EV_CPP(extern "C" {
         EV_INVOKE_PENDING; /* in case we recurse, ensure ordering stays nice and clean */
 
         do {
+            ob_update_loop_ts();
 #if EV_VERIFY >= 2
             ev_verify (EV_A);
 #endif

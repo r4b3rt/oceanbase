@@ -8,17 +8,12 @@
  * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PubL v2 for more details.
+ * This file contains implementation for json_type.
  */
 
-// This file contains implementation for json_type.
 #define USING_LOG_PREFIX SQL_ENG
 #include "ob_expr_json_type.h"
 #include "sql/engine/expr/ob_expr_json_func_helper.h"
-#include "sql/engine/expr/ob_expr_util.h"
-#include "share/object/ob_obj_cast.h"
-#include "sql/parser/ob_item_type.h"
-#include "sql/session/ob_sql_session_info.h"
-#include "lib/json_type/ob_json_tree.h"
 
 using namespace oceanbase::common;
 using namespace oceanbase::sql;
@@ -28,7 +23,7 @@ namespace oceanbase
 namespace sql
 {
 ObExprJsonType::ObExprJsonType(ObIAllocator &alloc)
-    : ObFuncExprOperator(alloc, T_FUN_SYS_JSON_TYPE, N_JSON_TYPE, 1, NOT_ROW_DIMENSION)
+    : ObFuncExprOperator(alloc, T_FUN_SYS_JSON_TYPE, N_JSON_TYPE, 1, VALID_FOR_GENERATED_COL, NOT_ROW_DIMENSION)
 {
 }
 
@@ -125,11 +120,12 @@ int ObExprJsonType::calc_result_type1(ObExprResType &type,
   return ret;
 }
 
-template <typename T>
-int ObExprJsonType::calc(const T &data, ObObjType type, ObCollationType cs_type,
+int ObExprJsonType::calc(ObEvalCtx &ctx, const ObDatum &data, ObDatumMeta meta, bool has_lob_header,
                          ObIAllocator *allocator, uint32_t &type_idx, bool &is_null)
 {
   INIT_SUCC(ret);
+  ObObjType type = meta.type_;
+  ObCollationType cs_type = meta.cs_type_;
 
   if (data.is_null()) {
     is_null = true;
@@ -150,14 +146,23 @@ int ObExprJsonType::calc(const T &data, ObObjType type, ObCollationType cs_type,
         } else if (j_str.length() == 0) {
           ret = OB_ERR_INVALID_JSON_TEXT;
           LOG_USER_ERROR(OB_ERR_INVALID_JSON_TEXT);
+        } else if (OB_FAIL(ObTextStringHelper::read_real_string_data(*allocator, data, meta, has_lob_header, j_str))) {
+          LOG_WARN("fail to get real data.", K(ret), K(j_str));
         } else if (OB_FAIL(ObJsonBaseFactory::get_json_base(allocator, j_str, j_in_type,
-            j_in_type, j_base))) {
+                                                            j_in_type, j_base, 0,
+                                                            ObJsonExprHelper::get_json_max_depth_config()))) {
           LOG_WARN("fail to get json base", K(ret), K(type), K(j_str), K(j_in_type));
-          if (ret == OB_ERR_INVALID_JSON_TEXT) {
+          if (ret == OB_ERR_INVALID_JSON_TEXT_IN_PARAM) {
+            ret = OB_ERR_INVALID_JSON_TEXT;
             LOG_USER_ERROR(OB_ERR_INVALID_JSON_TEXT);
           }
         } else {
           ObJsonNodeType j_type = j_base->json_type();
+          if (j_type == ObJsonNodeType::J_MYSQL_DATE){
+            j_type = ObJsonNodeType::J_DATE;
+          } else if (j_type == ObJsonNodeType::J_MYSQL_DATETIME){
+            j_type = ObJsonNodeType::J_DATETIME;
+          }
           type_idx = static_cast<uint32_t>(j_type);
           if (j_type == ObJsonNodeType::J_OPAQUE) {
             type_idx = opaque_index(j_base->field_type());
@@ -180,42 +185,7 @@ int ObExprJsonType::calc(const T &data, ObObjType type, ObCollationType cs_type,
   }
 
   return ret;
-}
-
-// for old sql engine
-int ObExprJsonType::calc_result1(common::ObObj &result, const common::ObObj &obj,
-                                 common::ObExprCtx &expr_ctx) const
-{
-  INIT_SUCC(ret);
-  ObIAllocator *allocator = expr_ctx.calc_buf_;
-
-  if (OB_ISNULL(allocator)) {
-    ret = OB_NOT_INIT;
-    LOG_WARN("varchar buffer not init", K(ret));
-  } else {
-    uint32_t type_idx = 0;
-    bool is_null = false;
-    if (OB_FAIL(calc(obj, obj.get_type(), obj.get_collation_type(), allocator, type_idx, is_null))) {
-      LOG_WARN("fail to calc json valid result", K(ret), K(obj.get_type()));
-    } else if (is_null) {
-      result.set_null();
-    } else {
-      const char *j_type_str = json_type_string_map[type_idx];
-      uint32_t j_type_str_len = strlen(j_type_str);
-      char *buf = reinterpret_cast<char *>(allocator->alloc(j_type_str_len));
-      if (OB_ISNULL(buf)) {
-        ret = OB_ALLOCATE_MEMORY_FAILED;
-        LOG_WARN("fail to alloc memory for result buf", K(ret), K(j_type_str), K(j_type_str_len));
-      } else {
-        MEMMOVE(buf, j_type_str, j_type_str_len);
-        result.set_collation_type(result_type_.get_collation_type());
-        result.set_string(ObLongTextType, buf, j_type_str_len);
-      }
-    }
-  }
-
-  return ret;
-}                          
+}                      
 
 // for new sql engine
 int ObExprJsonType::eval_json_type(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &res)
@@ -223,16 +193,19 @@ int ObExprJsonType::eval_json_type(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &
   INIT_SUCC(ret);
   ObDatum *datum = NULL;
   ObExpr *arg = expr.args_[0];
-  ObCollationType cs_type = arg->datum_meta_.cs_type_;
 
   if (OB_FAIL(arg->eval(ctx, datum))) {
     LOG_WARN("eval json arg failed", K(ret));
   } else {
     uint32_t type_idx = 0;
     bool is_null = false;
-    common::ObIAllocator &tmp_allocator = ctx.get_reset_tmp_alloc();
-    if (OB_FAIL(calc(*datum, arg->datum_meta_.type_, cs_type, &tmp_allocator, type_idx, is_null))) {
-      LOG_WARN("fail to calc json type result", K(ret), K(arg->datum_meta_.type_));
+    ObEvalCtx::TempAllocGuard tmp_alloc_g(ctx);
+    uint64_t tenant_id = ObMultiModeExprHelper::get_tenant_id(ctx.exec_ctx_.get_my_session());
+    MultimodeAlloctor tmp_allocator(tmp_alloc_g.get_allocator(), expr.type_, tenant_id, ret);
+    if (OB_FAIL(tmp_allocator.add_baseline_size(datum, arg->obj_meta_.has_lob_header()))) {
+      LOG_WARN("failed to add baseline size.", K(ret));
+    } else if (OB_FAIL(calc(ctx, *datum, arg->datum_meta_, arg->obj_meta_.has_lob_header(), &tmp_allocator, type_idx, is_null))) {
+      LOG_WARN("fail to calc json type result", K(ret), K(arg->datum_meta_));
     } else if (is_null) {
       res.set_null();
     } else {

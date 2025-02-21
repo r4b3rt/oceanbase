@@ -12,22 +12,16 @@
 
 #include "gtest/gtest.h"
 #include "lib/hash/ob_array_index_hash_set.h"
-#include "lib/container/ob_array.h"
 
 using namespace oceanbase;
 using namespace common;
 using namespace hash;
 
-struct Key {
+struct Key
+{
   int64_t value_;
-  bool operator==(const Key& key) const
-  {
-    return value_ == key.value_;
-  }
-  uint32_t hash() const
-  {
-    return (uint32_t)value_;
-  }
+  bool operator==(const Key & key) const { return value_ == key.value_; }
+  uint32_t hash() const { return (uint32_t)value_; }
   TO_STRING_EMPTY();
 };
 
@@ -39,8 +33,9 @@ TEST(TestArrayIndexHashSet, intarray)
 
   array_type array;
   ObArrayIndexHashSet<array_type, int, HASH_MAP_SIZE> map(array);
-  // ASSERT_EQ(2, sizeof(ObArrayIndexHashSet<array_type, int, HASH_MAP_SIZE>::IndexType));
-  for (int i = 0; i < HASH_MAP_SIZE; i++) {
+  //ASSERT_EQ(2, sizeof(ObArrayIndexHashSet<array_type, int, HASH_MAP_SIZE>::IndexType));
+  for (int i = 0; i < HASH_MAP_SIZE; i++)
+  {
     array[i] = i;
     uint64_t idx = 0;
     ASSERT_EQ(OB_ENTRY_NOT_EXIST, map.get_index(array[i], idx));
@@ -64,7 +59,8 @@ TEST(TestArrayIndexHashSet, keyarray)
   typedef ObArray<Key> array_type;
   array_type array;
   ObArrayIndexHashSet<array_type, Key, HASH_MAP_SIZE> map(array);
-  for (int i = 0; i < HASH_MAP_SIZE; i++) {
+  for (int i = 0; i < HASH_MAP_SIZE; i++)
+  {
     Key key;
     key.value_ = i;
     array.push_back(key);
@@ -80,8 +76,8 @@ TEST(TestArrayIndexHashSet, keyarray)
   ASSERT_NE(OB_SUCCESS, map.set_index(HASH_MAP_SIZE));
 }
 
-int main(int argc, char** argv)
+int main(int argc, char **argv)
 {
-  testing::InitGoogleTest(&argc, argv);
+  testing::InitGoogleTest(&argc,argv);
   return RUN_ALL_TESTS();
 }

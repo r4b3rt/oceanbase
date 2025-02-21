@@ -12,30 +12,26 @@
 
 #include <gtest/gtest.h>
 #include "sql/engine/ob_physical_plan.h"
-#include "sql/monitor/ob_phy_operator_stats.h"
 #include "sql/monitor/ob_phy_operator_monitor_info.h"
-#include "sql/plan_cache/ob_plan_cache_util.h"
-#include "lib/allocator/page_arena.h"
 using namespace std;
 using namespace oceanbase::common;
 using namespace oceanbase::sql;
 
-namespace oceanbase {
-namespace sql {
-class TestPhyOperatorStats : public ::testing::Test {
+namespace oceanbase
+{
+namespace sql
+{
+class TestPhyOperatorStats : public ::testing::Test
+{
 public:
-  TestPhyOperatorStats()
-  {}
-  ~TestPhyOperatorStats()
-  {}
-  virtual void SetUp()
-  {}
-  virtual void TearDown()
-  {}
-  static int build_operator_info(int64_t index, ObPhyOperatorMonitorInfo& info);
+  TestPhyOperatorStats() {}
+  ~TestPhyOperatorStats() {}
+  virtual void SetUp() {}
+  virtual void TearDown() {}
+  static int build_operator_info(int64_t index, ObPhyOperatorMonitorInfo &info);
 };
 
-int TestPhyOperatorStats::build_operator_info(int64_t index, ObPhyOperatorMonitorInfo& info)
+int TestPhyOperatorStats::build_operator_info(int64_t index, ObPhyOperatorMonitorInfo &info)
 {
   int ret = OB_SUCCESS;
   info.set_value(INPUT_ROW_COUNT, index + 1);
@@ -61,12 +57,12 @@ TEST_F(TestPhyOperatorStats, test_add)
   int64_t op_count = 3;
   EXPECT_EQ(OB_SUCCESS, stats.init(&alloc, op_count));
   ObPhyOperatorMonitorInfo op_info;
-  for (int64_t i = 0; i < op_count; i++) {
+  for (int64_t i  = 0; i < op_count; i++) {
     op_info.set_operator_id(i);
     EXPECT_EQ(OB_SUCCESS, build_operator_info(i, op_info));
     EXPECT_EQ(OB_SUCCESS, stats.add_op_stat(op_info));
   }
-  for (int64_t i = 0; i < op_count; i++) {
+  for (int64_t i  = 0; i < op_count; i++) {
     op_info.set_operator_id(i);
     EXPECT_EQ(OB_SUCCESS, build_operator_info(i, op_info));
     EXPECT_EQ(OB_SUCCESS, stats.add_op_stat(op_info));
@@ -74,20 +70,20 @@ TEST_F(TestPhyOperatorStats, test_add)
   ObOperatorStat stat;
   ObPhysicalPlan plan;
   plan.stat_.execute_times_ = 2;
-  // int64_t op_id = 0;
+  //int64_t op_id = 0;
   for (int64_t i = 0; i < op_count; i++) {
     EXPECT_EQ(OB_SUCCESS, stats.get_op_stat_accumulation(&plan, i, stat));
-    EXPECT_EQ(stat.input_rows_, (i + 1) * 2);
-    EXPECT_EQ(stat.output_rows_, (i + 2) * 2);
-    EXPECT_EQ(stat.rescan_times_, (i + 3) * 2);
+    EXPECT_EQ(stat.input_rows_,  (i + 1)* 2);
+    EXPECT_EQ(stat.output_rows_,  (i + 2) * 2);
+    EXPECT_EQ(stat.rescan_times_,  (i+3) * 2);
   }
 }
-}  // namespace sql
-}  // namespace oceanbase
-int main(int argc, char* argv[])
+}
+}
+int main(int argc, char *argv[])
 {
   OB_LOGGER.set_log_level("INFO");
   OB_LOGGER.set_file_name("test_phy_operator.log", true);
-  testing::InitGoogleTest(&argc, argv);
+  testing::InitGoogleTest(&argc,argv);
   return RUN_ALL_TESTS();
 }

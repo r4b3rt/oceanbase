@@ -11,23 +11,25 @@
  */
 
 #define USING_LOG_PREFIX SQL_ENG
-#include <math.h>
-#include "share/object/ob_obj_cast.h"
 #include "sql/engine/expr/ob_expr_log.h"
 #include "sql/engine/expr/ob_expr_pow.h"
 #include "sql/session/ob_sql_session_info.h"
-#include "lib/number/ob_number_v2.h"
-#include "sql/engine/expr/ob_expr_ln.h"
 
-namespace oceanbase {
+namespace oceanbase
+{
 using namespace oceanbase::common;
 
-namespace sql {
-ObExprLog::ObExprLog(ObIAllocator& alloc) : ObExprOperator(alloc, T_FUN_SYS_LOG, N_LOG, 2, NOT_ROW_DIMENSION)
-{}
+namespace sql
+{
+ObExprLog::ObExprLog(ObIAllocator &alloc)
+    : ObExprOperator(alloc, T_FUN_SYS_LOG, N_LOG, 2, VALID_FOR_GENERATED_COL, NOT_ROW_DIMENSION)
+{
+}
 
-int ObExprLog::calc_result_type2(
-    ObExprResType& type, ObExprResType& type1, ObExprResType& type2, ObExprTypeCtx& type_ctx) const
+int ObExprLog::calc_result_type2(ObExprResType &type,
+                                 ObExprResType &type1,
+                                 ObExprResType &type2,
+                                 ObExprTypeCtx &type_ctx) const
 {
   int ret = OB_SUCCESS;
   if (lib::is_mysql_mode()) {
@@ -47,59 +49,14 @@ int ObExprLog::calc_result_type2(
   return ret;
 }
 
-int ObExprLog::calc_result2(ObObj& result, const ObObj& obj1, const ObObj& obj2, ObExprCtx& expr_ctx) const
+int calc_log_expr_double(const ObExpr &expr, ObEvalCtx &ctx,
+                                ObDatum &res_datum)
 {
   int ret = OB_SUCCESS;
-
-  if (obj1.is_null() || obj2.is_null()) {
-    result.set_null();
-  } else if (obj1.is_number() && obj2.is_number()) {
-    LOG_DEBUG("ObExprLog, both-ObNumber path start");
-    const number::ObNumber base = obj1.get_number();
-    const number::ObNumber x = obj2.get_number();
-    number::ObNumber result_number;
-    common::ObIAllocator& allocator = *(expr_ctx.calc_buf_);
-    if (OB_FAIL(x.log(base, result_number, allocator))) {
-      LOG_WARN("log failed", K(ret), K(x), K(base), K(result_number));
-    } else {
-      result.set_number(result_number);
-      LOG_DEBUG("ObExprLog, ObNumber path end successfully");
-    }
-  } else if (obj1.is_double() && obj2.is_double()) {
-    // same as oracle behavior: if at least one of the arguments is
-    // binary_double, result type is double
-    double double_base = obj1.get_double();
-    double double_x = obj2.get_double();
-    if (lib::is_mysql_mode() && (double_base <= 0 || double_x <= 0)) {
-      LOG_USER_WARN(OB_EER_INVALID_ARGUMENT_FOR_LOGARITHM);
-      result.set_null();
-    } else {
-      double result_double = std::log(double_x) / std::log(double_base);
-      if (isinf(result_double) || isnan(result_double)) {
-        if (lib::is_mysql_mode()) {
-          LOG_USER_WARN(OB_EER_INVALID_ARGUMENT_FOR_LOGARITHM);
-          result.set_null();
-        } else {
-          ret = OB_OPERATE_OVERFLOW;
-        }
-      } else {
-        result.set_double(result_double);
-      }
-    }
-  } else {
-    ret = OB_ERR_UNEXPECTED;
-    LOG_WARN("get invalid calc type, expected number/double", K(get_type_name(obj1.get_type())),
-                                                         K(get_type_name(obj2.get_type())), K(ret));
-  }
-  return ret;
-}
-
-int calc_log_expr_double(const ObExpr& expr, ObEvalCtx& ctx, ObDatum& res_datum)
-{
-  int ret = OB_SUCCESS;
-  ObDatum* base = NULL;
-  ObDatum* x = NULL;
-  if (OB_FAIL(expr.args_[0]->eval(ctx, base)) || OB_FAIL(expr.args_[1]->eval(ctx, x))) {
+  ObDatum *base = NULL;
+  ObDatum *x = NULL;
+  if (OB_FAIL(expr.args_[0]->eval(ctx, base)) ||
+      OB_FAIL(expr.args_[1]->eval(ctx, x))) {
     LOG_WARN("eval arg failed", K(ret), K(expr));
   } else if (base->is_null() || x->is_null()) {
     res_datum.set_null();
@@ -119,12 +76,14 @@ int calc_log_expr_double(const ObExpr& expr, ObEvalCtx& ctx, ObDatum& res_datum)
   return ret;
 }
 
-int calc_log_expr_number(const ObExpr& expr, ObEvalCtx& ctx, ObDatum& res_datum)
+int calc_log_expr_number(const ObExpr &expr, ObEvalCtx &ctx,
+                                ObDatum &res_datum)
 {
   int ret = OB_SUCCESS;
-  ObDatum* base = NULL;
-  ObDatum* x = NULL;
-  if (OB_FAIL(expr.args_[0]->eval(ctx, base)) || OB_FAIL(expr.args_[1]->eval(ctx, x))) {
+  ObDatum *base = NULL;
+  ObDatum *x = NULL;
+  if (OB_FAIL(expr.args_[0]->eval(ctx, base)) ||
+      OB_FAIL(expr.args_[1]->eval(ctx, x))) {
     LOG_WARN("eval arg failed", K(ret), K(expr));
   } else if (base->is_null() || x->is_null()) {
     res_datum.set_null();
@@ -132,7 +91,8 @@ int calc_log_expr_number(const ObExpr& expr, ObEvalCtx& ctx, ObDatum& res_datum)
     const number::ObNumber base_nmb(base->get_number());
     const number::ObNumber x_nmb(x->get_number());
     number::ObNumber res_nmb;
-    if (OB_FAIL(x_nmb.log(base_nmb, res_nmb, ctx.get_reset_tmp_alloc()))) {
+    ObEvalCtx::TempAllocGuard alloc_guard(ctx);
+    if (OB_FAIL(x_nmb.log(base_nmb, res_nmb, alloc_guard.get_allocator()))) {
       LOG_WARN("calc log failed", K(ret), K(base_nmb), K(x_nmb), K(res_nmb));
     } else {
       res_datum.set_number(res_nmb);
@@ -141,7 +101,8 @@ int calc_log_expr_number(const ObExpr& expr, ObEvalCtx& ctx, ObDatum& res_datum)
   return ret;
 }
 
-int ObExprLog::cg_expr(ObExprCGCtx& expr_cg_ctx, const ObRawExpr& raw_expr, ObExpr& rt_expr) const
+int ObExprLog::cg_expr(ObExprCGCtx &expr_cg_ctx, const ObRawExpr &raw_expr,
+                       ObExpr &rt_expr) const
 {
   int ret = OB_SUCCESS;
   UNUSED(expr_cg_ctx);
@@ -164,5 +125,6 @@ int ObExprLog::cg_expr(ObExprCGCtx& expr_cg_ctx, const ObRawExpr& raw_expr, ObEx
   return ret;
 }
 
-}  // namespace sql
-}  // namespace oceanbase
+} // namespace sql
+} // namespace oceanbase
+

@@ -17,30 +17,53 @@
 #include "sql/engine/expr/ob_expr_regexp_context.h"
 #include "sql/engine/expr/ob_expr_operator.h"
 
-namespace oceanbase {
-namespace sql {
-class ObExprRegexpReplace : public ObStringExprOperator {
+namespace oceanbase
+{
+namespace sql
+{
+class ObExprRegexpReplace : public ObStringExprOperator
+{
 public:
-  explicit ObExprRegexpReplace(common::ObIAllocator& alloc);
+  explicit ObExprRegexpReplace(common::ObIAllocator &alloc);
   virtual ~ObExprRegexpReplace();
-  virtual int calc_result_typeN(
-      ObExprResType& type, ObExprResType* types, int64_t param_num, common::ObExprTypeCtx& type_ctx) const override;
-  virtual int calc_resultN(
-      common::ObObj& result, const common::ObObj* objs, int64_t param_num, common::ObExprCtx& expr_ctx) const override;
-
-  virtual int cg_expr(ObExprCGCtx& op_cg_ctx, const ObRawExpr& raw_expr, ObExpr& rt_expr) const override;
-
-  static int eval_regexp_replace(const ObExpr& expr, ObEvalCtx& ctx, ObDatum& expr_datum);
+  virtual int calc_result_typeN(ObExprResType &type,
+                                ObExprResType *types,
+                                int64_t param_num,
+                                common::ObExprTypeCtx &type_ctx) const;
+  virtual int cg_expr(ObExprCGCtx &op_cg_ctx,
+                      const ObRawExpr &raw_expr,
+                      ObExpr &rt_expr) const override;
+  virtual bool need_rt_ctx() const override { return true; }
+  virtual int is_valid_for_generated_column(const ObRawExpr*expr,
+                                            const common::ObIArray<ObRawExpr *> &exprs,
+                                            bool &is_valid) const override;
+  static int eval_regexp_replace(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &expr_datum);
+  static int eval_hs_regexp_replace(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &expr_datum);
+  static int eval_regexp_replace_vector(const ObExpr &expr, ObEvalCtx &ctx, const ObBitVector &skip,
+                                        const EvalBound &bound);
+  static int eval_hs_regexp_replace_vector(const ObExpr &expr, ObEvalCtx &ctx, const ObBitVector &skip,
+                                           const EvalBound &bound);
 
 private:
-  static int calc(common::ObString& ret_str, const common::ObString& text, const common::ObString& pattern,
-      const common::ObString& replacement_string, int64_t position, int64_t occurrence,
-      const common::ObCollationType cs_type, const common::ObString& match_param, int null_argument_idx,
-      ObExprRegexContext* regexp_ptr, common::ObExprStringBuf& string_buf);
+  template <typename TextVec, typename ResVec>
+  static int vector_regexp_replace_convert(const ObExpr &expr, ObEvalCtx &ctx,
+                                           const ObBitVector &skip, const EvalBound &bound,
+                                           ObString res_replace, bool is_no_pattern_to_replace,
+                                           ObCollationType res_coll_type,
+                                           ObExprStrResAlloc &out_alloc, ObIAllocator &tmp_alloc,
+                                           const int64_t idx);
 
-private:
+  template <typename TextVec, typename ResVec>
+  static int vector_regexp_replace(const ObExpr &expr, ObEvalCtx &ctx, const ObBitVector &skip,
+                                   const EvalBound &bound);
+
+  template <typename TextVec, typename ResVec>
+  static int vector_hs_regexp_replace(const ObExpr &expr, ObEvalCtx &ctx, const ObBitVector &skip,
+                                      const EvalBound &bound);
+  template<typename RegExpCtx>
+  static int regexp_replace(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &expr_datum);
   DISALLOW_COPY_AND_ASSIGN(ObExprRegexpReplace);
 };
-}  // namespace sql
-}  // namespace oceanbase
+}
+}
 #endif /* OCEANBASE_SQL_ENGINE_EXPR_OB_EXPR_REGEXP_SUBSTR_ */

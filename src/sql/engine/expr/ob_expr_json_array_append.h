@@ -8,9 +8,9 @@
  * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PubL v2 for more details.
+ * This file is for define of func json_array_array_append
  */
 
-// This file is for define of func json_array_array_append
 #ifndef OCEANBASE_SQL_OB_EXPR_JSON_ARRAY_APPEND_H_
 #define OCEANBASE_SQL_OB_EXPR_JSON_ARRAY_APPEND_H_
 
@@ -26,9 +26,14 @@ class ObExprJsonArrayAppend : public ObFuncExprOperator
 {
 public:
   explicit ObExprJsonArrayAppend(common::ObIAllocator &alloc);
+  explicit ObExprJsonArrayAppend(common::ObIAllocator &alloc,
+                                ObExprOperatorType type,
+                                const char *name,
+                                int32_t param_num,
+                                ObValidForGeneratedColFlag valid_for_generated_col,
+                                int32_t dimension);
   virtual ~ObExprJsonArrayAppend();
 
-  int calc_resultN(ObObj &result, const ObObj *objs, int64_t param_num, ObExprCtx &expr_ctx) const;
   virtual int calc_result_typeN(ObExprResType& type,
                                 ObExprResType* types,
                                 int64_t param_num, 

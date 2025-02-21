@@ -19,7 +19,7 @@ namespace oceanbase
 {
 namespace share
 {
-// ObSysVarFlag can not modified arbitrarily, all change should be synchronized to sql/session/gen_ob_sys_variables.py flag_value_dict
+// ObSysVarFlag的值不可随意增删改, 有任何增删改要同时同步到sql/session/gen_ob_sys_variables.py的flag_value_dict变量中
 struct ObSysVarFlag
 {
   const static int64_t NONE = 0LL;
@@ -41,7 +41,8 @@ struct ObSysVarFromJson{
   ObSysVarClassType id_;
   common::ObString name_;
   common::ObObjType data_type_;
-  common::ObString value_;
+  common::ObString default_value_; // used for init tenant
+  common::ObString base_value_; // used for session sync
   common::ObString min_val_;
   common::ObString max_val_;
   common::ObString enum_names_;
@@ -56,7 +57,7 @@ struct ObSysVarFromJson{
   common::ObString get_meta_type_func_;
   common::ObString session_special_update_func_;
 
-  ObSysVarFromJson():id_(SYS_VAR_INVALID), name_(""), data_type_(common::ObNullType), value_(""), min_val_(""), max_val_(""), enum_names_(""), info_(""), flags_(ObSysVarFlag::NONE), alias_(""), base_class_(""), on_check_and_convert_func_(), on_update_func_(), to_select_obj_func_(), to_show_str_func_(), get_meta_type_func_(), session_special_update_func_() {}
+  ObSysVarFromJson():id_(SYS_VAR_INVALID), name_(""), data_type_(common::ObNullType), default_value_(""), base_value_(""), min_val_(""), max_val_(""), enum_names_(""), info_(""), flags_(ObSysVarFlag::NONE), alias_(""), base_class_(""), on_check_and_convert_func_(), on_update_func_(), to_select_obj_func_(), to_show_str_func_(), get_meta_type_func_(), session_special_update_func_() {}
 };
 
 class ObSysVariables
@@ -67,6 +68,7 @@ public:
   static common::ObString get_name(int64_t i);
   static common::ObObjType get_type(int64_t i);
   static common::ObString get_value(int64_t i);
+  static common::ObString get_base_str_value(int64_t i);
   static common::ObString get_min(int64_t i);
   static common::ObString get_max(int64_t i);
   static common::ObString get_info(int64_t i);
@@ -76,9 +78,13 @@ public:
   static bool is_mysql_only(int64_t i);
   static common::ObString get_alias(int64_t i);
   static const common::ObObj &get_default_value(int64_t i);
+  static const common::ObObj &get_base_value(int64_t i);
   static int64_t get_amount();
+  static ObCollationType get_default_sysvar_collation();
   static int set_value(const char *name, const char * new_value);
   static int set_value(const common::ObString &name, const common::ObString &new_value);
+  static int set_base_value(const char *name, const char * new_value);
+  static int set_base_value(const common::ObString &name, const common::ObString &new_value);
   static int init_default_values();
 };
 

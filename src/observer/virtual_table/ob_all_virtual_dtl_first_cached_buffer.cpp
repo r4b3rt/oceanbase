@@ -13,28 +13,20 @@
 #define USING_LOG_PREFIX SQL_DTL
 
 #include "observer/virtual_table/ob_all_virtual_dtl_first_cached_buffer.h"
-#include "observer/omt/ob_multi_tenant.h"
-#include "observer/ob_server_struct.h"
-#include "share/rc/ob_context.h"
-#include "lib/allocator/ob_mod_define.h"
-#include "share/rc/ob_tenant_base.h"
 
 using namespace oceanbase::common;
 using namespace oceanbase::sql;
 using namespace oceanbase::sql::dtl;
 using namespace oceanbase::observer;
+using namespace oceanbase::share;
 
-void ObAllVirtualDtlFirstBufferInfo::set_first_buffer_info(uint64_t tenant_id, ObDtlCacheBufferInfo* buffer_info)
-{
-  tenant_id_ = tenant_id;
-  channel_id_ = buffer_info->chid();
-  calced_val_ = buffer_info->chid();
-  buffer_pool_id_ = ObDtlLocalFirstBufferCache::get_hash_value(channel_id_);
-  timeout_ts_ = buffer_info->ts();
-}
 
-ObAllVirtualDtlFirstCachedBufferIterator::ObAllVirtualDtlFirstCachedBufferIterator(ObArenaAllocator* allocator)
-    : cur_tenant_idx_(0), cur_buffer_idx_(0), iter_allocator_(allocator), tenant_ids_(), buffer_infos_()
+ObAllVirtualDtlFirstCachedBufferIterator::ObAllVirtualDtlFirstCachedBufferIterator(ObArenaAllocator *allocator) :
+  cur_tenant_idx_(0),
+  cur_buffer_idx_(0),
+  iter_allocator_(allocator),
+  tenant_ids_(),
+  buffer_infos_()
 {}
 
 ObAllVirtualDtlFirstCachedBufferIterator::~ObAllVirtualDtlFirstCachedBufferIterator()
@@ -63,13 +55,10 @@ int ObAllVirtualDtlFirstCachedBufferIterator::get_tenant_ids()
   int ret = OB_SUCCESS;
   if (OB_UNLIKELY(NULL == GCTX.omt_)) {
     ret = OB_NOT_INIT;
-    SERVER_LOG(WARN, "GCTX.omt_ shouldn't be NULL", K_(GCTX.omt), K(GCTX), K(ret));
-  } else {
-    omt::TenantIdList ids(NULL, ObNewModIds::OB_COMMON_ARRAY);
-    GCTX.omt_->get_tenant_ids(ids);
-    for (int64_t i = 0; OB_SUCC(ret) && i < ids.size(); i++) {
-      ret = tenant_ids_.push_back(ids[i]);
-    }
+    SERVER_LOG(WARN, "GCTX.omt_ shouldn't be NULL",
+        K_(GCTX.omt), K(GCTX), K(ret));
+  } else if (OB_FAIL(GCTX.omt_->get_mtl_tenant_ids(tenant_ids_))) {
+    LOG_WARN("failed to get_mtl_tenant_ids", K(ret));
   }
   return ret;
 }
@@ -84,91 +73,10 @@ int ObAllVirtualDtlFirstCachedBufferIterator::init()
   return ret;
 }
 
-class ObAllVirtualDtlFirstCachedBufferPoolOp {
-public:
-  class ObDtlFirstBufferHashMapOp {
-  public:
-    ObDtlFirstBufferHashMapOp(int64_t tenant_id,
-        ObArray<ObAllVirtualDtlFirstBufferInfo, ObWrapperAllocator>* first_buffer_info)
-        : tenant_id_(tenant_id), first_buffer_infos_(first_buffer_info)
-    {}
-    ~ObDtlFirstBufferHashMapOp()
-    {
-      first_buffer_infos_ = nullptr;
-    }
-    int operator()(ObDtlCacheBufferInfo* cache_info)
-    {
-      int ret = OB_SUCCESS;
-      ObAllVirtualDtlFirstBufferInfo buffer_info;
-      buffer_info.set_first_buffer_info(tenant_id_, cache_info);
-      if (MAX_BUFFER_CNT_PER_TENANT > first_buffer_infos_->count() &&
-          OB_FAIL(first_buffer_infos_->push_back(buffer_info))) {
-        LOG_WARN("failed to push back first buffer info", K(ret));
-      }
-      return ret;
-    }
-
-  private:
-    int64_t tenant_id_;
-    ObArray<ObAllVirtualDtlFirstBufferInfo, ObWrapperAllocator>* first_buffer_infos_;
-  };
-
-public:
-  explicit ObAllVirtualDtlFirstCachedBufferPoolOp(
-      uint64_t tenant_id, ObArray<ObAllVirtualDtlFirstBufferInfo, ObWrapperAllocator>* first_buffer_info)
-      : tenant_id_(tenant_id), first_buffer_infos_(first_buffer_info)
-  {}
-  ~ObAllVirtualDtlFirstCachedBufferPoolOp()
-  {
-    first_buffer_infos_ = nullptr;
-  }
-  int operator()(ObDtlLocalFirstBufferCache* buffer_cache)
-  {
-    int ret = OB_SUCCESS;
-    ObDtlFirstBufferHashTable<uint64_t, ObDtlCacheBufferInfo> &buffer_map = buffer_cache->get_buffer_map();
-    ObDtlFirstBufferHashMapOp op(tenant_id_, first_buffer_infos_);
-    if (OB_FAIL(buffer_map.foreach_refactored(op))) {
-      LOG_WARN("failed to get channel memory manager", K(ret));
-    }
-    LOG_TRACE("trace get first buffer cache", K(tenant_id_), K(first_buffer_infos_->count()));
-    return ret;
-  }
-
-private:
-  // the maxinum of get channels
-  static const int64_t MAX_BUFFER_CNT_PER_TENANT = 1000;
-  uint64_t tenant_id_;
-  ObArray<ObAllVirtualDtlFirstBufferInfo, ObWrapperAllocator>* first_buffer_infos_;
-};
-
-int ObAllVirtualDtlFirstCachedBufferIterator::get_all_first_cached_buffer(int64_t tenant_id, ObTenantDfc* tenant_dfc)
-{
-  int ret = OB_SUCCESS;
-  ObDtlLocalFirstBufferCacheManager* first_buffer_mgr = tenant_dfc->get_new_first_buffer_manager();
-  ObDtlFirstBufferHashTable<ObDtlDfoKey, ObDtlLocalFirstBufferCache>& buffer_hash_table =
-      first_buffer_mgr->get_buffer_hash_table();
-  ObAllVirtualDtlFirstCachedBufferPoolOp op(tenant_id, &buffer_infos_);
-  if (OB_FAIL(buffer_hash_table.foreach_refactored(op))) {
-    LOG_WARN("failed to get channel memory manager", K(ret));
-  }
-  LOG_TRACE("trace get first buffer cache", K(tenant_id), K(buffer_infos_.count()));
-  return ret;
-}
-
 int ObAllVirtualDtlFirstCachedBufferIterator::get_tenant_buffer_infos(uint64_t tenant_id)
 {
-  int ret = OB_SUCCESS;
-  iter_allocator_->reuse();
-  FETCH_ENTITY(TENANT_SPACE, tenant_id)
-  {
-    ObTenantDfc* tenant_dfc = MTL_GET(ObTenantDfc*);
-    if (nullptr == tenant_dfc) {
-      LOG_TRACE("failed to get tenant dfc", K(tenant_id), K(ret));
-    } else if (OB_FAIL(get_all_first_cached_buffer(tenant_id, tenant_dfc))) {
-      LOG_WARN("failed to get all first cached buffer", K(ret));
-    }
-  }
-  return ret;
+  UNUSED(tenant_id);
+  return OB_SUCCESS;
 }
 
 int ObAllVirtualDtlFirstCachedBufferIterator::get_next_tenant_buffer_infos()
@@ -197,7 +105,7 @@ int ObAllVirtualDtlFirstCachedBufferIterator::get_next_tenant_buffer_infos()
   return ret;
 }
 
-int ObAllVirtualDtlFirstCachedBufferIterator::get_next_buffer_info(ObAllVirtualDtlFirstBufferInfo& buffer_info)
+int ObAllVirtualDtlFirstCachedBufferIterator::get_next_buffer_info(ObAllVirtualDtlFirstBufferInfo &buffer_info)
 {
   int ret = OB_SUCCESS;
   bool get_buffer = false;
@@ -220,8 +128,11 @@ int ObAllVirtualDtlFirstCachedBufferIterator::get_next_buffer_info(ObAllVirtualD
   return ret;
 }
 
-ObAllVirtualDtlFirstCachedBuffer::ObAllVirtualDtlFirstCachedBuffer()
-    : ipstr_(), port_(0), arena_allocator_(ObModIds::OB_SQL_DTL), iter_(&arena_allocator_)
+ObAllVirtualDtlFirstCachedBuffer::ObAllVirtualDtlFirstCachedBuffer() :
+  ipstr_(),
+  port_(0),
+  arena_allocator_(ObModIds::OB_SQL_DTL),
+  iter_(&arena_allocator_)
 {}
 
 ObAllVirtualDtlFirstCachedBuffer::~ObAllVirtualDtlFirstCachedBuffer()
@@ -254,7 +165,7 @@ int ObAllVirtualDtlFirstCachedBuffer::inner_open()
     } else {
       start_to_read_ = true;
       char ipbuf[common::OB_IP_STR_BUFF];
-      common::ObAddr& addr = GCTX.self_addr_;
+      const common::ObAddr &addr = GCTX.self_addr();
       if (!addr.ip_to_string(ipbuf, sizeof(ipbuf))) {
         SERVER_LOG(ERROR, "ip to string failed");
         ret = OB_ERR_UNEXPECTED;
@@ -270,29 +181,18 @@ int ObAllVirtualDtlFirstCachedBuffer::inner_open()
   return ret;
 }
 
-int ObAllVirtualDtlFirstCachedBuffer::inner_get_next_row(ObNewRow*& row)
+int ObAllVirtualDtlFirstCachedBuffer::inner_get_next_row(ObNewRow *&row)
 {
-  int ret = OB_SUCCESS;
-  ObAllVirtualDtlFirstBufferInfo buffer_info;
-  if (OB_FAIL(iter_.get_next_buffer_info(buffer_info))) {
-    if (OB_ITER_END != ret) {
-      LOG_WARN("failed to get next channel", K(ret));
-    } else {
-      arena_allocator_.reuse();
-    }
-  } else if (OB_FAIL(get_row(buffer_info, row))) {
-    LOG_WARN("failed to get row from channel info", K(ret));
-  }
-  return ret;
+  return OB_ITER_END;
 }
 
-int ObAllVirtualDtlFirstCachedBuffer::get_row(ObAllVirtualDtlFirstBufferInfo& buffer_info, ObNewRow*& row)
+int ObAllVirtualDtlFirstCachedBuffer::get_row(ObAllVirtualDtlFirstBufferInfo &buffer_info, ObNewRow *&row)
 {
   int ret = OB_SUCCESS;
-  ObObj* cells = cur_row_.cells_;
+  ObObj *cells = cur_row_.cells_;
   for (int64_t cell_idx = 0; OB_SUCC(ret) && cell_idx < output_column_ids_.count(); ++cell_idx) {
     uint64_t col_id = output_column_ids_.at(cell_idx);
-    switch (col_id) {
+    switch(col_id) {
       case SVR_IP: {
         cells[cell_idx].set_varchar(ipstr_);
         cells[cell_idx].set_collation_type(ObCharset::get_default_collation(ObCharset::get_default_charset()));
@@ -314,7 +214,7 @@ int ObAllVirtualDtlFirstCachedBuffer::get_row(ObAllVirtualDtlFirstBufferInfo& bu
         cells[cell_idx].set_int(buffer_info.calced_val_);
         break;
       }
-      case BUFFER_POOL_ID: {  // OB_APP_MIN_COLUMN_ID + 5
+      case BUFFER_POOL_ID:{// OB_APP_MIN_COLUMN_ID + 5
         cells[cell_idx].set_int(buffer_info.buffer_pool_id_);
         break;
       }

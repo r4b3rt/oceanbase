@@ -14,19 +14,28 @@
 #define OB_RUNNING_MODE_H_
 
 #include "lib/ob_define.h"
-namespace oceanbase {
-namespace lib {
-struct ObRunningModeConfig {
+namespace oceanbase
+{
+namespace lib
+{
+extern bool mtl_is_mini_mode();
+
+struct ObRunningModeConfig
+{
+  static const int64_t MIN_MEM;
   static const int64_t MINI_MEM_LOWER;
   static const int64_t MINI_MEM_UPPER;
+  static const int64_t MINI_CPU_UPPER;
   bool mini_mode_ = false;
-  static ObRunningModeConfig& instance();
-
+  bool mini_cpu_mode_ = false;
+  int64_t memory_limit_ = 0;
+  bool use_ipv6_ = false;
+  static ObRunningModeConfig &instance();
 private:
   ObRunningModeConfig() = default;
 };
 
-inline ObRunningModeConfig& ObRunningModeConfig::instance()
+inline ObRunningModeConfig &ObRunningModeConfig::instance()
 {
   static ObRunningModeConfig instance;
   return instance;
@@ -34,14 +43,49 @@ inline ObRunningModeConfig& ObRunningModeConfig::instance()
 
 inline bool is_mini_mode()
 {
-  return ObRunningModeConfig::instance().mini_mode_;
+  return ObRunningModeConfig::instance().mini_mode_ || mtl_is_mini_mode();
 }
 
-inline void set_mini_mode(bool mini_mode)
+inline bool is_mini_cpu_mode()
 {
-  ObRunningModeConfig::instance().mini_mode_ = mini_mode;
+  return ObRunningModeConfig::instance().mini_cpu_mode_;
 }
 
-}  // namespace lib
-}  // namespace oceanbase
-#endif  // OB_RUNNING_MODE_H_
+inline double mini_mode_resource_ratio()
+{
+  int64_t memory_limit = ObRunningModeConfig::instance().memory_limit_;
+  int64_t upper = ObRunningModeConfig::instance().MINI_MEM_UPPER;
+  double ratio = 1.0;
+  if (0 == memory_limit || memory_limit >= upper) {
+    ratio = 1.0;
+  } else {
+    ratio = (double)memory_limit / upper;
+  }
+  return ratio;
+}
+
+inline void update_mini_mode(int64_t memory_limit, int64_t cpu_cnt)
+{
+  ObRunningModeConfig::instance().memory_limit_ = memory_limit;
+  ObRunningModeConfig::instance().mini_mode_ = (memory_limit < lib::ObRunningModeConfig::MINI_MEM_UPPER);
+  ObRunningModeConfig::instance().mini_cpu_mode_ = (cpu_cnt <= lib::ObRunningModeConfig::MINI_CPU_UPPER);
+}
+
+inline bool use_ipv6()
+{
+  return ObRunningModeConfig::instance().use_ipv6_;
+}
+
+inline void enable_use_ipv6()
+{
+  ObRunningModeConfig::instance().use_ipv6_ = true;
+}
+
+} //lib
+} //oceanbase
+
+extern "C" {
+  bool use_ipv6_c();
+} /* extern "C" */
+
+#endif // OB_RUNNING_MODE_H_

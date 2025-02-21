@@ -10,14 +10,15 @@
  * See the Mulan PubL v2 for more details.
  */
 
-#include "rpc/obrpc/ob_rpc_processor.h"
 #include "ob_blacklist_resp_processor.h"
 #include "share/ob_server_blacklist.h"
 
-namespace oceanbase {
+namespace oceanbase
+{
 using namespace common;
 
-namespace obrpc {
+namespace obrpc
+{
 class ObServerBlacklist;
 
 int ObBlacklistRespP::process()
@@ -27,8 +28,9 @@ int ObBlacklistRespP::process()
   if (OB_FAIL(share::ObServerBlacklist::get_instance().handle_resp(arg_, src_cluster_id))) {
     RPC_LOG(WARN, "handle_msg failed", K(ret));
   }
+  req_->set_trace_point();
   return ret;
 }
 
-};  // namespace obrpc
-};  // end namespace oceanbase
+}; // end namespace rpc
+}; // end namespace oceanbase

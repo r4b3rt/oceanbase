@@ -10,143 +10,11 @@
  * See the Mulan PubL v2 for more details.
  */
 
+#define USING_LOG_PREFIX COMMON
+
 #include "lib/cpu/ob_cpu_topology.h"
-
-#include <stdio.h>
-#include <string.h>
-#include <pthread.h>
-#include "lib/ob_define.h"
-
-using namespace oceanbase::common;
-
-ObCpuTopology::ObCpuTopology() : core_number_(0), node_number_(0), nodes_(), cores_map_(), init_(false)
-{
-  for (int64_t i = 0; i < MAX_NODE_NUMBER; i++) {
-    nodes_[i].core_number_ = 0;
-  }
-}
-
-int ObCpuTopology::init()
-{
-  int err = OB_SUCCESS;
-  FILE* fp = NULL;
-  if ((fp = popen("lscpu -p", "r")) == NULL) {
-    LIB_LOG(ERROR, "to get cpu topology error");
-  } else {
-    char buf[BUFSIZ];
-    int64_t core_id = 0;
-    int64_t node_id = 0;
-    while (NULL != fgets(buf, BUFSIZ, fp)) {
-      if (buf[0] == '#') {
-        continue;
-      }
-      char* p = strchr(buf, ',');
-      *p = '\0';
-      core_id = atoll(buf);
-      p = strchr(p + 1, ',');
-      char* node_id_str = p + 1;
-      p = strchr(node_id_str, ',');
-      *p = '\0';
-      node_id = atoll(node_id_str);
-      if (node_id + 1 > node_number_) {
-        node_number_ = node_id + 1;
-      }
-      if (core_id + 1 > core_number_) {
-        core_number_ = core_id + 1;
-      }
-      if (core_id >= 0 && core_id < MAX_CORE_NUMBER && node_id >= 0 && node_id < MAX_NODE_NUMBER &&
-          nodes_[node_id].core_number_ >= 0 && nodes_[node_id].core_number_ < MAX_CORE_NUMBER_PER_NODE &&
-          core_number_ < MAX_CORE_NUMBER && node_number_ < MAX_NODE_NUMBER) {
-        nodes_[node_id].cores_[nodes_[node_id].core_number_++] = core_id;
-        cores_map_[core_id] = node_id;
-      } else {
-        LIB_LOG(ERROR, "Too many cores", K_(core_number), K_(node_number));
-      }
-    }
-    pclose(fp);
-    fp = NULL;
-
-    init_ = true;
-
-    for (int64_t i = 0; i < node_number_; i++) {
-      int pos = 0;
-      for (int64_t j = 0; j < nodes_[i].core_number_; j++) {
-        pos += snprintf(buf + pos, BUFSIZ - pos, "%ld,", nodes_[i].cores_[j]);
-      }
-      _LIB_LOG(INFO, "node_id: %ld core_list: %s", i, buf);
-    }
-    if (core_number_ > 0 && core_number_ <= MAX_CORE_NUMBER) {
-      for (int64_t i = 0; i < core_number_; i++) {
-        _LIB_LOG(INFO, "core_id: %ld  ==>  node_id: %ld", i, cores_map_[i]);
-      }
-    }
-  }
-  return err;
-}
-
-int64_t ObCpuTopology::get_core_num()
-{
-  return core_number_;
-}
-
-int64_t ObCpuTopology::get_node_num()
-{
-  return node_number_;
-}
-
-int64_t ObCpuTopology::get_thread_node_id()
-{
-  return get_tl_info().node_id_;
-}
-
-int64_t ObCpuTopology::get_thread_core_id()
-{
-  return get_tl_info().core_id_;
-}
-
-ObCpuTopology::CoreInfo* ObCpuTopology::get_cores_by_node(int64_t node_id)
-{
-  CoreInfo* core_info = NULL;
-  if (node_id < node_number_) {
-    core_info = &nodes_[node_id];
-  }
-  return core_info;
-}
-
-void ObCpuTopology::bind_cpu(uint64_t core_id)
-{
-  ThreadLocalInfo pre_bind_info = get_tl_info();
-  if (core_id < static_cast<uint64_t>(core_number_)) {
-    get_tl_info().node_id_ = cores_map_[core_id];
-    get_tl_info().core_id_ = core_id;
-    get_tl_info().valid_ = 1;
-    cpu_set_t cpuset;
-    CPU_ZERO(&cpuset);
-    CPU_SET(core_id, &cpuset);
-    pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
-  } else {
-    LIB_LOG(ERROR, "bind_cpu get an invalid", K(core_id));
-  }
-  if (pre_bind_info.valid_ == 1) {
-    _LIB_LOG(INFO,
-        "bind_cpu tid=%ld core_id=%ld node_id=%ld, "
-        "replaced bind info core_id=%ld node_id=%ld",
-        syscall(__NR_gettid),
-        core_id,
-        cores_map_[core_id],
-        pre_bind_info.core_id_,
-        pre_bind_info.node_id_);
-  } else {
-    LIB_LOG(INFO, "bind_cpu", K(syscall(__NR_gettid)), K(core_id), K(cores_map_[core_id]));
-  }
-}
-
-ObCpuTopology::ThreadLocalInfo& ObCpuTopology::get_tl_info()
-{
-  // Note: Thread CPU binding information
-  static __thread ThreadLocalInfo tl_info_;
-  return tl_info_;
-}
+#include "lib/oblog/ob_log_module.h"
+#include "lib/container/ob_bit_set.h"
 
 namespace oceanbase {
 namespace common {
@@ -155,5 +23,170 @@ int64_t __attribute__((weak)) get_cpu_count()
 {
   return get_cpu_num();
 }
-}  // namespace common
-}  // namespace oceanbase
+
+static bool cpu_haveOSXSAVE();
+static bool cpu_have_sse42();
+static bool cpu_have_avx();
+static bool cpu_have_avx2();
+static bool cpu_have_avxf();
+static bool cpu_have_avx512bw();
+
+bool CpuFlagSet::have_flag(const CpuFlag flag) const
+{
+  return flags_ & (1 << (int)flag);
+}
+
+CpuFlagSet::CpuFlagSet() : flags_(0)
+{
+  int ret = OB_SUCCESS;
+  uint64_t flags_from_cpu, flags_from_os;
+  init_from_cpu(flags_from_cpu);
+  if (OB_FAIL(init_from_os(flags_from_os))) {
+    COMMON_LOG(WARN, "failed to init cpu flags from os", K(ret));
+    // fork failed or grep failed
+    // use flags from cpu
+    flags_ = flags_from_cpu;
+  } else if (flags_from_cpu != flags_from_os) {
+    COMMON_LOG_RET(ERROR,
+        OB_ERR_SYS,
+        "There is a mismatch between the cpu flags from cpu and those from os, "
+        "ISA extension like avx512bw may be not supported by the virtualization setup", K(flags_from_cpu), K(flags_from_os));
+    flags_ = flags_from_cpu & flags_from_os;
+  } else {
+    flags_ = flags_from_cpu;
+  }
+#define LOG_CPUFLAG(flag) \
+  if (have_flag(CpuFlag::flag)) { \
+    _LOG_INFO("#flag is supported"); \
+  } else { \
+    _LOG_WARN("#flag is not supported"); \
+  }
+  LOG_CPUFLAG(SSE4_2)
+  LOG_CPUFLAG(AVX)
+  LOG_CPUFLAG(AVX2)
+  LOG_CPUFLAG(AVX512BW)
+#undef LOG_CPUFLAG
+}
+
+void CpuFlagSet::init_from_cpu(uint64_t& flags)
+{
+  flags = 0;
+#define CPU_HAVE(flag, FLAG)            \
+  if (cpu_have_##flag()) {              \
+    flags |= (1 << (int)CpuFlag::FLAG); \
+  }
+  CPU_HAVE(sse42, SSE4_2);
+  CPU_HAVE(avx, AVX);
+  CPU_HAVE(avx2, AVX2);
+  CPU_HAVE(avx512bw, AVX512BW);
+#undef CPU_HAVE
+}
+
+int CpuFlagSet::init_from_os(uint64_t& flags)
+{
+  int ret = OB_SUCCESS;
+  flags = 0;
+  const char* const CPU_FLAG_CMDS[(int)CpuFlag::MAX] = {"grep -E ' sse4_2( |$)' /proc/cpuinfo",
+      "grep -E ' avx( |$)' /proc/cpuinfo",
+      "grep -E ' avx2( |$)' /proc/cpuinfo",
+      "grep -E ' avx512bw( |$)' /proc/cpuinfo"};
+  for (int i = 0; i < (int)CpuFlag::MAX; ++i) {
+    int system_ret = system(CPU_FLAG_CMDS[i]);
+    if (system_ret != 0) {
+      if (-1 != system_ret && 1 == WEXITSTATUS(system_ret)) {
+        // not found
+        COMMON_LOG(WARN, "cpu flag is not found", K(CPU_FLAG_CMDS[i]));
+      } else {
+        ret = OB_ERR_SYS;
+        _LOG_WARN("system(\"%s\") returns %d", CPU_FLAG_CMDS[i], system_ret);
+      }
+    } else {
+      flags |= (1 << i);
+    }
+  }
+  return ret;
+}
+
+#if defined(__x86_64__)
+void get_cpuid(int reg[4], int func_id)
+{
+  __asm__("cpuid\n\t"
+           : "=a"(reg[0]), "=b"(reg[1]), "=c"(reg[2]),
+             "=d"(reg[3])
+           : "a"(func_id), "c"(0));
+}
+uint64_t our_xgetbv(uint32_t xcr) noexcept
+{
+  uint32_t eax;
+  uint32_t edx;
+  __asm__ volatile("xgetbv"
+                    : "=a"(eax), "=d"(edx)
+                    : "c"(xcr));
+  return (static_cast<uint64_t>(edx) << 32) | eax;
+}
+#endif
+bool cpu_haveOSXSAVE()
+{
+#if defined(__x86_64__)
+  int regs[4];
+  get_cpuid(regs, 0x1);
+  return (regs[2] >> 27) & 1u;
+#else
+  return false;
+#endif
+}
+bool cpu_have_sse42()
+{
+#if defined(__x86_64__)
+  int regs[4];
+  get_cpuid(regs, 0x1);
+  return regs[2] >> 20 & 1;
+#else
+  return false;
+#endif
+}
+bool cpu_have_avx()
+{
+#if defined(__x86_64__)
+  int regs[4];
+  get_cpuid(regs, 0x1);
+  return cpu_haveOSXSAVE() && ((our_xgetbv(0) & 6u) == 6u) && (regs[2] >> 28 & 1);
+#else
+  return false;
+#endif
+}
+bool cpu_have_avx2()
+{
+#if defined(__x86_64__)
+  int regs[4];
+  get_cpuid(regs, 0x7);
+  return cpu_have_avx() && (regs[1] >> 5 & 1);
+#else
+  return false;
+#endif
+}
+bool cpu_have_avx512f()
+{
+#if defined(__x86_64__)
+  int regs[4];
+  get_cpuid(regs, 0x7);
+  return regs[1] >> 16 & 1;
+#else
+  return false;
+#endif
+}
+bool cpu_have_avx512bw()
+{
+#if defined(__x86_64__)
+  int regs[4];
+  get_cpuid(regs, 0x7);
+  return cpu_have_avx512f() && (regs[1] >> 30 & 1);
+#else
+  return false;
+#endif
+}
+
+
+} // common
+} // oceanbase
+

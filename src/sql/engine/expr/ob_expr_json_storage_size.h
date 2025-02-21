@@ -8,13 +8,14 @@
  * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PubL v2 for more details.
+ * This file contains implementation for json_storage_size.
  */
 
-// This file contains implementation for json_storage_size.
 #ifndef OCEANBASE_SQL_OB_EXPR_JSON_STORAGE_SIZE_H_
 #define OCEANBASE_SQL_OB_EXPR_JSON_STORAGE_SIZE_H_
 
 #include "sql/engine/expr/ob_expr_operator.h"
+#include "sql/engine/expr/ob_expr_multi_mode_func_helper.h"
 
 using namespace oceanbase::common;
 
@@ -31,10 +32,9 @@ public:
                                 ObExprResType &type1,
                                 common::ObExprTypeCtx &type_ctx)
                                 const override;
-  virtual int calc_result1(common::ObObj &result, const common::ObObj &obj,
-                           common::ObExprCtx &expr_ctx) const;
-  template <typename T>
-  static int calc(const T &data, ObObjType type, ObCollationType cs_type, ObIAllocator *allocator, T &res);                             
+
+  static int calc(ObEvalCtx &ctx, const ObDatum &data, ObDatumMeta meta, bool has_lob_header,
+                  MultimodeAlloctor *allocator, ObDatum &res);
   static int eval_json_storage_size(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &res);
   virtual int cg_expr(ObExprCGCtx &expr_cg_ctx, const ObRawExpr &raw_expr,
                       ObExpr &rt_expr) const override;

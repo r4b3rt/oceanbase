@@ -13,67 +13,66 @@
 #ifndef OCEANBASE_SQL_ENGINE_CMD_OB_KILL_EXECUTOR_H__
 #define OCEANBASE_SQL_ENGINE_CMD_OB_KILL_EXECUTOR_H__
 #include "share/ob_srv_rpc_proxy.h"
-namespace oceanbase {
-namespace observer {
-class ObGlobalContext;
-}
-namespace common {
+namespace oceanbase
+{
+namespace common
+{
 class ObSqlString;
 class ObAddr;
-}  // namespace common
-namespace sql {
+}
+namespace sql
+{
 class ObExecContext;
 class ObKillStmt;
 class ObSQLSessionInfo;
 class ObSQLSessionMgr;
 class ObKillSessionArg;
 
-class ObKillSession {
+class ObKillSession
+{
 public:
-  ObKillSession()
-  {}
-  virtual ~ObKillSession()
-  {}
-
+  ObKillSession() {}
+  virtual ~ObKillSession() {}
 protected:
-  int kill_session(const ObKillSessionArg& arg, ObSQLSessionMgr& sess_mgr);
-
+  int kill_session(const ObKillSessionArg &arg, ObSQLSessionMgr &sess_mgr);
 private:
-  int get_session(ObSQLSessionMgr& ses_mgr, uint32_t sessid, ObSQLSessionInfo*& sess_info);
   DISALLOW_COPY_AND_ASSIGN(ObKillSession);
 };
 
-class ObKillExecutor : public ObKillSession {
+class ObKillExecutor : public ObKillSession
+{
 public:
-  ObKillExecutor()
-  {}
-  virtual ~ObKillExecutor()
-  {}
-  int execute(ObExecContext& ctx, ObKillStmt& stmt);
-
+  ObKillExecutor() {}
+  virtual ~ObKillExecutor() {}
+  int execute(ObExecContext &ctx, ObKillStmt &stmt);
 private:
-  int get_remote_session_location(const ObKillSessionArg& arg, ObExecContext& ctx, common::ObAddr& addr);
-  int generate_read_sql(uint32_t sess_id, common::ObSqlString& sql);
-  int kill_remote_session(ObExecContext& ctx, const common::ObAddr& addr, const ObKillSessionArg& arg);
+  int kill_client_session(const ObKillSessionArg &arg, ObSQLSessionMgr &sess_mgr,
+                          ObExecContext &ctx);
+  int get_client_session_create_time_and_auth(const ObKillSessionArg &arg, ObExecContext &ctx,
+                          common::ObAddr &cs_addr, int64_t &create_time);
+  int get_remote_session_location(const ObKillSessionArg &arg, ObExecContext &ctx, common::ObAddr &addr, bool is_client_session = false);
+  int generate_read_sql(uint32_t sess_id, common::ObSqlString &sql);
+  int generate_read_sql_from_session_info(uint32_t sess_id, common::ObSqlString &sql);
+  int kill_remote_session(ObExecContext &ctx, const common::ObAddr &addr, const ObKillSessionArg &arg);
+  int kill_query_cs_id(const ObKillSessionArg &arg, ObSQLSessionMgr &sess_mgr,
+                        ObExecContext &ctx);
 
   DISALLOW_COPY_AND_ASSIGN(ObKillExecutor);
 };
 
-class ObRpcKillSessionP : public obrpc::ObRpcProcessor<obrpc::ObSrvRpcProxy::ObRpc<obrpc::OB_KILL_SESSION> >,
-                          public ObKillSession {
+class ObRpcKillSessionP : public obrpc::ObRpcProcessor<
+     obrpc::ObSrvRpcProxy::ObRpc<obrpc::OB_KILL_SESSION> >, public ObKillSession
+{
 public:
-  explicit ObRpcKillSessionP(const observer::ObGlobalContext& gctx) : gctx_(gctx)
+  explicit ObRpcKillSessionP(const observer::ObGlobalContext &gctx) : gctx_(gctx)
   {}
-  ~ObRpcKillSessionP()
-  {}
-
+  ~ObRpcKillSessionP() {}
 protected:
   int process();
-
 private:
-  const observer::ObGlobalContext& gctx_;
+  const observer::ObGlobalContext &gctx_;
 };
-}  // namespace sql
-}  // namespace oceanbase
+}
+}
 #endif /* OCEANBASE_SQL_ENGINE_CMD_OB_KILL_EXECUTOR_H__ */
 //// end of header file

@@ -11,67 +11,69 @@
  */
 
 #define USING_LOG_PREFIX SQL
-#include "sql/session/ob_sql_session_mgr.h"
 
-#include "lib/string/ob_sql_string.h"
-#include "lib/stat/ob_session_stat.h"
-#include "lib/mysqlclient/ob_mysql_proxy.h"
-#include "share/inner_table/ob_inner_table_schema_constants.h"
-#include "io/easy_io.h"
-#include "rpc/ob_rpc_define.h"
-#include "sql/ob_sql_trans_control.h"
-#include "observer/mysql/obsm_handler.h"
-#include "observer/mysql/obsm_struct.h"
-#include "observer/ob_server_struct.h"
-#include "sql/session/ob_user_resource_mgr.h"
+#ifdef OB_BUILD_AUDIT_SECURITY
+#include "ob_sql_session_mgr.h"
+#include "sql/monitor/ob_security_audit_utils.h"
+#include "sql/audit/ob_audit_log_utils.h"
+#endif
+#include "sql/monitor/flt/ob_flt_control_info_mgr.h"
+#include "storage/concurrency_control/ob_multi_version_garbage_collector.h"
+#include "lib/ash/ob_active_session_guard.h"
+#include "sql/engine/dml/ob_trigger_handler.h"
 
 using namespace oceanbase::common;
 using namespace oceanbase::sql;
 using namespace oceanbase::share;
 using namespace oceanbase::observer;
 
-ObSQLSessionMgr::SessionPool::SessionPool() : session_pool_()
+ObTenantSQLSessionMgr::SessionPool::SessionPool()
+  : session_pool_()
 {
-  MEMSET(session_array, 0, POOL_CAPACIPY * sizeof(ObSQLSessionInfo*));
+  MEMSET(session_array_, 0, POOL_CAPACIPY * sizeof(ObSQLSessionInfo *));
 }
 
-int ObSQLSessionMgr::SessionPool::init()
+int ObTenantSQLSessionMgr::SessionPool::init(const int64_t capacity)
 {
   int ret = OB_SUCCESS;
-  char* session_buf = reinterpret_cast<char*>(session_array);
-  OZ(session_pool_.init(POOL_CAPACIPY, session_buf));
+  int64_t real_cap = capacity;
+  if (real_cap > POOL_CAPACIPY) {
+    real_cap = POOL_CAPACIPY;
+  }
+  char *session_buf = reinterpret_cast<char *>(session_array_);
+  OZ (session_pool_.init(real_cap, session_buf));
   return ret;
 }
 
-int ObSQLSessionMgr::SessionPool::pop_session(uint64_t tenant_id, ObSQLSessionInfo*& session)
+int ObTenantSQLSessionMgr::SessionPool::pop_session(ObSQLSessionInfo *&session)
 {
   int ret = OB_SUCCESS;
   session = NULL;
   if (OB_FAIL(session_pool_.pop(session))) {
     if (ret != OB_ENTRY_NOT_EXIST) {
-      LOG_WARN(
-          "failed to pop session", K(ret), K(tenant_id), K(session_pool_.get_total()), K(session_pool_.get_free()));
+      LOG_WARN("failed to pop session", K(ret),
+               K(session_pool_.get_total()), K(session_pool_.get_free()));
     } else {
       ret = OB_SUCCESS;
       LOG_DEBUG("session pool is empty",
-               K(tenant_id), K(session_pool_.get_total()), K(session_pool_.get_free()), K(lbt()));
+                K(session_pool_.get_total()), K(session_pool_.get_free()));
     }
   }
   return ret;
 }
 
-int ObSQLSessionMgr::SessionPool::push_session(uint64_t tenant_id, ObSQLSessionInfo*& session)
+int ObTenantSQLSessionMgr::SessionPool::push_session(ObSQLSessionInfo *&session)
 {
   int ret = OB_SUCCESS;
   if (OB_NOT_NULL(session)) {
     if (OB_FAIL(session_pool_.push(session))) {
       if (ret != OB_SIZE_OVERFLOW) {
-        LOG_WARN(
-            "failed to push session", K(ret), K(tenant_id), K(session_pool_.get_total()), K(session_pool_.get_free()));
+        LOG_WARN("failed to push session", K(ret),
+                 K(session_pool_.get_total()), K(session_pool_.get_free()));
       } else {
         ret = OB_SUCCESS;
-        LOG_INFO(
-            "session pool is full", K(tenant_id), K(session_pool_.get_total()), K(session_pool_.get_free()), K(lbt()));
+        LOG_DEBUG("session pool is full",
+                  K(session_pool_.get_total()), K(session_pool_.get_free()));
       }
     } else {
       session = NULL;
@@ -80,162 +82,237 @@ int ObSQLSessionMgr::SessionPool::push_session(uint64_t tenant_id, ObSQLSessionI
   return ret;
 }
 
-int64_t ObSQLSessionMgr::SessionPool::count() const
+int64_t ObTenantSQLSessionMgr::SessionPool::count() const
 {
   return session_pool_.get_total();
 }
 
-int ObSQLSessionMgr::SessionPoolMap::get_session_pool(uint64_t tenant_id, SessionPool*& session_pool)
+ObTenantSQLSessionMgr::ObTenantSQLSessionMgr(const int64_t tenant_id)
+  : tenant_id_(tenant_id), count_(0),
+    session_allocator_(lib::ObMemAttr(tenant_id, "SQLSessionInfo"), MTL_CPU_COUNT(), 4)
+{}
+
+ObTenantSQLSessionMgr::~ObTenantSQLSessionMgr()
+{}
+
+int ObTenantSQLSessionMgr::init()
 {
   int ret = OB_SUCCESS;
-  uint64_t block_id = get_block_id(tenant_id);
-  uint64_t slot_id = get_slot_id(tenant_id);
-  SessionPoolBlock* pool_block = NULL;
-  if (block_id < pool_blocks_.count()) {
-    OX(pool_block = pool_blocks_.at(block_id));
-  } else {
-    OZ(create_pool_block(block_id, pool_block));
-  }
-  OV(OB_NOT_NULL(pool_block), OB_ERR_UNEXPECTED, tenant_id, block_id, slot_id);
-  OX(session_pool = ATOMIC_LOAD(&((*pool_block)[slot_id])));
-  if (OB_ISNULL(session_pool)) {
-    OZ(create_session_pool(*pool_block, slot_id, session_pool));
+  if (OB_FAIL(session_pool_.init(SessionPool::POOL_CAPACIPY))) {
+    LOG_WARN("fail to init session pool", K(tenant_id_), K(ret));
   }
   return ret;
 }
 
-int ObSQLSessionMgr::SessionPoolMap::create_pool_block(uint64_t block_id, SessionPoolBlock*& pool_block)
+void ObTenantSQLSessionMgr::destroy()
 {
-  int ret = OB_SUCCESS;
-  void* buf = NULL;
-  ObLockGuard<ObSpinLock> lock_guard(lock_);
-  while (OB_SUCC(ret) && block_id >= pool_blocks_.count()) {
-    OV(OB_NOT_NULL(buf = alloc_.alloc(sizeof(SessionPoolBlock))), OB_ALLOCATE_MEMORY_FAILED, block_id);
-    OX(MEMSET(buf, 0, sizeof(SessionPoolBlock)));
-    OZ(pool_blocks_.push_back(static_cast<SessionPoolBlock*>(buf)), block_id);
-  }
-  OX(pool_block = pool_blocks_.at(block_id));
-  return ret;
 }
 
-int ObSQLSessionMgr::SessionPoolMap::create_session_pool(
-    SessionPoolBlock& pool_block, uint64_t slot_id, SessionPool*& session_pool)
+int ObTenantSQLSessionMgr::mtl_new(ObTenantSQLSessionMgr *&t_session_mgr)
 {
   int ret = OB_SUCCESS;
-  void* buf = NULL;
-  OV(slot_id < SLOT_PER_BLOCK);
-  ObLockGuard<ObSpinLock> lock_guard(lock_);
-  if (OB_ISNULL(session_pool = ATOMIC_LOAD(&(pool_block[slot_id])))) {
-    OV(OB_NOT_NULL(buf = alloc_.alloc(sizeof(SessionPool))), OB_ALLOCATE_MEMORY_FAILED);
-    OV(OB_NOT_NULL(session_pool = new (buf) SessionPool()));
-    OZ(session_pool->init());
-    OX(ATOMIC_STORE(&(pool_block[slot_id]), session_pool));
+  t_session_mgr = OB_NEW(ObTenantSQLSessionMgr, ObMemAttr(MTL_ID(), "TSQLSessionMgr"),
+                         MTL_ID());
+  if (OB_ISNULL(t_session_mgr)) {
+    ret = OB_ALLOCATE_MEMORY_FAILED;
+    LOG_WARN("failed to alloc tenant session manager", K(ret));
   }
   return ret;
 }
 
-uint64_t ObSQLSessionMgr::SessionPoolMap::get_block_id(uint64_t tenant_id) const
+int ObTenantSQLSessionMgr::mtl_init(ObTenantSQLSessionMgr *&t_session_mgr)
 {
-  return tenant_id >> BLOCK_ID_SHIFT;
+  int ret = OB_SUCCESS;
+  if (t_session_mgr != NULL) {
+    if (OB_FAIL(t_session_mgr->init())) {
+      LOG_WARN("failed to init tenant session manager", K(ret));
+    }
+  }
+  return ret;
 }
 
-uint64_t ObSQLSessionMgr::SessionPoolMap::get_slot_id(uint64_t tenant_id) const
+void ObTenantSQLSessionMgr::mtl_wait(ObTenantSQLSessionMgr *&t_session_mgr)
 {
-  return tenant_id & SLOT_ID_MASK;
+  if (t_session_mgr != NULL) {
+    while (t_session_mgr->count() != 0) {
+      LOG_WARN_RET(OB_NEED_RETRY, "tenant session mgr should be empty",
+                   K(t_session_mgr->count()));
+      usleep(1000 * 1000);
+    }
+  }
+  LOG_INFO("success to wait tenant session mgr");
+}
+
+void ObTenantSQLSessionMgr::mtl_destroy(ObTenantSQLSessionMgr *&t_session_mgr)
+{
+  if (nullptr != t_session_mgr) {
+    t_session_mgr->destroy();
+    OB_DELETE(ObTenantSQLSessionMgr, "unused", t_session_mgr);
+    t_session_mgr = nullptr;
+  }
+}
+
+ObSQLSessionInfo *ObTenantSQLSessionMgr::alloc_session()
+{
+  int ret = OB_SUCCESS;
+  ObSQLSessionInfo *session = NULL;
+  OX (session_pool_.pop_session(session));
+  if (OB_ISNULL(session)) {
+    OX (session = op_instance_alloc_args(&session_allocator_,
+                                         ObSQLSessionInfo,
+                                         tenant_id_));
+    if (session != NULL) {
+      OX (ATOMIC_FAA(&count_, 1));
+    }
+  }
+  OV (OB_NOT_NULL(session));
+  OX (session->set_tenant_session_mgr(this));
+  OX (session->set_valid(true));
+  OX (session->set_shadow(true));
+  return session;
+}
+
+void ObTenantSQLSessionMgr::free_session(ObSQLSessionInfo *session)
+{
+  int ret = OB_SUCCESS;
+  SessionPool *session_pool = NULL;
+  // add tracepoint for control session pool.
+  int64_t code = 0;
+  code = OB_E(EventTable::EN_SESS_POOL_MGR_CTRL) OB_SUCCESS;
+  if (ObTenantSQLSessionMgr::is_valid_tenant_id(session->get_login_tenant_id()) &&
+      session->can_release_to_pool() && code == OB_SUCCESS) {
+    if (session->is_use_inner_allocator() && !session->is_tenant_killed()) {
+      session_pool = &session_pool_;
+    }
+  }
+  if (OB_NOT_NULL(session_pool)) {
+    OX (session->destroy(true));
+    OX (session->set_acquire_from_pool(true));
+    OX (session_pool->push_session(session));
+  }
+  if (OB_NOT_NULL(session)) {
+    OX (op_free(session));
+    OX (ATOMIC_FAA(&count_, -1));
+    OX (session = NULL);
+  }
+}
+
+void ObTenantSQLSessionMgr::clean_session_pool()
+{
+  int ret = OB_SUCCESS;
+  ObSQLSessionInfo *session = NULL;
+  // 注意，这里并没有从设计上保证session池一定被彻底清空，有极低概率会有少量遗留session：
+  // 1. 在生产系统中，删除租户是非常少见的操作。
+  // 2. 在生产系统中，删除租户前一定会先保证业务层不再访问该租户。
+  // 以上前提下，理论上该session池已经没有任何操作。
+  // 3. 正常停掉某个observer，但即使有少数session遗漏，也会随着进程结束而释放。
+  // 4. unit迁移等情况，可能会有少数session未被释放，但将来unit再迁回后可复用。
+  while (session_pool_.count() > 0) {
+    OX (session_pool_.pop_session(session));
+    if (OB_NOT_NULL(session)) {
+      OX (op_free(session));
+      OX (ATOMIC_FAA(&count_, -1));
+      OX (session = NULL);
+    }
+  }
+}
+
+bool ObTenantSQLSessionMgr::is_valid_tenant_id(uint64_t tenant_id) const
+{
+  return ::is_valid_tenant_id(tenant_id) &&
+    tenant_id != OB_INVALID_ID &&
+    tenant_id != OB_SYS_TENANT_ID;
 }
 
 int ObSQLSessionMgr::ValueAlloc::clean_tenant(uint64_t tenant_id)
 {
   int ret = OB_SUCCESS;
-  SessionPool* session_pool = NULL;
-  ObSQLSessionInfo* session = NULL;
-  if (is_valid_tenant_id(tenant_id)) {
-    OX(session_pool_map_.get_session_pool(tenant_id, session_pool));
-  }
-  if (OB_NOT_NULL(session_pool)) {
-    // Note that there is no design guarantee that the session pool must be completely cleaned.
-    // There is a very low probability of session leak.
-    // 1. In the production system, deleting tenants is a very rare operation.
-    // 2. In the production system, before deleting a tenant, we must ensure that the business
-    //    layer will no longer access the tenant.
-    // Under the above premise, theoretically, the tenant will have no active  session.
-    // 3. When stopping an observer, even if a few sessions are missing, they will be releasedi
-    //    with the end of the process.
-    // 4. In the case of unit migration, a few sessions may not be released, but in the future,
-    //    the unit can be reused after migrating back.
-    while (session_pool->count() > 0) {
-      OX(session_pool->pop_session(tenant_id, session));
-      if (OB_NOT_NULL(session)) {
-        OX(op_reclaim_free(session));
-        OX(session = NULL);
-      }
-    }
+  MTL_SWITCH(tenant_id) {
+    ObTenantSQLSessionMgr *t_session_mgr = MTL(ObTenantSQLSessionMgr*);
+    t_session_mgr->clean_session_pool();
+  } else {
+    LOG_ERROR("switch tenant failed", K(ret), K(tenant_id));
   }
   return ret;
 }
 
-ObSQLSessionInfo* ObSQLSessionMgr::ValueAlloc::alloc_value(uint64_t tenant_id)
+ObSQLSessionInfo *ObSQLSessionMgr::ValueAlloc::alloc_value(uint64_t tenant_id)
 {
   int ret = OB_SUCCESS;
-  SessionPool* session_pool = NULL;
-  ObSQLSessionInfo* session = NULL;
+  ObSQLSessionInfo *session = NULL;
   int64_t alloc_total_count = 0;
   // we use OX instead of OZ in operation of upper session pool, because we need acquire
   // from lower session pool when not success, no matter which errno we get here.
-  if (is_valid_tenant_id(tenant_id)) {
-    OX(session_pool_map_.get_session_pool(tenant_id, session_pool));
-    OX(alloc_total_count = ATOMIC_FAA(&alloc_total_count_, 1));
-  }
-  if (OB_NOT_NULL(session_pool)) {
-    OX(session_pool->pop_session(tenant_id, session));
-  }
-  if (OB_ISNULL(session)) {
-    OX(session = op_reclaim_alloc(ObSQLSessionInfo));
+  MTL_SWITCH(tenant_id) {
+    ObTenantSQLSessionMgr *t_session_mgr = MTL(ObTenantSQLSessionMgr*);
+    if (OB_ISNULL(session = t_session_mgr->alloc_session())) {
+      ret = OB_ALLOCATE_MEMORY_FAILED;
+      LOG_WARN("fail to alloc session", K(ret));
+    }
+    if (OB_SUCC(ret)) {
+      if (OB_FAIL(GCTX.session_mgr_->get_sess_hold_map()
+                  .set_refactored(reinterpret_cast<uint64_t>(session), session))) {
+        LOG_WARN("fail to set session", K(ret), KP(session));
+      }
+    }
+    OX (alloc_total_count = ATOMIC_FAA(&alloc_total_count_, 1));
+    if (alloc_total_count > 0 && alloc_total_count % 10000 == 0) {
+      LOG_INFO("alloc_session_count", K(alloc_total_count));
+    }
   } else {
-    OX(ATOMIC_FAA(&alloc_from_pool_count_, 1));
-  }
-  OV(OB_NOT_NULL(session));
-  OX(session->set_valid(true));
-  OX(session->set_shadow(true));
-  if (alloc_total_count > 0 && alloc_total_count % 10000 == 0) {
-    LOG_INFO("alloc_session_count", K(alloc_total_count), K_(alloc_from_pool_count));
+    LOG_WARN("switch tenant failed", K(ret), K(tenant_id));
   }
   return session;
 }
 
-void ObSQLSessionMgr::ValueAlloc::free_value(ObSQLSessionInfo* session)
+void ObSQLSessionMgr::ValueAlloc::free_value(ObSQLSessionInfo *session)
 {
   if (OB_NOT_NULL(session)) {
     int ret = OB_SUCCESS;
     uint64_t tenant_id = session->get_login_tenant_id();
-    SessionPool* session_pool = NULL;
     int64_t free_total_count = 0;
-    if (is_valid_tenant_id(tenant_id) && session->can_release_to_pool()) {
-      if (session->is_use_inner_allocator() && !session->is_tenant_killed()) {
-        OX(session_pool_map_.get_session_pool(tenant_id, session_pool));
+    // delete from hold map, ingore error
+    int tmp_ret = OB_SUCCESS;
+    uint32_t server_sessid = INVALID_SESSID;
+    if (OB_SUCCESS != (tmp_ret = GCTX.session_mgr_->get_sess_hold_map().erase_refactored(
+                                                    reinterpret_cast<uint64_t>(session)))) {
+      LOG_WARN("fail to erase session", K(session->get_sessid()), K(tmp_ret), KP(session));
+    } else if (session->get_client_sessid() != INVALID_SESSID) {
+      if (OB_SUCCESS != (tmp_ret = GCTX.session_mgr_->get_client_sess_map().get_refactored(
+                                                    session->get_client_sessid(), server_sessid))) {
+        if (tmp_ret == OB_HASH_NOT_EXIST) {
+          // no need to display info, if current server no this client session id.
+          tmp_ret = OB_SUCCESS;
+          LOG_DEBUG("current client session id not find", K(tmp_ret),
+                    K(session->get_client_sessid()));
+        } else {
+          COMMON_LOG(WARN, "get session failed", K(tmp_ret), K(session->get_client_sessid()));
+        }
+      } else if (session->get_sessid() == server_sessid) {
+        ObClientSessMapErase client_sess_map_erase(session->get_sessid());
+        bool is_erased = false;
+        if (OB_SUCCESS != (tmp_ret = GCTX.session_mgr_->get_client_sess_map().erase_if(
+                  session->get_client_sessid(),client_sess_map_erase, is_erased))) {
+          LOG_WARN("fail to erase client session", K(session->get_client_sessid()),
+          K(session->get_sessid()), K(tmp_ret));
+        } else {
+          LOG_DEBUG("success to erase cs id", K(session->get_client_sessid()),
+                    K(session->get_sessid()), K(lbt()));
+        }
+      } else {
+        LOG_DEBUG("no need to erase client session", K(session->get_client_sessid()),
+          K(session->get_sessid()), K(server_sessid), K(tmp_ret),K(lbt()));
       }
-      OX(free_total_count = ATOMIC_FAA(&free_total_count_, 1));
     }
-    if (OB_NOT_NULL(session_pool)) {
-      OX(session->destroy(true));
-      OX(session->set_acquire_from_pool(true));
-      OX(session_pool->push_session(tenant_id, session));
+    ObTenantSQLSessionMgr *t_session_mgr = session->get_tenant_session_mgr();
+    if (t_session_mgr != NULL) {
+      t_session_mgr->free_session(session);
     }
-    if (OB_NOT_NULL(session)) {
-      OX(op_reclaim_free(session));
-      OX(session = NULL);
-    } else {
-      OX(ATOMIC_FAA(&free_to_pool_count_, 1));
-    }
+    OX (free_total_count = ATOMIC_FAA(&free_total_count_, 1));
     if (free_total_count > 0 && free_total_count % 10000 == 0) {
-      LOG_INFO("free_session_count", K(free_total_count), K_(free_to_pool_count));
+      LOG_INFO("free_session_count", K(free_total_count));
     }
   }
-}
-
-bool ObSQLSessionMgr::ValueAlloc::is_valid_tenant_id(uint64_t tenant_id) const
-{
-  return ::is_valid_tenant_id(tenant_id) && tenant_id != OB_INVALID_ID && tenant_id != OB_SYS_TENANT_ID;
 }
 
 int ObSQLSessionMgr::init()
@@ -245,6 +322,18 @@ int ObSQLSessionMgr::init()
     LOG_WARN("fail to init session map", K(ret));
   } else if (OB_FAIL(sessid_sequence_.init(MAX_LOCAL_SEQ))) {
     LOG_WARN("init sessid sequence failed", K(ret));
+  } else if (OB_FAIL(sess_hold_map_.create(BUCKET_COUNT,
+                                           SET_USE_500("SessHoldMapBuck"),
+                                           SET_USE_500("SessHoldMapNode")))) {
+    LOG_WARN("failed to init sess_hold_map", K(ret));
+  } else if (OB_FAIL(client_sess_map_.create(BUCKET_COUNT,
+                                           SET_USE_500("ClientSessBuck"),
+                                           SET_USE_500("ClientSessNode")))) {
+    LOG_WARN("failed to init client_sess_map", K(ret));
+  } else if (OB_FAIL(kill_client_sess_map_.create(BUCKET_COUNT,
+                                           SET_USE_500("KillSessMapBuck"),
+                                           SET_USE_500("KillSessMapNode")))) {
+    LOG_WARN("failed to init client_sess_map", K(ret));
   }
   for (uint32_t i = 1; OB_SUCC(ret) && i <= MAX_LOCAL_SEQ; ++i) {
     if (OB_FAIL(sessid_sequence_.push(reinterpret_cast<void*>(i)))) {
@@ -254,21 +343,29 @@ int ObSQLSessionMgr::init()
   return ret;
 }
 
-uint64_t ObSQLSessionMgr::extract_server_id(uint32_t sessid)
+void ObSQLSessionMgr::destroy()
 {
-  uint64_t server_id = sessid >> LOCAL_SEQ_LEN;
-  return server_id & MAX_SERVER_ID;
+  sessinfo_map_.destroy();
+  sessid_sequence_.destroy();
+  client_sess_map_.destroy();
+  kill_client_sess_map_.destroy();
+  sess_hold_map_.destroy();
 }
 
-int ObSQLSessionMgr::inc_session_ref(const ObSQLSessionInfo* my_session)
+uint64_t ObSQLSessionMgr::extract_server_index(uint32_t sessid)
+{
+  uint64_t server_index = sessid >> LOCAL_SEQ_LEN;
+  return server_index & MAX_SERVER_INDEX;
+}
+
+int ObSQLSessionMgr::inc_session_ref(const ObSQLSessionInfo *my_session)
 {
   int ret = OB_SUCCESS;
   if (OB_NOT_NULL(my_session)) {
-    ObSQLSessionInfo* tmp_session = NULL;
-    uint32_t version = my_session->get_version();
+    ObSQLSessionInfo *tmp_session = NULL;
     uint32_t sessid = my_session->get_sessid();
-    if (OB_FAIL(get_session(version, sessid, tmp_session))) {
-      LOG_WARN("fail to get session", K(version), K(sessid), K(ret));
+    if (OB_FAIL(get_session(sessid, tmp_session))) {
+      LOG_WARN("fail to get session", K(sessid), K(ret));
     }
     UNUSED(tmp_session);
   }
@@ -282,159 +379,222 @@ int ObSQLSessionMgr::inc_session_ref(const ObSQLSessionInfo* my_session)
 // |Mask|          Server Id           |           Local Seq            |
 // +----+------------------------------+--------------------------------+
 //
-// MASK: 1 means session_id is generated by observer, 0 means in_mgr = false.
-// Server Id: generated by root server, and unique in cluster.
-// Local Seq: max session number in an observer.
+//MASK: 1 表示是server自己生成connection id,
+//      0 表示是proxy生成的connection id(已废弃，目前仅用于 in_mgr = false 的场景)；
+//Server index: 集群中server的id由RS分配，集群内唯一，但在server删除后可能会被复用；
+//Local Seq: 一个server可用连接数，目前单台server最多有INT16_MAX个连接;
 //
 int ObSQLSessionMgr::create_sessid(uint32_t &sessid, bool in_mgr)
 {
   int ret = OB_SUCCESS;
   int tmp_ret = OB_SUCCESS;
   sessid = 0;
-  const uint64_t server_id = GCTX.server_id_;
+  const uint64_t server_index = GCTX.get_server_index();
   uint32_t local_seq = 0;
-  static uint32_t abnormal_seq = 0;
-  if (server_id > MAX_SERVER_ID) {
+  static uint32_t abnormal_seq = 0;//用于server_id == 0是的sessid分配
+  if (server_index > MAX_SERVER_INDEX) {
     ret = OB_ERR_UNEXPECTED;
-    LOG_ERROR("server id maybe invalid", K(ret), K(server_id));
+    LOG_ERROR("server index maybe invalid", K(ret), K(server_index));
   } else if (!in_mgr) {
     sessid = (GETTID() | LOCAL_SESSID_TAG);
-    sessid |= static_cast<uint32_t>(server_id << LOCAL_SEQ_LEN);  // set observer
-  } else if (0 == server_id) {
+    sessid |= static_cast<uint32_t>(server_index << LOCAL_SEQ_LEN);  // set observer
+  } else if (0 == server_index) {
     local_seq = (ATOMIC_FAA(&abnormal_seq, 1) & MAX_LOCAL_SEQ);
     uint32_t max_local_seq = MAX_LOCAL_SEQ;
-    uint32_t max_server_id = MAX_SERVER_ID;
-    LOG_WARN("server is initiating", K(server_id), K(local_seq), K(max_local_seq), K(max_server_id));
+    uint32_t max_server_index = MAX_SERVER_INDEX;
+    LOG_WARN("server is initiating", K(server_index), K(local_seq), K(max_local_seq), K(max_server_index));
   } else if (OB_UNLIKELY(OB_SUCCESS != (ret = tmp_ret = get_avaiable_local_seq(local_seq)))) {
     LOG_WARN("fail to get avaiable local_seq", K(local_seq));
-  } else { /*do nothing*/
-  }
+  } else {/*do nothing*/}
 
   if (OB_SUCC(ret) && in_mgr) {
-    sessid = local_seq | SERVER_SESSID_TAG;                       // set observer sessid mark
-    sessid |= static_cast<uint32_t>(server_id << LOCAL_SEQ_LEN);  // set observer
-    // high bit is reserved for server id
-    sessid |= static_cast<uint32_t>(1ULL << (LOCAL_SEQ_LEN + SERVER_ID_LEN));
+    sessid = local_seq | SERVER_SESSID_TAG;// set observer sessid mark
+    sessid |= static_cast<uint32_t>(server_index << LOCAL_SEQ_LEN);  // set observer
+    // high bit is reserved for server index
+    sessid |= static_cast<uint32_t>(1ULL << (LOCAL_SEQ_LEN + SERVER_INDEX_LEN));
   }
   return ret;
 }
 
-// if ret == OB_SUCCESS, sess_info must be not NULL, caller must call revert_session() later.
-// if ret != OB_SUCCESS, sess_info must be NULL.
-int ObSQLSessionMgr::create_session_by_version(
-    uint64_t tenant_id, uint32_t sessid, uint64_t proxy_sessid, ObSQLSessionInfo*& sess_info, uint32_t& out_version)
-{
-  int ret = OB_SUCCESS;
-  int gt_ret = OB_SUCCESS;
-  int rt_ret = OB_SUCCESS;
-  sess_info = NULL;
-  out_version = 0;
-  uint32_t version = 0;
-  bool is_shadow = false;
-  ObSQLSessionInfo* tmp_sess = NULL;
-  do {
-    is_shadow = false;
-    if (OB_FAIL(sessinfo_map_.create(tenant_id, Key(version, sessid, proxy_sessid), tmp_sess))) {
-      if (OB_LIKELY(OB_ENTRY_EXIST == ret)) {
-        if (OB_UNLIKELY(OB_SUCCESS != (gt_ret = get_session(version, sessid, tmp_sess)))) {
-          if (OB_ENTRY_NOT_EXIST == gt_ret) {
-            LOG_DEBUG("session has been freed", K(gt_ret), K(version), K(sessid));
-          } else {
-            LOG_WARN("fail to get session", K(gt_ret), K(version), K(sessid));
-          }
-        } else {
-          is_shadow = tmp_sess->is_shadow();
-          if (OB_UNLIKELY(OB_SUCCESS != (rt_ret = revert_session(tmp_sess)))) {
-            LOG_ERROR("fail to revert session", K(rt_ret));
-          }
-          ++version;
-        }
-      }
-    }
-  } while (OB_UNLIKELY(OB_ENTRY_EXIST == ret && ((OB_SUCCESS == gt_ret && is_shadow) || OB_ENTRY_NOT_EXIST == gt_ret) &&
-                       version <= MAX_VERSION));
-
-  if (OB_SUCC(ret)) {
-    sess_info = tmp_sess;
-    out_version = version;
-  }
-  return ret;
-}
-
-// if ret == OB_SUCCESS, sess_info must be not NULL, caller must call revert_session() later.
-// if ret != OB_SUCCESS, sess_info must be NULL.
-int ObSQLSessionMgr::create_session(ObSMConnection* conn, ObSQLSessionInfo*& sess_info)
+//ret == OB_SUCCESS时,保证sess_info != NULL, 需要在外面进行revert_session
+//ret != OB_SUCCESS时，保证sess_info == NULL, 不需要在外面进行revert_session
+int ObSQLSessionMgr::create_session(ObSMConnection *conn, ObSQLSessionInfo *&sess_info)
 {
   int ret = OB_SUCCESS;
   sess_info = NULL;
+  // In order to be compatible with lower versions,
+  // the client session id of unsupported versions is INVALID_SESSID.
+  // proxy mode, client sess id will be passed by proxy.
+  // direct mode, cs_id same as session id.
+  conn->client_sessid_ = conn->proxy_cap_flags_.is_client_sessid_support() || (conn->proxy_sessid_ == 0)
+    ? (conn->client_sessid_ == INVALID_SESSID ? conn->sessid_ : conn->client_sessid_) : INVALID_SESSID;
   if (OB_ISNULL(conn)) {
     ret = OB_ERR_UNEXPECTED;
     LOG_WARN("conn is NULL", K(ret));
-  } else if (OB_FAIL(create_session(
-                 conn->tenant_id_, conn->sessid_, conn->proxy_sessid_, conn->sess_create_time_, sess_info))) {
+  } else if (OB_FAIL(create_session(conn->tenant_id_,
+                                    conn->sessid_,
+                                    conn->proxy_sessid_,
+                                    conn->sess_create_time_,
+                                    sess_info,
+                                    conn->client_sessid_,
+                                    conn->client_create_time_))) {
     LOG_WARN("create session failed", K(ret));
   } else if (OB_ISNULL(sess_info)) {
     ret = OB_ERR_UNEXPECTED;
-    LOG_WARN("NULL session returned", K(ret));
+    LOG_WARN("sess_info is null", K(ret));
   } else {
-    conn->version_ = sess_info->get_version();
+    sess_info->set_vid(conn->vid_);
+    sess_info->set_vip(conn->vip_buf_);
+    sess_info->set_vport(conn->vport_);
+    sess_info->inc_in_bytes(conn->connect_in_bytes_);
   }
   return ret;
 }
 
-int ObSQLSessionMgr::create_session(const uint64_t tenant_id, const uint32_t sessid, const uint64_t proxy_sessid,
-    const int64_t create_time, ObSQLSessionInfo*& session_info)
+int ObSQLSessionMgr::create_session(const uint64_t tenant_id,
+                                    const uint32_t sessid,
+                                    const uint64_t proxy_sessid,
+                                    const int64_t create_time,
+                                    ObSQLSessionInfo *&session_info,
+                                    const uint32_t client_sessid,
+                                    const int64_t client_create_time)
 {
+  ACTIVE_SESSION_FLAG_SETTER_GUARD(in_connection_mgr);
   int ret = OB_SUCCESS;
   int err = OB_SUCCESS;
   session_info = NULL;
-  uint32_t version = 0;
-  ObSQLSessionInfo* tmp_sess = NULL;
-  if (OB_FAIL(create_session_by_version(tenant_id, sessid, proxy_sessid, tmp_sess, version))) {
-    LOG_WARN("fail to create session by version", K(ret), K(sessid), K(version));
+  ObSQLSessionInfo *tmp_sess = NULL;
+  if (OB_FAIL(sessinfo_map_.create(tenant_id, Key(sessid, proxy_sessid), tmp_sess))) {
+    LOG_WARN("fail to create session", K(ret), K(sessid));
     if (OB_ENTRY_EXIST == ret) {
       ret = OB_SESSION_ENTRY_EXIST;
     }
   } else if (OB_ISNULL(tmp_sess)) {
     ret = OB_ERR_UNEXPECTED;
-    LOG_WARN("fail to alloc session info", K(ret), K(version), K(sessid), K(proxy_sessid));
-  } else if (OB_FAIL(tmp_sess->init(version, sessid, proxy_sessid, NULL, NULL, create_time, tenant_id))) {
-    LOG_WARN("fail to init session", K(ret), K(tmp_sess), K(version), K(sessid), K(proxy_sessid), K(create_time));
-    if (OB_SUCCESS != (err = revert_session(tmp_sess))) {
-      LOG_ERROR("fail to free session", K(err), K(version), K(sessid), K(proxy_sessid));
-    } else if (OB_SUCCESS != (err = sessinfo_map_.del(Key(version, sessid)))) {
-      LOG_ERROR("fail to free session", K(err), K(version), K(sessid), K(proxy_sessid));
+    LOG_WARN("fail to alloc session info", K(ret), K(sessid), K(proxy_sessid));
+  } else if (client_sessid != INVALID_SESSID && OB_FAIL(GCTX.session_mgr_->get_client_sess_map()
+          .set_refactored(client_sessid, sessid))) {
+    if (OB_HASH_EXIST == ret) {
+      ret = OB_SUCCESS;
+      int flag = 1;
+      ObSQLSessionInfo *last_server_session = NULL;
+      uint32_t last_sessid = INVALID_SESSID;
+      if (OB_FAIL(GCTX.session_mgr_->get_client_sess_map()
+            .get_refactored(client_sessid, last_sessid))) {
+        ret = OB_SUCCESS;
+      } else if (OB_FAIL(get_session(last_sessid, last_server_session))) {
+        ret = OB_SUCCESS;
+      } else if (OB_ISNULL(last_server_session)) {
+        ret = OB_ERR_UNEXPECTED;
+        LOG_WARN("fail to alloc session info", K(last_sessid),
+          K(client_sessid), K(ret));
+      } else if (last_server_session->get_session_state() != SESSION_KILLED && proxy_sessid != last_server_session->get_proxy_sessid()) {
+        LOG_ERROR("conclude same client session", K(client_sessid), K(proxy_sessid),
+          K(last_server_session->get_proxy_sessid()));
+      }
+      if (OB_FAIL(GCTX.session_mgr_->get_client_sess_map()
+            .set_refactored(client_sessid, sessid, flag))) {
+        ret = OB_SUCCESS;
+        LOG_WARN("fail to set client session, no gurantee client session info", K(client_sessid));
+      } else {
+      }
+      if (NULL != last_server_session) {
+        revert_session(last_server_session);
+      }
     } else {
-      LOG_DEBUG("free session successfully in create session", K(err), K(version), K(sessid), K(proxy_sessid));
+      // revert session behind.
     }
   } else {
-    tmp_sess->update_last_active_time();
-    session_info = tmp_sess;
+    // create session contains a 'get_session' action implicitly
+    const bool v = GCONF._enable_trace_session_leak;
+    if (OB_UNLIKELY(v)) {
+      tmp_sess->on_get_session();
+    }
+  }
+
+  if (OB_FAIL(ret)) {
+    if (NULL != tmp_sess) {
+      if (FALSE_IT(revert_session(tmp_sess))) {
+      } else if (OB_SUCCESS != (err = sessinfo_map_.del(Key(sessid)))) {
+        LOG_ERROR("fail to free session", K(err), K(sessid), K(client_sessid));
+      } else {
+        LOG_DEBUG("free session successfully in create session", K(err),
+            K(sessid), K(client_sessid));
+      }
+    }
+  } else if (OB_FAIL(tmp_sess->init(sessid, proxy_sessid, NULL, NULL, create_time,
+                      tenant_id, client_create_time))) {
+    LOG_WARN("fail to init session", K(ret), K(tmp_sess),
+        K(sessid), K(proxy_sessid), K(create_time));
+    if (FALSE_IT(revert_session(tmp_sess))) {
+      LOG_ERROR("fail to free session", K(err), K(sessid), K(proxy_sessid));
+    } else if (OB_SUCCESS != (err = sessinfo_map_.del(Key(sessid)))) {
+      LOG_ERROR("fail to free session", K(err), K(sessid), K(proxy_sessid));
+    } else {
+      LOG_DEBUG("free session successfully in create session", K(err),
+          K(sessid), K(proxy_sessid), K(client_create_time));
+    }
+  } else {
+    // set tenant info to session, if has.
+    ObFLTControlInfoManager mgr(tenant_id);
+    if (OB_FAIL(mgr.init())) {
+      LOG_WARN("failed to init full link control info", K(ret));
+      if (FALSE_IT(revert_session(tmp_sess))) {
+        LOG_ERROR("fail to free session", K(err), K(sessid), K(proxy_sessid));
+      } else if (OB_SUCCESS != (err = sessinfo_map_.del(Key(sessid)))) {
+        LOG_ERROR("fail to free session", K(err), K(sessid), K(proxy_sessid));
+      } else {
+        LOG_DEBUG("free session successfully in create session", K(err),
+            K(sessid), K(proxy_sessid));
+      }
+    } else if (mgr.is_valid_tenant_config()) {
+      tmp_sess->set_flt_control_info(mgr.get_control_info());
+    }
+
+    if (OB_FAIL(ret)) {
+      // do nothing
+    } else {
+      tmp_sess->update_last_active_time();
+      session_info = tmp_sess;
+    }
   }
   return ret;
 }
 
-int ObSQLSessionMgr::free_session(const ObFreeSessionCtx& ctx)
+int ObSQLSessionMgr::free_session(const ObFreeSessionCtx &ctx)
 {
+  ACTIVE_SESSION_FLAG_SETTER_GUARD(in_connection_mgr);
   int ret = OB_SUCCESS;
-  uint32_t version = ctx.version_;
   uint32_t sessid = ctx.sessid_;
   uint64_t proxy_sessid = ctx.proxy_sessid_;
   uint64_t tenant_id = ctx.tenant_id_;
   bool has_inc = ctx.has_inc_active_num_;
-  ObSQLSessionInfo* sess_info = NULL;
-  sessinfo_map_.get(Key(version, sessid), sess_info);
+  ObSQLSessionInfo *sess_info = NULL;
+  sessinfo_map_.get(Key(sessid), sess_info);
   if (NULL != sess_info) {
-    if (sess_info->has_got_conn_res()
-        && OB_UNLIKELY(OB_SUCCESS != sess_info->on_user_disconnect())) {
-      LOG_ERROR("user disconnect failed", K(ret), K(sess_info->get_user_id()));
+#ifdef OB_BUILD_AUDIT_SECURITY
+    if (!sess_info->get_is_deserialized()) {
+      ObString empty_comment_text;
+      sess_info->update_alive_time_stat();
+      int64_t cur_timeout_backup = THIS_WORKER.get_timeout_ts();
+      THIS_WORKER.set_timeout_ts(ObTimeUtility::current_time() + OB_MAX_USER_SPECIFIED_TIMEOUT);
+      ObSecurityAuditUtils::handle_security_audit(*sess_info,
+                                                  stmt::T_LOGOFF,
+                                                  ObString::make_string("DISCONNECT"),
+                                                  empty_comment_text,
+                                                  ret);
+      ObAuditLogUtils::hanlde_connect_audit_log(*sess_info, "LOGOFF");
+      THIS_WORKER.set_timeout_ts(cur_timeout_backup);
+    }
+#endif
+    if (OB_UNLIKELY(OB_SUCCESS != sess_info->on_user_disconnect())) {
+      LOG_WARN("user disconnect failed", K(ret), K(sess_info->get_user_id()));
     }
     sessinfo_map_.revert(sess_info);
   }
-  if (OB_FAIL(sessinfo_map_.del(Key(version, sessid)))) {
-    LOG_WARN("fail to remove session from session map", K(ret), K(version), K(sessid), K(proxy_sessid));
+  if (OB_FAIL(sessinfo_map_.del(Key(sessid)))) {
+    LOG_WARN("fail to remove session from session map", K(ret), K(sessid), K(proxy_sessid));
   } else if (tenant_id != 0 && sessid != 0 && has_inc) {
-    ObTenantStatEstGuard guard(tenant_id);
     EVENT_DEC(ACTIVE_SESSIONS);
   }
   return ret;
@@ -443,144 +603,203 @@ int ObSQLSessionMgr::free_session(const ObFreeSessionCtx& ctx)
 void ObSQLSessionMgr::try_check_session()
 {
   int ret = OB_SUCCESS;
-  int64_t sess_count = 0;
   CheckSessionFunctor check_timeout(this);
   if (OB_FAIL(for_each_session(check_timeout))) {
     LOG_WARN("fail to check time out", K(ret));
-  } else if (OB_FAIL(get_session_count(sess_count))) {
+  } else {
+    if (REACH_TIME_INTERVAL(60000000)) { // 60s
+      OZ (check_session_leak());
+    }
+  }
+}
+
+int ObSQLSessionMgr::get_min_active_snapshot_version(share::SCN &snapshot_version)
+{
+  int ret = OB_SUCCESS;
+
+  concurrency_control::GetMinActiveSnapshotVersionFunctor min_active_txn_version_getter;
+
+  if (OB_FAIL(for_each_session(min_active_txn_version_getter))) {
+    LOG_WARN("fail to get min active snapshot version", K(ret));
+  } else {
+    snapshot_version = min_active_txn_version_getter.get_min_active_snapshot_version();
+  }
+
+  return ret;
+}
+
+int ObSQLSessionMgr::check_session_leak()
+{
+  int ret = OB_SUCCESS;
+  int64_t hold_session_count = sess_hold_map_.size();
+  int64_t used_session_count = 0;
+  if (OB_FAIL(get_session_count(used_session_count))) {
     LOG_WARN("fail to get session count", K(ret));
   } else {
-    LOG_DEBUG("get current session count", K(sess_count));
+    static const int32_t DEFAULT_SESSION_LEAK_COUNT_THRESHOLD = 100;
+    int64_t session_leak_count_threshold = - EVENT_CALL(EventTable::EN_SESSION_LEAK_COUNT_THRESHOLD);
+    session_leak_count_threshold = session_leak_count_threshold > 0
+                                  ? session_leak_count_threshold
+                                  : DEFAULT_SESSION_LEAK_COUNT_THRESHOLD;
+    LOG_INFO("get current session count", K(used_session_count), K(hold_session_count),
+                                          K(session_leak_count_threshold));
+    if (hold_session_count - used_session_count >= session_leak_count_threshold) {
+      LOG_ERROR("session leak!!!", "leak_count", hold_session_count - used_session_count,
+                 K(used_session_count), K(hold_session_count));
+      DumpHoldSession dump_session;
+      OZ(for_each_hold_session(dump_session));
+    }
   }
+  return ret;
 }
 
 void ObSQLSessionMgr::runTimerTask()
 {
   try_check_session();
+  traverse_times_++;
+  // 30s clean kill client session map
+  if (traverse_times_ == TRAVERSE_MAX_TIMES) {
+    traverse_times_ = 0;
+    RecordCleanKillClientSession clean_kill_client_session(this);
+    for_each_kill_client_session(clean_kill_client_session);
+    for (int64_t i =0; i< clean_kill_client_session.clean_kill_array_.count(); i++) {
+      bool is_erased = false;
+      CleanKillClientSessionFin clean_kill_client_sessionf(this, clean_kill_client_session.clean_kill_array_.at(i).first,
+      clean_kill_client_session.clean_kill_array_.at(i).second);
+      GCTX.session_mgr_->get_kill_client_sess_map().erase_if(clean_kill_client_session.clean_kill_array_.at(i).first,
+        clean_kill_client_sessionf, is_erased);
+    }
+  }
 }
 
 // just a wrapper
-int ObSQLSessionMgr::kill_query(ObSQLSessionInfo& session)
+int ObSQLSessionMgr::kill_query(ObSQLSessionInfo &session)
 {
-  return kill_query(session, partition_service_);
+  return kill_query(session, ObSQLSessionState::QUERY_KILLED);
 }
 
-int ObSQLSessionMgr::kill_query(ObSQLSessionInfo& session, storage::ObPartitionService* partition_service)
+int ObSQLSessionMgr::set_query_deadlocked(ObSQLSessionInfo &session)
 {
-  int tmp_ret = OB_SUCCESS;
-  // must call kill_query_session() to wakeup worker thread first,
-  // otherwise kill_query() may not work if worker is sleep.
-  if (OB_SUCCESS !=
-      (tmp_ret = ObSqlTransControl::kill_query_session(partition_service, session, ObSQLSessionState::QUERY_KILLED))) {
-    LOG_WARN("fail to kill query or session", "ret", tmp_ret, K(session));
-  }
-  return session.kill_query();
+  return kill_query(session, ObSQLSessionState::QUERY_DEADLOCKED);
 }
 
-// kill active transaction on this session
-int ObSQLSessionMgr::kill_active_trx(ObSQLSessionInfo* session)
-{
-  return ObSqlTransControl::kill_active_trx(partition_service_, session);
-}
-
-int ObSQLSessionMgr::kill_session(ObSQLSessionInfo& session)
+int ObSQLSessionMgr::kill_query(ObSQLSessionInfo &session,
+    const ObSQLSessionState status)
 {
   int ret = OB_SUCCESS;
   int tmp_ret = OB_SUCCESS;
-  // must call kill_query_session() to wakeup worker thread first,
-  // otherwise kill_query() may not work if worker is sleep.
+  //如果start_stmt/end_stmt卡住，此时需要先唤醒sql线程，然后再设置标记，否则kill session不起作用
+  if (OB_SUCCESS != (tmp_ret = ObSqlTransControl::kill_query_session(session, status))) {
+    LOG_WARN("fail to kill query or session", "ret", tmp_ret, K(session));
+  }
+
+  if (ObSQLSessionState::QUERY_KILLED == status) {
+    ret = session.kill_query();
+  } else if (ObSQLSessionState::QUERY_DEADLOCKED == status) {
+    ret = session.set_query_deadlocked();
+  } else {
+    LOG_WARN("unexpected status", K(status));
+    ret = OB_ERR_UNEXPECTED;
+  }
+
+  return ret;
+}
+
+// kill idle timeout transaction on this session
+int ObSQLSessionMgr::kill_idle_timeout_tx(ObSQLSessionInfo *session)
+{
+  return ObSqlTransControl::kill_idle_timeout_tx(session);
+}
+
+// kill deadlock transaction on this session
+int ObSQLSessionMgr::kill_deadlock_tx(ObSQLSessionInfo *session)
+{
+  return ObSqlTransControl::kill_deadlock_tx(session);
+}
+
+int ObSQLSessionMgr::kill_session(ObSQLSessionInfo &session)
+{
+  int ret = OB_SUCCESS;
+  int tmp_ret = OB_SUCCESS;
+  //如果start_stmt/end_stmt卡住，此时需要先唤醒sql线程，然后再设置标记，否则kill session不起作用
   if (OB_SUCCESS != (tmp_ret = ObSqlTransControl::kill_query_session(
-                         partition_service_, session, ObSQLSessionState::SESSION_KILLED))) {
+        session, ObSQLSessionState::SESSION_KILLED))) {
     LOG_WARN("fail to kill query or session", "ret", tmp_ret, K(session));
   }
   session.set_session_state(SESSION_KILLED);
-  // DO NOT change the order of the two guards below, otherwise it may cause deadlock.
+  // NOTE: 下面两个guard的顺序不可更换，否则有机会形成死锁
   ObSQLSessionInfo::LockGuard query_lock_guard(session.get_query_lock());
   ObSQLSessionInfo::LockGuard data_lock_guard(session.get_thread_data_lock());
-  bool has_called_txs_end_trans = false;
+  bool need_disconnect = false;
   session.set_query_start_time(ObTimeUtility::current_time());
-  if (OB_SUCCESS != (tmp_ret = ObSqlTransControl::end_trans(partition_service_, &session, has_called_txs_end_trans))) {
-    LOG_WARN("fail to rollback transaction",
-        K(session.get_sessid()),
-        "proxy_sessid",
-        session.get_proxy_sessid(),
-        K(tmp_ret),
-        "trans_id",
-        session.get_trans_desc().get_trans_id(),
-        "query_str",
-        session.get_current_query_string(),
-        K(has_called_txs_end_trans));
+  if (session.is_in_transaction()) {
+    if (OB_SUCCESS != (tmp_ret = ObSqlTransControl::kill_tx_on_session_killed(&session))) {
+      LOG_WARN("fail to rollback transaction", K(session.get_sessid()),
+               "proxy_sessid", session.get_proxy_sessid(),
+               K(tmp_ret), KPC(session.get_tx_desc()),
+               "query_str", session.get_current_query_string(),
+               K(need_disconnect));
+    }
   }
 
   session.update_last_active_time();
-  easy_connection_t* c = session.get_conn();
-  if (OB_LIKELY(NULL != c)) {
+  session.set_disconnect_state(NORMAL_KILL_SESSION);
+  rpc::ObSqlSockDesc &sock_desc = session.get_sock_desc();
+  if (OB_LIKELY(NULL != sock_desc.sock_desc_)) {
+    SQL_REQ_OP.disconnect_by_sql_sock_desc(sock_desc);
     // this function will trigger on_close(), and then free the session
-    easy_connection_destroy_dispatch(c);
-    session.set_conn(NULL);  // the connection is invalid now
     LOG_INFO("kill session successfully",
-        "proxy",
-        session.get_proxy_addr(),
-        "peer",
-        session.get_peer_addr(),
-        "real_client_ip",
-        session.get_client_ip(),
-        "sessid",
-        session.get_sessid(),
-        "proxy_sessid",
-        session.get_proxy_sessid(),
-        "trans_id",
-        session.get_trans_desc().get_trans_id(),
-        "is_trans_end",
-        session.get_trans_desc().is_trans_end(),
-        "query_str",
-        session.get_current_query_string());
+             "proxy", session.get_proxy_addr(),
+             "peer", session.get_peer_addr(),
+             "real_client_ip", session.get_client_ip(),
+             "sessid", session.get_sessid(),
+             "proxy_sessid", session.get_proxy_sessid(),
+             "query_str", session.get_current_query_string());
   } else {
-    LOG_WARN("get conn from session info is null",
-        K(session.get_sessid()),
-        K(session.get_version()),
-        "proxy_sessid",
-        session.get_proxy_sessid(),
-        K(session.get_magic_num()));
+    LOG_WARN("get conn from session info is null", K(session.get_sessid()),
+        "proxy_sessid", session.get_proxy_sessid(), K(session.get_magic_num()));
   }
+
   return ret;
 }
 
-int ObSQLSessionMgr::disconnect_session(ObSQLSessionInfo& session)
+int ObSQLSessionMgr::disconnect_session(ObSQLSessionInfo &session)
 {
   int ret = OB_SUCCESS;
-  // DO NOT change the order of the two guards below, otherwise it may cause deadlock.
+  // NOTE: 下面两个guard的顺序不可更换，否则有机会形成死锁
   ObSQLSessionInfo::LockGuard query_lock_guard(session.get_query_lock());
   ObSQLSessionInfo::LockGuard data_lock_guard(session.get_thread_data_lock());
-  bool has_called_txs_end_trans = false;
+  bool need_disconnect = false;
+  (void) TriggerHandle::calc_system_trigger_logoff(session);
   session.set_query_start_time(ObTimeUtility::current_time());
-  if (OB_FAIL(ObSqlTransControl::end_trans(partition_service_, &session, has_called_txs_end_trans))) {
-    LOG_WARN("fail to rollback transaction",
-        K(session.get_sessid()),
-        "proxy_sessid",
-        session.get_proxy_sessid(),
-        K(ret),
-        "trans_id",
-        session.get_trans_desc().get_trans_id(),
-        "query_str",
-        session.get_current_query_string(),
-        K(has_called_txs_end_trans));
+  // 调用这个函数之前会在ObSMHandler::on_disconnect中调session.set_session_state(SESSION_KILLED)，
+  if (session.is_in_transaction()) {
+    if (OB_FAIL(ObSqlTransControl::kill_tx_on_session_disconnect(&session))) {
+      LOG_WARN("fail to rollback transaction", K(session.get_sessid()),
+               "proxy_sessid", session.get_proxy_sessid(), K(ret),
+               "query_str", session.get_current_query_string(),
+               K(need_disconnect));
+    }
   }
   session.update_last_active_time();
   return ret;
 }
 
-int ObSQLSessionMgr::kill_tenant(const uint64_t tenant_id)
+int ObSQLSessionMgr::kill_tenant(const uint64_t tenant_id, bool force_kill)
 {
   int ret = OB_SUCCESS;
-  KillTenant kt_func(this, tenant_id);
-  OZ(for_each_session(kt_func));
-  OZ(sessinfo_map_.clean_tenant(tenant_id));
+  KillTenant kt_func(this, tenant_id, force_kill);
+  OZ (for_each_session(kt_func));
+  OX (ret = kt_func.get_ret_code());
+  OZ (sessinfo_map_.clean_tenant(tenant_id));
+  LOG_INFO("kill tenant", K(tenant_id), K(force_kill));
   return ret;
 }
 
 int ObSQLSessionMgr::mark_sessid_used(uint32_t sess_id)
 {
+  //这个接口是为了以前老版本解决proxy sessid复用添加的
+  //现在的版本(从2.0开始)里不会再有switch_sessid的需求，因此这里不用再提供
   UNUSED(sess_id);
   return OB_NOT_SUPPORTED;
 }
@@ -588,16 +807,21 @@ int ObSQLSessionMgr::mark_sessid_used(uint32_t sess_id)
 int ObSQLSessionMgr::mark_sessid_unused(uint32_t sess_id)
 {
   int ret = OB_SUCCESS;
-  uint64_t server_id = extract_server_id(sess_id);
-  if (server_id == 0) {
-    // see create_sessid(), sess_id with server_id 0 is not allocated from sessid_sequence_.
+  uint64_t server_index = extract_server_index(sess_id);
+  if (0 == server_index) {
+    // 参考：create_sessid方法
+    // 由于server_id == 0时, 此时的local_seq，是由ATOMIC_FAA(&abnormal_seq, 1)产生，
+    // 使用ATOMIC_FAA的原因无从考证（原作者的信息描述无任何具体信息），采取保守修改策略
+    // local_seq未曾从sessid_sequence_队列中获取,所以不需要归还到队列，不然会导致队列溢出的bug
+    // bug详情:
   } else if (OB_FAIL(sessid_sequence_.push(reinterpret_cast<void*>(sess_id & MAX_LOCAL_SEQ)))) {
     LOG_WARN("fail to push sessid to sessid_sequence_", K(sess_id), K(ret));
   }
   return ret;
 }
 
-bool ObSQLSessionMgr::CheckSessionFunctor::operator()(sql::ObSQLSessionMgr::Key key, ObSQLSessionInfo* sess_info)
+bool ObSQLSessionMgr::CheckSessionFunctor::operator()(sql::ObSQLSessionMgr::Key key,
+                                                      ObSQLSessionInfo *sess_info)
 {
   int ret = OB_SUCCESS;
   UNUSED(key);
@@ -609,7 +833,9 @@ bool ObSQLSessionMgr::CheckSessionFunctor::operator()(sql::ObSQLSessionMgr::Key 
     ret = OB_INVALID_ARGUMENT;
     LOG_WARN("session info is not valid", K(ret));
   } else {
-    // DO NOT change the order of the two locks below, otherwise it may cause deadlock.
+    int callback_retcode = OB_SUCCESS;
+    transaction::ObITxCallback *commit_cb = NULL;
+    // NOTE: 下面两个guard的顺序不可更换，否则有机会形成死锁
     if (OB_FAIL(sess_info->try_lock_query())) {
       if (OB_UNLIKELY(OB_EAGAIN != ret)) {
         LOG_WARN("fail to try lock query", K(ret));
@@ -630,30 +856,87 @@ bool ObSQLSessionMgr::CheckSessionFunctor::operator()(sql::ObSQLSessionMgr::Key 
         } else if (OB_FAIL(sess_info->is_timeout(is_timeout))) {
           LOG_WARN("fail to check is timeout", K(ret));
         } else if (true == is_timeout) {
-          LOG_INFO("session is timeout, kill this session", K(key.version_), K(key.sessid_));
+          LOG_INFO("session is timeout, kill this session", K(key.sessid_));
           ret = sess_mgr_->kill_session(*sess_info);
+        } else if (sess_info->is_txn_free_route_temp()) {
+          sess_info->check_txn_free_route_alive();
         } else {
+          //借助于session遍历的功能，尝试revert session上缓存的schema guard，
+          //避免长时间持有guard，导致schema mgr的槽位无法释放
           sess_info->get_cached_schema_guard_info().try_revert_schema_guard();
-          // kill transaction which is idle more than configuration 'ob_trx_idle_timeout'
-          if (OB_FAIL(sess_info->is_trx_idle_timeout(is_timeout))) {
+          //定期更新租户级别的配置项，避免频繁获取租户级配置项给性能带来的开销
+          sess_info->refresh_tenant_config();
+          // send client commit result if txn commit timeout
+          if (OB_FAIL(sess_info->is_trx_commit_timeout(commit_cb, callback_retcode))) {
+            LOG_WARN("fail to check transaction commit timeout", K(ret));
+          } else if (commit_cb) {
+            LOG_INFO("transaction commit reach timeout", K(callback_retcode), K(key.sessid_));
+          } else if (OB_FAIL(sess_info->is_trx_idle_timeout(is_timeout))) {
+            // kill transaction which is idle more than configuration 'ob_trx_idle_timeout'
             LOG_WARN("fail to check transaction idle timeout", K(ret));
-          } else if (true == is_timeout) {
-            LOG_INFO("transaction is idle timeout, start to rollback", K(key.version_), K(key.sessid_));
+          } else if (true == is_timeout && !sess_info->associated_xa()) {
+            LOG_INFO("transaction is idle timeout, start to rollback", K(key.sessid_));
             int tmp_ret;
-            if (OB_SUCCESS != (tmp_ret = sess_mgr_->kill_active_trx(sess_info))) {
-              LOG_WARN("fail to kill transaction", K(tmp_ret), K(key.version_), K(key.sessid_));
+            if (OB_SUCCESS != (tmp_ret = sess_mgr_->kill_idle_timeout_tx(sess_info))) {
+              LOG_WARN("fail to kill transaction", K(ret), K(key.sessid_));
             }
           }
         }
         (void)sess_info->unlock_thread_data();
       }
       (void)sess_info->unlock_query();
+      // NOTE: must execute callback after release query_lock
+      if (commit_cb) {
+        commit_cb->callback(callback_retcode);
+      }
+    }
+  }
+  //detect sql hung
+  int64_t tmp_ret = (OB_E(EventTable::EN_SQL_HUNG_DETECT) OB_SUCCESS);
+  int64_t timeout_multiplier = OB_ERROR == tmp_ret ? 2 : std::max(static_cast<int64_t>(1), std::abs(tmp_ret));
+  if (OB_FAIL(ret)) {
+  } else if (OB_SUCCESS == tmp_ret) {
+    //do nothing
+  } else if (obmysql::COM_QUERY == sess_info->get_mysql_cmd() ||
+            obmysql::COM_STMT_EXECUTE == sess_info->get_mysql_cmd() ||
+            obmysql::COM_STMT_PREPARE == sess_info->get_mysql_cmd() ||
+            obmysql::COM_STMT_PREXECUTE == sess_info->get_mysql_cmd()) {
+    int64_t cur_time = common::ObTimeUtility::current_time();
+    int64_t query_timeout = 0;
+    ObSQLSessionInfo::LockGuard lock_guard(sess_info->get_thread_data_lock());
+    if ((sess_info->get_stmt_type() != stmt::T_SELECT &&
+         sess_info->get_stmt_type() != stmt::T_UPDATE &&
+         sess_info->get_stmt_type() != stmt::T_INSERT &&
+         sess_info->get_stmt_type() != stmt::T_DELETE &&
+         sess_info->get_stmt_type() != stmt::T_MERGE &&
+         sess_info->get_stmt_type() != stmt::T_REPLACE &&
+         sess_info->get_stmt_type() != stmt::T_EXPLAIN) ||
+        sess_info->get_ddl_info().is_ddl() ||
+        OB_NOT_NULL(sess_info->get_pl_context()) ||
+        !sess_info->is_user_session() ||
+        sess_info->is_remote_session() ||
+        sess_info->get_current_trace_id().is_invalid()) {
+      //filter out DDL, PL and physical restore tenant statements, because they are not subject to query timeout control.
+    } else if (OB_FAIL(sess_info->get_sys_variable(SYS_VAR_OB_QUERY_TIMEOUT, query_timeout))) {
+      LOG_WARN("failed to get sesion variable", K(ret));
+    } else if (sess_info->get_query_start_time() > 0 &&
+               cur_time - sess_info->get_query_start_time() > timeout_multiplier * query_timeout + 1000000) {
+      LOG_ERROR("detect sql hung!!!", K(sess_info->get_current_trace_id()),
+                                      K(sess_info->get_cur_sql_id()),
+                                      K(sess_info->get_thread_id()),
+                                      K(cur_time - sess_info->get_query_start_time()),
+                                      K(query_timeout), K(timeout_multiplier),
+                                      "session_state", ObString::make_string(sess_info->get_session_state_str()),
+                                      K(sess_info->get_current_query_string()));
+      //dump stack of all threads of observer
+      IGNORE_RETURN faststack();
     }
   }
   return OB_SUCCESS == ret;
 }
 
-bool ObSQLSessionMgr::KillTenant::operator()(sql::ObSQLSessionMgr::Key, ObSQLSessionInfo* sess_info)
+bool ObSQLSessionMgr::KillTenant::operator() (
+    sql::ObSQLSessionMgr::Key, ObSQLSessionInfo *sess_info)
 {
   int ret = OB_SUCCESS;
   if (OB_ISNULL(mgr_)) {
@@ -663,18 +946,30 @@ bool ObSQLSessionMgr::KillTenant::operator()(sql::ObSQLSessionMgr::Key, ObSQLSes
     ret = OB_ERR_UNEXPECTED;
     LOG_WARN("sess info is NULL", K(sess_info));
   } else {
-    if (sess_info->get_priv_tenant_id() == tenant_id_) {
-      ret = mgr_->kill_session(*sess_info);
+    if (sess_info->get_priv_tenant_id() == tenant_id_ ||
+      sess_info->get_effective_tenant_id() == tenant_id_) {
+      bool need_kill = true;
+      if (force_kill_) {
+        ret = mgr_->kill_session(*sess_info);
+      } else if (OB_FAIL(sess_info->can_kill_session_immediately(need_kill))) {
+        LOG_WARN("failed to check can gc immediately");
+      } else if (!need_kill) {
+        ret_ = OB_EAGAIN;
+        LOG_TRACE("unit gc needs to wait", K(ret_));
+      } else if (need_kill) {
+        LOG_INFO("force kill session", K(sess_info->get_sessid()));
+        ret = mgr_->kill_session(*sess_info);
+      }
     }
   }
   return OB_SUCCESS == ret;
 }
 
-int ObSQLSessionMgr::get_avaiable_local_seq(uint32_t& local_seq)
+int ObSQLSessionMgr::get_avaiable_local_seq(uint32_t &local_seq)
 {
   int ret = OB_SUCCESS;
   local_seq = 0;
-  void* ptr = nullptr;
+  void *ptr = nullptr;
   if (OB_FAIL(sessid_sequence_.pop(ptr))) {
     LOG_WARN("fail to find and set first zero bit", K(ret));
   } else {
@@ -695,18 +990,95 @@ int ObSQLSessionMgr::get_avaiable_local_seq(uint32_t& local_seq)
   return ret;
 }
 
-int ObSQLSessionMgr::is_need_clear_sessid(const ObSMConnection* conn, bool& is_need)
+int ObSQLSessionMgr::is_need_clear_sessid(const ObSMConnection *conn, bool &is_need)
 {
   int ret = OB_SUCCESS;
   is_need = false;
   if (OB_ISNULL(conn)) {
     ret = OB_ERR_UNEXPECTED;
     LOG_WARN("unexpected parameter", K(conn));
-  } else if (is_server_sessid(conn->sessid_) && ObSMConnection::INITIAL_SESSID != conn->sessid_ &&
-             0 != extract_server_id(conn->sessid_) && GCTX.server_id_ == extract_server_id(conn->sessid_) &&
-             conn->is_need_clear_sessid_) {
+  } else if (is_server_sessid(conn->sessid_)
+             && ObSMConnection::INITIAL_SESSID != conn->sessid_
+             && 0 != extract_server_index(conn->sessid_)
+             && GCTX.get_server_index() == extract_server_index(conn->sessid_)
+             && conn->is_need_clear_sessid_) {
     is_need = true;
-  } else { /*do nothing*/
+  } else {/*do nothing*/  }
+  return ret;
+}
+
+int ObSQLSessionMgr::DumpHoldSession::operator()(
+               common::hash::HashMapPair<uint64_t, ObSQLSessionInfo *> &entry)
+{
+  int ret = common::OB_SUCCESS;
+  if (OB_ISNULL(entry.second)) {
+    LOG_INFO("session is null", "sess_ptr", entry.first);
+  } else {
+    LOG_INFO("dump session", "sid", entry.second->get_sessid(),
+                             "ref_count", entry.second->get_sess_ref_cnt(),
+                             "state",ObString::make_string(entry.second->get_session_state_str()),
+                             KP(entry.second),
+                             K(entry.first),
+                             "lbt", entry.second->get_sess_bt());
   }
   return ret;
+}
+
+int ObSQLSessionMgr::RecordCleanKillClientSession::operator()(
+               common::hash::HashMapPair<uint32_t, uint64_t> &entry)
+{
+  int ret = common::OB_SUCCESS;
+  uint64_t now = ObTimeUtility::current_time();
+  // Cleared from map after 8h， can be controled by switch.
+  int64_t code = 0;
+  code = OB_E(EventTable::EN_SESS_CLEAN_KILL_MAP_TIME) OB_SUCCESS;
+  if (code < 0) {
+    clean_kill_time_ = -code;
+  } else {
+    clean_kill_time_ = CLEAN_KILL_CLIENT_SESSION_TIME;
+  }
+  if ((now - entry.second) > clean_kill_time_) {
+    clean_kill_array_.push_back(std::make_pair(entry.first, entry.second));
+  }
+  return ret;
+}
+
+bool ObSQLSessionMgr::CleanKillClientSessionFin::operator()(
+               common::hash::HashMapPair<uint32_t, uint64_t> &entry)
+{
+  int ret = common::OB_SUCCESS;
+  // Cleared from map after 8h， can be controled by switch.
+  bool judge = false;
+  if (entry.first == cs_id_ && entry.second == cs_connect_time_) {
+    judge = true;
+  } else {
+    LOG_DEBUG("Not match clean", K(entry.first),K(entry.second),K(cs_id_),K(cs_connect_time_),K(ret));
+  }
+  return judge;
+}
+
+bool ObSQLSessionMgr::ObClientSessMapErase::operator() (
+    common::hash::HashMapPair<uint32_t, uint32_t> &entry)
+{
+  return entry.second == sess_id_;
+}
+
+
+ObSessionGetterGuard::ObSessionGetterGuard(ObSQLSessionMgr &sess_mgr, uint32_t sessid)
+  : mgr_(sess_mgr), session_(NULL)
+{
+  ret_ = mgr_.get_session(sessid, session_);
+  if (OB_SUCCESS != ret_) {
+    LOG_WARN_RET(ret_, "get session fail", K(ret_), K(sessid));
+  } else {
+    NG_TRACE_EXT(session, OB_ID(sid), session_->get_sessid(),
+                 OB_ID(tenant_id), session_->get_priv_tenant_id());
+  }
+}
+
+ObSessionGetterGuard::~ObSessionGetterGuard()
+{
+  if (session_) {
+    mgr_.revert_session(session_);
+  }
 }

@@ -9,9 +9,12 @@
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PubL v2 for more details.
  */
+#include "ob_trace_event.h"
 
-#include "lib/trace/ob_trace_event.h"
+namespace oceanbase
+{
+namespace common
+{
 
-namespace oceanbase {
-namespace common {}  // end namespace common
-}  // end namespace oceanbase
+} // end namespace common
+} // end namespace oceanbase

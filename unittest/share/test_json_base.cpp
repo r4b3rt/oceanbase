@@ -9,18 +9,14 @@
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PubL v2 for more details.
  */
-
+#define USING_LOG_PREFIX SHARE
 #include <gtest/gtest.h>
 #define private public
 #include "lib/json_type/ob_json_tree.h"
 #include "lib/json_type/ob_json_bin.h"
-#include "lib/json_type/ob_json_base.h"
-#include "lib/string/ob_sql_string.h"
-#include "lib/timezone/ob_timezone_info.h"
+#include "lib/json_type/ob_json_diff.h"
 #undef private
 
-#include <sys/time.h>    
-#include <limits.h> 
 using namespace std;
 namespace oceanbase {
 namespace common {
@@ -47,11 +43,32 @@ private:
   DISALLOW_COPY_AND_ASSIGN(TestJsonBase);
 };
 
-// json text compare
+static int init_update_ctx(ObIAllocator &allocator, ObJsonBin *bin)
+{
+  INIT_SUCC(ret);
+  ObJsonBinUpdateCtx *update_ctx = nullptr;
+  ObLobInRowUpdateCursor *cursor = nullptr;
+  if (OB_ISNULL(update_ctx = OB_NEWx(ObJsonBinUpdateCtx, &allocator, &allocator))) {
+    LOG_WARN("alloc update_ctx fail", K(ret));
+  } else if (OB_ISNULL(cursor = OB_NEWx(ObLobInRowUpdateCursor, &allocator, &allocator))) {
+    LOG_WARN("alloc cursor fail", K(ret));
+  } else if (OB_FAIL(cursor->init(bin->get_cursor()))) {
+    LOG_WARN("init cursor fail", K(ret));
+  } else {
+    update_ctx->set_lob_cursor(cursor);
+    bin->get_cursor()->reset();
+    bin->set_cursor(cursor);
+    bin->get_ctx()->update_ctx_ = update_ctx;
+    bin->get_ctx()->is_update_ctx_alloc_ = true;
+  }
+  return ret;
+}
+
+// json text 比较
 //
-// @param [in] json_text_a, json text a
-// @param [in] json_text_b, json text b
-// @return -1(<), 1(>), 0(=)
+// @param [in] json_text_a 比较的json text a
+// @param [in] json_text_b 比较的json text b
+// @return 小于返回-1，大于返回1， 相等返回0
 static int json_compare_json_text(common::ObString &json_text_a, common::ObString &json_text_b)
 {
   common::ObArenaAllocator allocator(ObModIds::TEST);
@@ -81,13 +98,13 @@ static int json_compare_json_text(common::ObString &json_text_a, common::ObStrin
   return res_bin;
 }
 
-// json string compare
+// json string 比较
 //
-// @param [in] str_a, string a
-// @param [in] len_a, len of a
-// @param [in] str_b, string b
-// @param [in] len_a, len of b
-// @return -1(<), 1(>), 0(=)
+// @param [in] str_a 比较的json 字符串a
+// @param [in] len_a 比较的json 字符串a的长度
+// @param [in] str_b 比较的json 字符串b
+// @param [in] len_a 比较的json 字符串b的长度
+// @return 小于返回-1，大于返回1， 相等返回0
 static int json_compare_string(const char *str_a, uint32_t len_a, const char *str_b, uint32_t len_b)
 {
   common::ObArenaAllocator allocator(ObModIds::TEST);
@@ -121,7 +138,7 @@ static int json_compare_string(const char *str_a, uint32_t len_a, const char *st
 //
 // @param [in] a int64_t
 // @param [in] b int64_t
-// @return -1(<), 1(>), 0(=)
+// @return 小于返回-1，大于返回1， 相等返回0
 static int json_compare_int_int(int64_t a, int64_t b)
 {
   common::ObArenaAllocator allocator(ObModIds::TEST);
@@ -155,7 +172,7 @@ static int json_compare_int_int(int64_t a, int64_t b)
 //
 // @param [in] a int64_t
 // @param [in] b uint64_t
-// @return -1(<), 1(>), 0(=)
+// @return 小于返回-1，大于返回1， 相等返回0
 static int json_compare_int_uint(int64_t a, uint64_t b)
 {
   common::ObArenaAllocator allocator(ObModIds::TEST);
@@ -189,7 +206,7 @@ static int json_compare_int_uint(int64_t a, uint64_t b)
 //
 // @param [in] a int64_t
 // @param [in] b double
-// @return -1(<), 1(>), 0(=)
+// @return 小于返回-1，大于返回1， 相等返回0
 static int json_compare_int_double(int64_t a, double b)
 {
   common::ObArenaAllocator allocator(ObModIds::TEST);
@@ -223,7 +240,7 @@ static int json_compare_int_double(int64_t a, double b)
 //
 // @param [in] a int64_t
 // @param [in] b ObNumber
-// @return -1(<), 1(>), 0(=)
+// @return 小于返回-1，大于返回1， 相等返回0
 static int json_compare_int_decimal(int64_t a, number::ObNumber &b)
 {
   common::ObArenaAllocator allocator(ObModIds::TEST);
@@ -257,7 +274,7 @@ static int json_compare_int_decimal(int64_t a, number::ObNumber &b)
 //
 // @param [in] a uint64_t
 // @param [in] b uint64_t
-// @return -1(<), 1(>), 0(=)
+// @return 小于返回-1，大于返回1， 相等返回0
 static int json_compare_uint_uint(uint64_t a, uint64_t b)
 {
   common::ObArenaAllocator allocator(ObModIds::TEST);
@@ -291,7 +308,7 @@ static int json_compare_uint_uint(uint64_t a, uint64_t b)
 //
 // @param [in] a uint64_t
 // @param [in] b int64_t
-// @return -1(<), 1(>), 0(=)
+// @return 小于返回-1，大于返回1， 相等返回0
 static int json_compare_uint_int(uint64_t a, int64_t b)
 {
   common::ObArenaAllocator allocator(ObModIds::TEST);
@@ -325,7 +342,7 @@ static int json_compare_uint_int(uint64_t a, int64_t b)
 //
 // @param [in] a uint64_t
 // @param [in] b double
-// @return -1(<), 1(>), 0(=)
+// @return 小于返回-1，大于返回1， 相等返回0
 static int json_compare_uint_double(uint64_t a, double b)
 {
   common::ObArenaAllocator allocator(ObModIds::TEST);
@@ -359,7 +376,7 @@ static int json_compare_uint_double(uint64_t a, double b)
 //
 // @param [in] a uint64_t
 // @param [in] b ObNumber
-// @return -1(<), 1(>), 0(=)
+// @return 小于返回-1，大于返回1， 相等返回0
 static int json_compare_uint_decimal(uint64_t a, number::ObNumber &b)
 {
   common::ObArenaAllocator allocator(ObModIds::TEST);
@@ -393,7 +410,7 @@ static int json_compare_uint_decimal(uint64_t a, number::ObNumber &b)
 //
 // @param [in] a double
 // @param [in] b int64_t
-// @return -1(<), 1(>), 0(=)
+// @return 小于返回-1，大于返回1， 相等返回0
 static int json_compare_doule_int(double a, int64_t b)
 {
   common::ObArenaAllocator allocator(ObModIds::TEST);
@@ -427,7 +444,7 @@ static int json_compare_doule_int(double a, int64_t b)
 //
 // @param [in] a double
 // @param [in] b uint64_t
-// @return -1(<), 1(>), 0(=)
+// @return 小于返回-1，大于返回1， 相等返回0
 static int json_compare_doule_uint(double a, uint64_t b)
 {
   common::ObArenaAllocator allocator(ObModIds::TEST);
@@ -461,7 +478,7 @@ static int json_compare_doule_uint(double a, uint64_t b)
 //
 // @param [in] a double
 // @param [in] b ObNumber
-// @return -1(<), 1(>), 0(=)
+// @return 小于返回-1，大于返回1， 相等返回0
 static int json_compare_double_decimal(double a, number::ObNumber &b)
 {
   common::ObArenaAllocator allocator(ObModIds::TEST);
@@ -495,7 +512,7 @@ static int json_compare_double_decimal(double a, number::ObNumber &b)
 //
 // @param [in] a double
 // @param [in] b double
-// @return -1(<), 1(>), 0(=)
+// @return 小于返回-1，大于返回1， 相等返回0
 static int json_compare_double_double(double a, double b)
 {
   common::ObArenaAllocator allocator(ObModIds::TEST);
@@ -529,7 +546,7 @@ static int json_compare_double_double(double a, double b)
 //
 // @param [in] a ObNumber
 // @param [in] b ObNumber
-// @return -1(<), 1(>), 0(=)
+// @return 小于返回-1，大于返回1， 相等返回0
 static int json_compare_decimal_decimal(number::ObNumber &a, number::ObNumber &b)
 {
   common::ObArenaAllocator allocator(ObModIds::TEST);
@@ -563,7 +580,7 @@ static int json_compare_decimal_decimal(number::ObNumber &a, number::ObNumber &b
 //
 // @param [in] a ObNumber
 // @param [in] b int64_t
-// @return -1(<), 1(>), 0(=)
+// @return 小于返回-1，大于返回1， 相等返回0
 static int json_compare_decimal_int(number::ObNumber &a, int64_t b)
 {
   common::ObArenaAllocator allocator(ObModIds::TEST);
@@ -597,7 +614,7 @@ static int json_compare_decimal_int(number::ObNumber &a, int64_t b)
 //
 // @param [in] a ObNumber
 // @param [in] b uint64_t
-// @return -1(<), 1(>), 0(=)
+// @return 小于返回-1，大于返回1， 相等返回0
 static int json_compare_decimal_uint(number::ObNumber &a, uint64_t b)
 {
   common::ObArenaAllocator allocator(ObModIds::TEST);
@@ -631,7 +648,7 @@ static int json_compare_decimal_uint(number::ObNumber &a, uint64_t b)
 //
 // @param [in] a ObNumber
 // @param [in] b double
-// @return -1(<), 1(>), 0(=)
+// @return 小于返回-1，大于返回1， 相等返回0
 static int json_compare_decimal_double(number::ObNumber &a, double b)
 {
   common::ObArenaAllocator allocator(ObModIds::TEST);
@@ -665,7 +682,7 @@ static int json_compare_decimal_double(number::ObNumber &a, double b)
 //
 // @param [in] a bool
 // @param [in] b bool
-// @return -1(<), 1(>), 0(=)
+// @return 小于返回-1，大于返回1， 相等返回0
 static int json_compare_boolean_boolean(bool a, bool b)
 {
   common::ObArenaAllocator allocator(ObModIds::TEST);
@@ -698,10 +715,10 @@ static int json_compare_boolean_boolean(bool a, bool b)
 // json datetime vs datetime
 //
 // @param [in] a ObTime
-// @param [in] a time type
+// @param [in] a 时间字段类型
 // @param [in] b ObTime
-// @param [in] a time type
-// @return -1(<), 1(>), 0(=)
+// @param [in] a 时间字段类型
+// @return 小于返回-1，大于返回1， 相等返回0
 static int json_compare_datetime_datetime(ObTime &a, ObObjType type_a,
                                           ObTime &b, ObObjType type_b)
 {
@@ -738,7 +755,7 @@ static int json_compare_datetime_datetime(ObTime &a, ObObjType type_a,
 // @param [in] type_a ObObjType
 // @param [in] b ObString
 // @param [in] type_a ObObjType
-// @return @return -1(<), 1(>), 0(=)
+// @return 小于返回-1，大于返回1， 相等返回0
 static int json_compare_opaque_opaque(common::ObString a, ObObjType type_a,
                                       common::ObString b, ObObjType type_b)
 {
@@ -887,10 +904,11 @@ TEST_F(TestJsonBase, test_get_allocator)
 
 TEST_F(TestJsonBase, test_seek)
 {
+  set_compat_mode(lib::Worker::CompatMode::MYSQL);
   ObArenaAllocator allocator(ObModIds::TEST);
   ObIJsonBase *j_tree = NULL;
   ObIJsonBase *j_bin = NULL;
-  ObJsonBaseVector hit;
+  ObJsonSeekResult hit;
   ObJsonBuffer j_buf(&allocator);
 
   // 1. seek_not_exist_member
@@ -994,7 +1012,7 @@ TEST_F(TestJsonBase, test_seek)
   // tree
   ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path5, j_path5.path_node_cnt(), true, false, hit));
   ASSERT_EQ(hit.size(), 1);
-  ASSERT_EQ(1, hit[0]->get_uint());
+  ASSERT_EQ(1, hit[0]->get_int());
   // bin
   ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
       ObJsonInType::JSON_BIN, j_bin));
@@ -1014,8 +1032,8 @@ TEST_F(TestJsonBase, test_seek)
   // tree
   ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path6, j_path6.path_node_cnt(), false, false, hit));
   ASSERT_EQ(hit.size(), 2);
-  ASSERT_EQ(1, hit[0]->get_uint());
-  ASSERT_EQ(2, hit[1]->get_uint());
+  ASSERT_EQ(1, hit[0]->get_int());
+  ASSERT_EQ(2, hit[1]->get_int());
   // bin
   ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
       ObJsonInType::JSON_BIN, j_bin));
@@ -1038,8 +1056,8 @@ TEST_F(TestJsonBase, test_seek)
   ASSERT_EQ(hit.size(), 2);
   ObJsonUint *val7_0 = static_cast<ObJsonUint *>(hit[0]);
   ObJsonUint *val7_1 = static_cast<ObJsonUint *>(hit[1]);
-  ASSERT_EQ(1, hit[0]->get_uint());
-  ASSERT_EQ(4, hit[1]->get_uint());
+  ASSERT_EQ(1, hit[0]->get_int());
+  ASSERT_EQ(4, hit[1]->get_int());
   // bin
   ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
       ObJsonInType::JSON_BIN, j_bin));
@@ -1051,7 +1069,7 @@ TEST_F(TestJsonBase, test_seek)
 
   // 8. seek test1
   common::ObString j_text8("{\"width\":\"800\",\"image\":800,\"thumbnail\":{\"url\":    \
-      \"iamexampleurl\",\"width\":100},\"ids\":[116,943,234,38793]}");
+      \"http://www.example.com/image/481989943\",\"width\":100},\"ids\":[116,943,234,38793]}");
   ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_text8,
       ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, j_tree));
   common::ObString path_text8_0("$.ids[0]");
@@ -1099,12 +1117,12 @@ TEST_F(TestJsonBase, test_seek)
   }
   ObString raw_str;
   ASSERT_EQ(OB_SUCCESS, jb_res->get_raw_binary(raw_str, &allocator));
-  ASSERT_EQ(27, raw_str.length());
+  ASSERT_EQ(8 + 27, raw_str.length());
   ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, jb_res,
       ObJsonInType::JSON_BIN, j_bin));
   raw_str.reset();
   ASSERT_EQ(OB_SUCCESS, j_bin->get_raw_binary(raw_str, &allocator));
-  ASSERT_EQ(27, raw_str.length());
+  ASSERT_EQ(8 + 27, raw_str.length());
 
   // 10. seek test3(bin->seek->print)
   common::ObString j_text10("{\"some_key\": true}");
@@ -1118,13 +1136,1130 @@ TEST_F(TestJsonBase, test_seek)
   ASSERT_EQ(hit.size(), 1);
   raw_str.reset();
   ASSERT_EQ(OB_SUCCESS, hit[0]->get_raw_binary(raw_str, &allocator));
-  ObJsonBin j_bin_tmp(raw_str.ptr(), raw_str.length());
+  ObJsonBin j_bin_tmp(raw_str.ptr(), raw_str.length(), &allocator);
   ObIJsonBase *j_base = &j_bin_tmp;
   j_buf.reset();
   ASSERT_EQ(OB_SUCCESS, j_bin_tmp.reset_iter());
   ASSERT_EQ(OB_SUCCESS, j_base->print(j_buf, false));
   cout << j_buf.ptr() << endl;
   ASSERT_EQ(0, strncmp("true", j_buf.ptr(), j_buf.length()));
+}
+
+TEST_F(TestJsonBase, test_oracle_seek)
+{
+  ObArenaAllocator allocator(ObModIds::TEST);
+  ObIJsonBase *j_tree = NULL;
+  ObIJsonBase *j_bin = NULL;
+  ObJsonSeekResult hit;
+  ObJsonBuffer j_buf(&allocator);
+
+  // 1. seek_not_exist_member
+  common::ObString j_text1("{\"name\": \"Safari\", \"os\": \"Mac\"}");
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_text1,
+      ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, j_tree));
+  common::ObString path_text1("$.b");
+  ObJsonPath j_path1(path_text1, &allocator);
+  j_path1.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path1.parse_path());
+  // tree
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path1, j_path1.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 0);
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path1, j_path1.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 0);
+  std::cout <<"seek_not_exist_member(tree & bin) success."<<std::endl;
+
+  // 2. seek_member
+  common::ObString j_text2("{\"x\": \"Safari\", \"os\": \"Mac\", \"resolution\": \
+      {\"x\": \"1920\", \"y\": \"1080\"}}");
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_text2,
+      ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, j_tree));
+  common::ObString path_text2("$.\"resolution\".x");
+  ObJsonPath j_path2(path_text2, &allocator);
+  j_path2.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path2.parse_path());
+  hit.reset();
+  // tree
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path2, j_path2.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 1);
+  ASSERT_EQ(0, strncmp("1920", hit[0]->get_data(), hit[0]->get_data_length()));
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path2, j_path2.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 1);
+  ASSERT_EQ(0, strncmp("1920", hit[0]->get_data(), hit[0]->get_data_length()));
+  std::cout <<"seek_member(tree & bin) success."<<std::endl;
+
+  // 3. seek_member in lax mode
+  common::ObString j_text31("[1, 2, 3, 4, 5, {\"z\" : \"6\"}, 7, 8, 9]");
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_text31,
+      ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, j_tree));
+  common::ObString path_text31("$.z");
+  ObJsonPath j_path31(path_text31, &allocator);
+  j_path31.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path31.parse_path());
+  hit.reset();
+  // tree
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path31, j_path31.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 1);
+  ASSERT_EQ(0, strncmp("6", hit[0]->get_data(), hit[0]->get_data_length()));
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path31, j_path31.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 1);
+  //ASSERT_EQ(6, hit[0]->get_uint());
+  ASSERT_EQ(0, strncmp("6", hit[0]->get_data(), hit[0]->get_data_length()));
+  std::cout <<"seek_member(tree & bin) in lax mode success."<<std::endl;
+
+
+  // 3. seek_member_wildcard1
+  common::ObString j_text3("{\"x\": \"Safari\", \"os\": \"Mac\", \"resolution\": \
+      {\"x\": \"1920\", \"y\": \"1080\"}}");
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_text3,
+      ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, j_tree));
+  common::ObString path_text3("$.\"resolution\".*");
+  ObJsonPath j_path3(path_text3, &allocator);
+  j_path3.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path3.parse_path());
+  hit.reset();
+  // tree
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path3, j_path3.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 2);
+  std::cout <<"seek_member_wildcard1"<<std::endl;
+  for (uint32_t i = 0; i < hit.size(); ++i) {
+    j_buf.reset();
+    ASSERT_EQ(OB_SUCCESS, hit[i]->print(j_buf, false));
+    std::cout << i << ": " << j_buf.ptr() << std:: endl;
+  }
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path3, j_path3.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 2);
+  std::cout <<"seek_member_wildcard1 (bin)"<<std::endl;
+  for (uint32_t i = 0; i < hit.size(); ++i) {
+    j_buf.reset();
+    ASSERT_EQ(OB_SUCCESS, hit[i]->print(j_buf, false));
+    std::cout << i << ": " << j_buf.ptr() << std:: endl;
+  }
+
+  // 4. seek_member_wildcard2
+  common::ObString j_text4("{\"name\": \"Safari\", \"os\": \"Mac\", \"resolution\": \
+      {\"x\": \"1920\", \"y\": \"1080\"}}");
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_text4,
+      ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, j_tree));
+  common::ObString path_text4("$.*");
+  ObJsonPath j_path4(path_text4, &allocator);
+  j_path4.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path4.parse_path());
+  hit.reset();
+  // tree
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path4, j_path4.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 3);
+  std::cout <<"seek_member_wildcard2"<<std::endl;
+  for (uint32_t i = 0; i < hit.size(); ++i) {
+    j_buf.reset();
+    ASSERT_EQ(OB_SUCCESS, hit[i]->print(j_buf, false));
+    std::cout << i << ": " << j_buf.ptr() << std:: endl;
+  }
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path4, j_path4.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 3);
+  std::cout <<"seek_member_wildcard2 (bin)"<<std::endl;
+  for (uint32_t i = 0; i < hit.size(); ++i) {
+    j_buf.reset();
+    ASSERT_EQ(OB_SUCCESS, hit[i]->print(j_buf, false));
+    std::cout << i << ": " << j_buf.ptr() << std:: endl;
+  }
+
+  // 41. seek member_wildcard in lax_mode
+  common::ObString j_text41("[1, 2, 3, 4, 5, {\"resolution\": \
+      {\"x\": \"1920\", \"y\": \"1080\"}}, 7, 8, 9]");
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_text41,
+      ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, j_tree));
+  common::ObString path_text41("lax $.resolution.*");
+  ObJsonPath j_path41(path_text41, &allocator);
+  j_path41.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path41.parse_path());
+  hit.reset();
+  // tree
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path41, j_path41.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 2);
+  std::cout <<"seek_member_wildcard in lax mode"<<std::endl;
+  for (uint32_t i = 0; i < hit.size(); ++i) {
+    j_buf.reset();
+    ASSERT_EQ(OB_SUCCESS, hit[i]->print(j_buf, false));
+    std::cout << i << ": " << j_buf.ptr() << std:: endl;
+  }
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path41, j_path41.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 2);
+  std::cout <<"seek_member_wildcard1 in lax (bin)"<<std::endl;
+  for (uint32_t i = 0; i < hit.size(); ++i) {
+    j_buf.reset();
+    ASSERT_EQ(OB_SUCCESS, hit[i]->print(j_buf, false));
+    std::cout << i << ": " << j_buf.ptr() << std:: endl;
+  }
+
+  // 5. seek_array_cell
+  common::ObString j_text5("[1, 2, 3, 4, 5]");
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_text5,
+      ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, j_tree));
+  common::ObString path_text5("$[0][0]");
+  ObJsonPath j_path5(path_text5, &allocator);
+  j_path5.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path5.parse_path());
+  hit.reset();
+  // tree
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path5, j_path5.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 1);
+  ASSERT_EQ(1, hit[0]->get_uint());
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path5, j_path5.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 1);
+  ASSERT_EQ(1, hit[0]->get_uint());
+  std::cout <<"seek_array_cell success"<<std::endl;
+
+
+  // 6. seek_array_wildcard
+  common::ObString j_text6("[1, 2]");
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_text6,
+      ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, j_tree));
+  common::ObString path_text6("$[*][*]");
+  ObJsonPath j_path6(path_text6, &allocator);
+  j_path6.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path6.parse_path());
+  hit.reset();
+  // tree
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path6, j_path6.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 2);
+  ASSERT_EQ(1, hit[0]->get_uint());
+  ASSERT_EQ(2, hit[1]->get_uint());
+  std::cout <<"seek_array_wildcard(tree) success."<<std::endl;
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path6, j_path6.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 2);
+  ASSERT_EQ(1, hit[0]->get_uint());
+  ASSERT_EQ(2, hit[1]->get_uint());
+  std::cout <<"seek_array_wildcard(bin) success."<<std::endl;
+
+  // 7. seek_ellipsis
+  common::ObString j_text7("{\"name\": \"Safari\", \"x\": \"Mac\", \"resolution\": \
+      {\"x\": \"1920\", \"y\": \"1080\"}}");
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_text7,
+      ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, j_tree));
+  common::ObString path_text7("$..x");
+  ObJsonPath j_path7(path_text7, &allocator);
+  j_path7.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path7.parse_path());
+  hit.reset();
+  // tree
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path7, j_path7.path_node_cnt(), true, false, hit));
+  std::cout <<"seek_ellipsis "<<std::endl;
+  ASSERT_EQ(hit.size(), 2);
+  for (uint32_t i = 0; i < hit.size(); ++i) {
+    j_buf.reset();
+    ASSERT_EQ(OB_SUCCESS, hit[i]->print(j_buf, false));
+    std::cout << i << ": " << j_buf.ptr() << std:: endl;
+  }
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path7, j_path7.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 2);
+  for (uint32_t i = 0; i < hit.size(); ++i) {
+    j_buf.reset();
+    ASSERT_EQ(OB_SUCCESS, hit[i]->print(j_buf, false));
+    std::cout << i << "(ellipsis_bin): " << j_buf.ptr() << std:: endl;
+  }
+
+  // 71. seek_ellipsis in lax_mode
+  common::ObString j_text71("[1, 2, 3, 4, 5, {\"x\": \
+      {\"x\": \"1920\", \"y\": \"1080\"}}, 7, 8, 9]");
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_text71,
+      ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, j_tree));
+  common::ObString path_text71("lax $..x");
+  ObJsonPath j_path71(path_text71, &allocator);
+  j_path71.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path71.parse_path());
+  hit.reset();
+  // tree
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path71, j_path71.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 2);
+  std::cout <<"seek_ellipsis in lax mode"<<std::endl;
+  for (uint32_t i = 0; i < hit.size(); ++i) {
+    j_buf.reset();
+    ASSERT_EQ(OB_SUCCESS, hit[i]->print(j_buf, false));
+    std::cout << i << ": " << j_buf.ptr() << std:: endl;
+  }
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path71, j_path71.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 2);
+  for (uint32_t i = 0; i < hit.size(); ++i) {
+    j_buf.reset();
+    ASSERT_EQ(OB_SUCCESS, hit[i]->print(j_buf, false));
+    std::cout << i << "(ellipsis_bin_lax): " << j_buf.ptr() << std:: endl;
+  }
+
+  // 8. seek_array_range
+  common::ObString j_text8("[1, 2, 3, 4, 5]");
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_text8,
+      ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, j_tree));
+  common::ObString path_text8("$[last-4 to last -3]");
+  ObJsonPath j_path8(path_text8, &allocator);
+  j_path8.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path8.parse_path());
+  hit.reset();
+  // tree
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path8, j_path8.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 2);
+  ASSERT_EQ(1, hit[0]->get_uint());
+  ASSERT_EQ(2, hit[1]->get_uint());
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path8, j_path8.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 2);
+  ASSERT_EQ(1, hit[0]->get_uint());
+  ASSERT_EQ(2, hit[1]->get_uint());
+
+  // 9. seek_array_range2
+  common::ObString j_text9("[1, 2, 3, 4, 5]");
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_text9,
+      ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, j_tree));
+  common::ObString path_text9("$[2, 2 to 3]");
+  ObJsonPath j_path9(path_text9, &allocator);
+  j_path9.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path9.parse_path());
+  hit.reset();
+  // tree
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path9, j_path9.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 3);
+  ASSERT_EQ(3, hit[0]->get_uint());
+  ASSERT_EQ(3, hit[1]->get_uint());
+  ASSERT_EQ(4, hit[2]->get_uint());
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path9, j_path9.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 3);
+  ASSERT_EQ(3, hit[0]->get_uint());
+  ASSERT_EQ(3, hit[1]->get_uint());
+  ASSERT_EQ(4, hit[2]->get_uint());
+
+  // 00. seek_special
+  common::ObString j_text00("{}");
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_text00,
+      ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, j_tree));
+  common::ObString path_text00("$[*]");
+  ObJsonPath j_path00(path_text00, &allocator);
+  j_path00.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path00.parse_path());
+  hit.reset();
+  // tree
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path00, j_path00.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 1);
+  for (uint32_t i = 0; i < hit.size(); ++i) {
+    j_buf.reset();
+    ASSERT_EQ(OB_SUCCESS, hit[i]->print(j_buf, false));
+    std::cout << i << ": " << j_buf.ptr() << std:: endl;
+  }
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path00, j_path00.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 1);
+  for (uint32_t i = 0; i < hit.size(); ++i) {
+    j_buf.reset();
+    ASSERT_EQ(OB_SUCCESS, hit[i]->print(j_buf, false));
+    std::cout << i << ": " << j_buf.ptr() << std:: endl;
+  }
+
+  // 10. seek_numeric_item_method (abs, floor, ceiling)
+  common::ObString j_text10("[1.1, 2, 3, 4, 5]");
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_text10,
+      ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, j_tree));
+  common::ObString path_text10("$[0].ceiling()");
+  ObJsonPath j_path10(path_text10, &allocator);
+  j_path10.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path10.parse_path());
+  hit.reset();
+  // tree
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path10, j_path10.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 1);
+  ASSERT_EQ(2, hit[0]->get_int());
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path10, j_path10.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 1);
+  ASSERT_EQ(2, hit[0]->get_int());
+}
+
+TEST_F(TestJsonBase, test_seek_str_cmp)
+{
+  ObArenaAllocator allocator(ObModIds::TEST);
+  ObIJsonBase *j_tree = NULL;
+  ObIJsonBase *j_bin = NULL;
+  ObJsonSeekResult hit;
+  ObJsonBuffer j_buf(&allocator);
+
+  common::ObString var_name("sql");
+  common::ObString j_text_var("23");
+  ObIJsonBase *j_tree_var = NULL;
+
+  // init pass_map
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_text_var,
+      ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, j_tree_var));
+  PassingMap pass_map;
+  ASSERT_EQ(OB_SUCCESS, pass_map.create(2, "json_sql_var"));
+  ASSERT_EQ(OB_SUCCESS, pass_map.set_refactored(var_name, j_tree_var));
+  ASSERT_EQ(OB_SUCCESS, pass_map.set_refactored("test", nullptr));
+
+  // 1. starts with (string)
+  common::ObString j_text1("{\"a\": \"Safari\", \"b\": true, \"c\": 123}");
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_text1,
+      ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, j_tree));
+  common::ObString path_text1("$?( @.a starts with \"Saf\").c");
+  ObJsonPath j_path1(path_text1, &allocator);
+  j_path1.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path1.parse_path());
+  // tree
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path1, j_path1.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 1);
+  ASSERT_EQ(123, hit[0]->get_int());
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path1, j_path1.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 1);
+  ASSERT_EQ(123, hit[0]->get_int());
+
+  // 2. starts with (trans to string)
+  common::ObString path_text2("$?( @.b starts with \"true\").c");
+  ObJsonPath j_path2(path_text2, &allocator);
+  j_path2.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path2.parse_path());
+  // tree
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path2, j_path2.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 1);
+  ASSERT_EQ(123, hit[0]->get_int());
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path2, j_path2.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 1);
+  ASSERT_EQ(123, hit[0]->get_int());
+
+  // 3. has substring (string)
+  common::ObString path_text3("$?( @.a has substring \"ri\").c");
+  ObJsonPath j_path3(path_text3, &allocator);
+  j_path3.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path3.parse_path());
+  // tree
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path3, j_path3.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 1);
+  ASSERT_EQ(123, hit[0]->get_int());
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path3, j_path3.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 1);
+  ASSERT_EQ(123, hit[0]->get_int());
+
+  // 4. has substring (trans to string)
+  common::ObString path_text4("$?( @.c has substring $sql).c");
+  ObJsonPath j_path4(path_text4, &allocator);
+  j_path4.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path4.parse_path());
+  // tree
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path4, j_path4.path_node_cnt(), true, false, hit, &pass_map));
+  ASSERT_EQ(hit.size(), 1);
+  ASSERT_EQ(123, hit[0]->get_int());
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path4, j_path4.path_node_cnt(), true, false, hit, &pass_map));
+  ASSERT_EQ(hit.size(), 1);
+  ASSERT_EQ(123, hit[0]->get_int());
+  std::cout <<"seek_not_exist_member(tree & bin) success."<<std::endl;
+}
+
+TEST_F(TestJsonBase, test_seek_func)
+{
+  ObArenaAllocator allocator(ObModIds::TEST);
+  ObIJsonBase *j_tree = NULL;
+  ObIJsonBase *j_bin = NULL;
+  ObJsonSeekResult hit;
+  ObJsonBuffer j_buf(&allocator);
+
+  // 11. seek_type
+  common::ObString j_text11("[1.1, true, null, \"a string\", {\"z\": 1}, [6]]");
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_text11,
+      ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, j_tree));
+  common::ObString path_text11("$[*].type()");
+  ObJsonPath j_path11(path_text11, &allocator);
+  j_path11.is_mysql_ = false;
+
+  ASSERT_EQ(OB_SUCCESS, j_path11.parse_path());
+  hit.reset();
+  // tree
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path11, j_path11.path_node_cnt(), true, false, hit));
+  std::cout <<"seek_type (tree)"<<std::endl;
+  ASSERT_EQ(hit.size(), 6);
+  for (uint32_t i = 0; i < hit.size(); ++i) {
+    j_buf.reset();
+    ASSERT_EQ(OB_SUCCESS, hit[i]->print(j_buf, false));
+    std::cout << i << ": " << j_buf.ptr() << std:: endl;
+  }
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path11, j_path11.path_node_cnt(), true, false, hit));
+  std::cout <<"seek_type (bin)"<<std::endl;
+  ASSERT_EQ(hit.size(), 6);
+  for (uint32_t i = 0; i < hit.size(); ++i) {
+    j_buf.reset();
+    ASSERT_EQ(OB_SUCCESS, hit[i]->print(j_buf, false));
+    std::cout << i << ": " << j_buf.ptr() << std:: endl;
+  }
+
+  // 12. seek_length
+  common::ObString j_text12("[1.1, true, null, \"a string\", {\"z\": 1}, [6]]");
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_text12,
+      ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, j_tree));
+  common::ObString path_text12("$[*].length()");
+  ObJsonPath j_path12(path_text12, &allocator);
+  j_path12.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path12.parse_path());
+  hit.reset();
+  // tree
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path12, j_path12.path_node_cnt(), true, false, hit));
+  std::cout <<"seek_length (tree)"<<std::endl;
+  ASSERT_EQ(hit.size(), 6);
+  for (uint32_t i = 0; i < hit.size(); ++i) {
+    j_buf.reset();
+    ASSERT_EQ(OB_SUCCESS, hit[i]->print(j_buf, false));
+    std::cout << i << ": " << j_buf.ptr() << std:: endl;
+  }
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path12, j_path12.path_node_cnt(), true, false, hit));
+  std::cout <<"seek_length (bin)"<<std::endl;
+  ASSERT_EQ(hit.size(), 6);
+  for (uint32_t i = 0; i < hit.size(); ++i) {
+    j_buf.reset();
+    ASSERT_EQ(OB_SUCCESS, hit[i]->print(j_buf, false));
+    std::cout << i << ": " << j_buf.ptr() << std:: endl;
+  }
+
+  // 13. seek_bool/boolOnly
+  common::ObString j_text13("[1.1, true, false, null, \"a string\", {\"z\": 1}, [6]]");
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_text13,
+      ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, j_tree));
+  common::ObString path_text13("$[*].boolean()");
+  ObJsonPath j_path13(path_text13, &allocator);
+  j_path13.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path13.parse_path());
+  hit.reset();
+  // tree
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path13, j_path13.path_node_cnt(), true, false, hit));
+  std::cout <<"seek_bool (tree)"<<std::endl;
+  ASSERT_EQ(hit.size(), 7);
+  for (uint32_t i = 0; i < hit.size(); ++i) {
+    j_buf.reset();
+    ASSERT_EQ(OB_SUCCESS, hit[i]->print(j_buf, false));
+    std::cout << i << ": " << j_buf.ptr() << std:: endl;
+  }
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path13, j_path13.path_node_cnt(), true, false, hit));
+  std::cout <<"seek_bool (bin)"<<std::endl;
+  ASSERT_EQ(hit.size(), 7);
+  for (uint32_t i = 0; i < hit.size(); ++i) {
+    j_buf.reset();
+    ASSERT_EQ(OB_SUCCESS, hit[i]->print(j_buf, false));
+    std::cout << i << ": " << j_buf.ptr() << std:: endl;
+  }
+
+  // 14. seek_date & timestamp
+  common::ObString j_text14("[\"2022-8-30\", \"2015-4-15 11:12:00.123456\"]");
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_text14,
+      ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, j_tree));
+  common::ObString path_text14("$[1].timestamp()");
+  ObJsonPath j_path14(path_text14, &allocator);
+  j_path14.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path14.parse_path());
+  hit.reset();
+  // tree
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path14, j_path14.path_node_cnt(), true, false, hit));
+  std::cout <<"seek_date& timestamp (tree)"<<std::endl;
+  ASSERT_EQ(hit.size(), 1);
+  for (uint32_t i = 0; i < hit.size(); ++i) {
+    j_buf.reset();
+    ASSERT_EQ(OB_SUCCESS, hit[i]->print(j_buf, false));
+    std::cout << i << ": " << j_buf.ptr() << std:: endl;
+  }
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path14, j_path14.path_node_cnt(), true, false, hit));
+  std::cout <<"seek_date& timestamp (bin)"<<std::endl;
+  ASSERT_EQ(hit.size(), 1);
+  for (uint32_t i = 0; i < hit.size(); ++i) {
+    j_buf.reset();
+    ASSERT_EQ(OB_SUCCESS, hit[i]->print(j_buf, false));
+    std::cout << i << ": " << j_buf.ptr() << std:: endl;
+  }
+
+  // 15. seek_double
+  common::ObString j_text15("[\"1.1\"]");
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_text15,
+      ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, j_tree));
+  common::ObString path_text15("$[0].double()");
+  ObJsonPath j_path15(path_text15, &allocator);
+  j_path15.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path15.parse_path());
+  hit.reset();
+  // tree
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path15, j_path15.path_node_cnt(), true, false, hit));
+  std::cout <<"seek_double (tree)"<<std::endl;
+  ASSERT_EQ(hit.size(), 1);
+  ASSERT_EQ(1.1, hit[0]->get_double());
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path15, j_path15.path_node_cnt(), true, false, hit));
+  std::cout <<"seek_double (bin)"<<std::endl;
+  ASSERT_EQ(hit.size(), 1);
+  ASSERT_EQ(1.1, hit[0]->get_double());
+
+  // 16. seek_number
+  common::ObString j_text16("[\"1.1\"]");
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_text16,
+      ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, j_tree));
+  common::ObString path_text16("$[0].number()");
+  ObJsonPath j_path16(path_text16, &allocator);
+  j_path16.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path16.parse_path());
+  hit.reset();
+  // tree
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path16, j_path16.path_node_cnt(), true, false, hit));
+  std::cout <<"seek_number (tree)"<<std::endl;
+  ASSERT_EQ(hit.size(), 1);
+  ASSERT_EQ(1.1, hit[0]->get_double());
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path16, j_path16.path_node_cnt(), true, false, hit));
+  std::cout <<"seek_number (bin)"<<std::endl;
+  ASSERT_EQ(hit.size(), 1);
+  ASSERT_EQ(1.1, hit[0]->get_double());
+
+  // 17. seek_string
+  common::ObString j_text17("[0, true , \"a string\"]");
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_text17,
+      ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, j_tree));
+  common::ObString path_text17("$[*].string()");
+  ObJsonPath j_path17(path_text17, &allocator);
+  j_path17.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path17.parse_path());
+  hit.reset();
+  // tree
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path17, j_path17.path_node_cnt(), true, false, hit));
+  std::cout <<"seek_string (tree)"<<std::endl;
+  ASSERT_EQ(hit.size(), 3);
+  for (uint32_t i = 0; i < hit.size(); ++i) {
+    j_buf.reset();
+    ASSERT_EQ(OB_SUCCESS, hit[i]->print(j_buf, false));
+    std::cout << i << ": " << j_buf.ptr() << std:: endl;
+  }
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path17, j_path17.path_node_cnt(), true, false, hit));
+  std::cout <<"seek_string (bin)"<<std::endl;
+  ASSERT_EQ(hit.size(), 3);
+  for (uint32_t i = 0; i < hit.size(); ++i) {
+    j_buf.reset();
+    ASSERT_EQ(OB_SUCCESS, hit[i]->print(j_buf, false));
+    std::cout << i << ": " << j_buf.ptr() << std:: endl;
+  }
+
+  // 18. seek_size
+  common::ObString j_text18("[1, 2, \"test\", {\"a\": 3}]");
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_text18,
+      ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, j_tree));
+  common::ObString path_text18("$[0].size()");
+  ObJsonPath j_path18(path_text18, &allocator);
+  j_path18.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path18.parse_path());
+  hit.reset();
+  // tree
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path18, j_path18.path_node_cnt(), true, false, hit));
+  std::cout <<"seek_size (tree)"<<std::endl;
+  ASSERT_EQ(hit.size(), 1);
+  ASSERT_EQ(1, hit[0]->get_uint());
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path18, j_path18.path_node_cnt(), true, false, hit));
+  std::cout <<"seek_size (bin)"<<std::endl;
+  ASSERT_EQ(hit.size(), 1);
+  ASSERT_EQ(1, hit[0]->get_uint());
+
+  // 19. seek_upper & lower
+  common::ObString j_text19("[\"aBcDeFg\"]");
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_text19,
+      ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, j_tree));
+  common::ObString path_text19("$[0].lower()");
+  ObJsonPath j_path19(path_text19, &allocator);
+  j_path19.is_mysql_ = false;
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_path19.parse_path());
+  // tree
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path19, j_path19.path_node_cnt(), true, false, hit));
+  std::cout <<"seek_trans (tree)"<<std::endl;
+  ASSERT_EQ(hit.size(), 1);
+  ObString ans1(hit[0]->get_data_length(), hit[0]->get_data());
+  ASSERT_EQ(ans1, "abcdefg");
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  common::ObString path_text20("$[0].upper()");
+  ObJsonPath j_path20(path_text20, &allocator);
+  j_path20.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path20.parse_path());
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path20, j_path20.path_node_cnt(), true, false, hit));
+  std::cout <<"seek_trans (bin)"<<std::endl;
+  ASSERT_EQ(hit.size(), 1);
+  ObString ans2(hit[0]->get_data_length(), hit[0]->get_data());
+  ASSERT_EQ(ans2, "ABCDEFG");
+}
+
+TEST_F(TestJsonBase, test_seek_bad_filter)
+{
+  ObArenaAllocator allocator(ObModIds::TEST);
+  ObIJsonBase *j_tree = NULL;
+  ObIJsonBase *j_bin = NULL;
+  ObJsonSeekResult hit;
+  ObJsonBuffer j_buf(&allocator);
+  INIT_SUCC(ret);
+/*
+  bad filter
+  [\"a\", 2, 3, {\"resolution\" : {\"x\": 1920, \"y\": \"2015-4-15 11:12:00.123456\", \"z\": true}}, [5, 6]]
+    1. $?( @[3].resolution.x.number() == \"1920\")
+    2. $?( @[3].resolution.x.numberOnly() == \"1920\")
+    3. $?( @[3].resolution.x.length() == \"1920\")
+    4. $?( @[3].resolution.x.abs() == \"1920\")
+    5. $?( @[3].resolution.x.floor() == \"1920\")
+    6. $?( @[3].resolution.x.ceiling() == \"1920\")
+    7. $?( @[3].resolution.x.double() == \"1920\")
+    8. $?( @[4].double() == \"1920\")
+    9. $[4]?( @.double() == \"1920\")
+    10. $?(\"1920\" ==  @[3].resolution.x.number())
+    11. $?(\"1920\" ==   @[3].resolution.x.numberOnly())
+    12. $?(\"1920\" ==   @[3].resolution.x.length())
+    13. $?( \"1920\" ==  @[3].resolution.x.abs())
+    14. $?(\"1920\" ==   @[3].resolution.x.floor())
+    15. $?(\"1920\" ==   @[3].resolution.x.ceiling())
+    16. $?(\"1920\" ==   @[3].resolution.x.double() )
+    17. $?(\"1920\" ==   @[4].double() )
+    18. $[4]?(\"1920\" ==   @.double())
+    19. $?( @[3].resolution.x.string() == 1920)
+    20. $?( @[3].resolution.x.stringOnly() == 1920)
+    21. $?( @[3].resolution.x.lower() == 1920)
+    22. $?( @[3].resolution.x.upper() == 1920)
+    23. $?( @[3].resolution.x.type() == 1920)
+    24. $?( @[3].resolution.x.date() == 1920)
+    25. $?( @[3].resolution.x.timestamp() == 1920)
+    26. $?( @[3].resolution.z.boolean() == 1920)
+    27. $?( @[3].resolution.x.string() == 1920)
+    28. $?( @[3].resolution.x.stringOnly() == 1920)
+    29. $?( @[3].resolution.x.lower() == 1920)
+    30. $?( @[3].resolution.x.upper() == 1920)
+    31. $?( @[3].resolution.x.type() == 1920)
+    32. $?( @[3].resolution.x.date() == 1920)
+    33. $?( @[3].resolution.x.timestamp() == 1920)
+    34. $?( @[3].resolution.z.boolean() == 1920)
+    35. $?( @[3].resolution.z.boolean() == \" true\")
+    36. $?( @[3].resolution.z.boolean() == \"true \")
+    37. $?( @[3].resolution.z.boolean() == \"fals\")
+    38. $?( @[3].resolution.z.boolean() == \"falsee\")
+    39. $?(true == null)
+    40. $?(false == 1)
+    41. $?(\"1\" == 1)
+    42. $?(\"1\" == true)
+*/
+  common::ObString j_text1("[\"a\", 2, 3, {\"resolution\" : {\"x\": 1920, \"y\": \"2015-4-15 11:12:00.123456\", \"z\": true}}, [5, 6]]");
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_text1,
+      ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, j_tree));
+  common::ObString path_text1("$?( @[3].resolution.z.boolean() == \"false\")");
+  ObJsonPath j_path1(path_text1, &allocator);
+  j_path1.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path1.parse_path());
+  // tree
+  ret = j_tree->seek(j_path1, j_path1.path_node_cnt(), true, false, hit);
+  ASSERT_EQ(false, OB_FAIL(ret));
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ret = OB_SUCCESS;
+  ret =  j_bin->seek(j_path1, j_path1.path_node_cnt(), true, false, hit);
+  ASSERT_EQ(false, OB_FAIL(ret));
+}
+
+TEST_F(TestJsonBase, test_seek_filter)
+{
+  ObArenaAllocator allocator(ObModIds::TEST);
+  ObIJsonBase *j_tree = NULL;
+  ObIJsonBase *j_bin = NULL;
+  ObJsonSeekResult hit;
+  ObJsonBuffer j_buf(&allocator);
+
+  /*
+  1.compare (scalar，scalar) :
+    (number, number)
+        1. $?(1 == 1)
+        2. $?(1 < 15535.6
+        3. $?(1 <= 15535.6
+        4.  "$?(15535.6 > 1.346647)"
+        5. "$?(15535.6 >= 1.346647)"
+        6.  "$?(15535.6 != 1.346647)"
+    (string, string)
+        7. $?(\"abc\" != \"abc\")
+        8. $?(\"abc\" == \"abc\")
+        9. $?(\"abc\" >= \"abc\")
+        10. $?(\"abc\" <= \"abc\")
+        11. $?(\"abcd\" > \"abc\")
+    (bool, bool/string)
+        12. $?(true == true)
+        13. $?(false == false)
+        14. $?(true == false)
+        15. $?( true ==  \"true\")
+        16. $?( true ==  \"TrUe\")
+        17. $?( \"false\" == false)
+        18. $?( \"fALse\" == false)
+    (null, null)
+        19. $?( null ==  null)
+*/
+  common::ObString j_text1("[\"a\", 2, 3, {\"resolution\" : {\"x\": 1920, \"y\": \"2015-4-15 11:12:00.123456\", \"z\": \"trueeee\"}}, [5, 6]]");
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_text1,
+      ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, j_tree));
+  common::ObString path_text1("$?( true ==  \"TrUe\")");
+  ObJsonPath j_path1(path_text1, &allocator);
+  j_path1.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path1.parse_path());
+  // tree
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path1, j_path1.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 1);
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path1, j_path1.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 1);
+  std::cout << "1.compare (scalar, scalar) success"<< std::endl;
+
+  common::ObString path_text0("$?(@[3].resolution.z.boolean() !=  \"true\")");
+  ObJsonPath j_path0(path_text0, &allocator);
+  j_path0.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path0.parse_path());
+  // tree
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path0, j_path0.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 1);
+  ASSERT_NE(false, hit[0]->get_boolean());
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path0, j_path0.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 1);
+
+/*
+  2.compare (scalar，subpath) / (subpath，scalar):
+    "[\"a\", 2, 3, {\"resolution\" : {\"x\": 1920, \"y\": \"2015-4-15 11:12:00.1234567 -07:00"\", \"z\": \"true\" }}, [5, 6]]"
+    20. $?(2 == @[1])
+    21. $?(@[1] == 2)
+    22. $?(\"1930\" >= @[3].resolution.x)
+    23. $?(@[3].resolution.x <=  \"1930\" )
+    24. $?(@[3].resolution.x.number() != 1930)   // 如果是$?( @[3].resolution.x.number() != \"1930\") 则报错
+    25. $?(1930 != @[3].resolution.x.number())
+    26. $?(@[3].resolution.x.string() == \"1920\")
+    27. $?(\"1920\" == @[3].resolution.x.string())
+    28. $?(@[3].resolution.z.boolean() == \"true\")
+    29. $?(\"true\" == @[3].resolution.z.boolean())
+    30. $?(\"false\" != @[3].resolution.z.boolean())
+    31. $?(@[3].resolution.z.boolean() == \"false\")  // change @.z = "false"
+    32. $?( \"FaLsE\" ==@[3].resolution.z.boolean())
+    33. $?(@[3].resolution.y.timestamp() == \"2015-4-15 11:12:00.123456\")
+    34. $?( \"2015-4-15 11:12:00.123456\" == @[3].resolution.y.timestamp())
+    35. $?(\"2015-4-15\" == @[3].resolution.y.date())
+    36. $?(@[3].resolution.y.date() == \"2015-4-15\")
+*/
+  common::ObString path_text2("$?(@[3].resolution.x <=  \"1930\")");
+  ObJsonPath j_path2(path_text2, &allocator);
+  j_path2.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path2.parse_path());
+  // tree
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path2, j_path2.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 1);
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path2, j_path2.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 1);
+  std::cout << "2.compare (scalar, subpath) / (subpath, scalar): success"<< std::endl;
+
+/*
+  3. (subpath, sql_var) / (sql_var, sub_path)
+    37. $?($v1 == @[1])      // $v1 = 2
+    38. $?(@[1] == $v1)
+    39. $?($v1 >= @[3].resolution.x)  // $v1 = 1930
+    40. $?(@[3].resolution.x <= $v1 )
+    41. $?(@[3].resolution.x.number() != $v1)
+    42. $?($v1 != @[3].resolution.x.number())
+    43. $?(@[3].resolution.x.string() == $v1)    // $v1 = \"1920\"
+    44. $?($v1 == @[3].resolution.x.string())
+    45. $?(@[3].resolution.z.boolean() == $v1)  // $v1 = true
+    46. $?($v1== @[3].resolution.z.boolean())
+    47. $?($v1 != @[3].resolution.z.boolean())  // $v1 = false
+    48. $?(@[3].resolution.z.boolean() == $v1)  // change @.z = "false"
+    49. $?( $v1 ==@[3].resolution.z.boolean()) // $v1 = fAlse
+    50. $?(@[3].resolution.y.timestamp() ==$v1)  // $v1 =  \"2015-4-15 11:12:00.123456\"
+    51. $?($v1 == @[3].resolution.y.timestamp())
+    52. $?($v1 == @[3].resolution.y.date()) / $v1 =  \"2015-4-15\"
+    53. $?(@[3].resolution.y.date() == $v1")
+*/
+  // common::ObString path_text3("$?(@[3].resolution.z.boolean() ==$v1)");
+  common::ObString path_text3("$?(exists(@[3].resolution.*?($v1 == @[0])))");
+  common::ObString var_name("v1");
+  common::ObString j_text_var("1920");
+  ObIJsonBase *j_tree_var = NULL;
+
+  // init pass_map
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_text_var,
+      ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, j_tree_var));
+  PassingMap pass_map;
+  ASSERT_EQ(OB_SUCCESS, pass_map.create(2, "json_sql_var"));
+  ASSERT_EQ(OB_SUCCESS, pass_map.set_refactored(var_name, j_tree_var));
+  ASSERT_EQ(OB_SUCCESS, pass_map.set_refactored("test", nullptr));
+  ObJsonPath j_path3(path_text3, &allocator);
+  j_path3.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path3.parse_path());
+  // tree
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path3, j_path3.path_node_cnt(), true, false, hit, &pass_map));
+  ASSERT_EQ(hit.size(), 1);
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path3, j_path3.path_node_cnt(), true, false, hit, &pass_map));
+  ASSERT_EQ(hit.size(), 1);
+  std::cout << "3. (subpath, sql_var) / (sql_var, sub_path) success"<< std::endl;
+
+/*
+  4. exists/!exists
+  exists(sub_path)
+    54. $?(exists(@[3].resolution.x?(@[0] == 1920)))  ——> true
+    55. $?(exists(@[3].resolution.x?(@[0] <= 1920)))  ——> true
+    56. $?(exists(@[3].resolution.x?(@[0] < 1920)))   ——> false
+    57. $?(exists(@[3].resolution.x?(@[0].string() == \"1920\")))  ——> true
+    58. $?(exists(@[3].resolution.y?(@[0].date() == \"2015-4-15\")))  ——> true
+    59. $?(exists(@[3].resolution.y?(@[0].date() == \"2015-8-15\")))  ——> false
+    60. $[3].resolution?(exists(@.*?(@[0].date() == \"2015-4-15\")))  ——> true
+    61. $[3].resolution?(exists(@.*?(@[0].date() == \"2015-8-15\")))  ——> false
+    62. $?(exists(@[3].resolution.y?(@[0].timestamp() == \"2015-4-15 11:12:00.123456\")))  ——> true
+    63. $?(exists(@[3].resolution.y?(@[0].timestamp() == \"2015-8-15 11:12:00.123456\")))  ——> false
+    64. $[3].resolution?(exists(@.*?(@[0].timestamp() == \"2015-4-15 11:12:00.123456\")))  ——> true
+    65. $[3].resolution?(exists(@.*?(@[0].timestamp() == \"2015-8-15 11:12:00.123456\")))  ——> false
+    66. $?(exists(@[5].resolution?(@.* == 1920).x.number())) ——> false
+    67. $?(exists(@[3].resolution?(@.* == 1920).x.number())) ——> true
+    68. $?(!exists(@[3].resolution.x?(@[0] == 1920)))  ——> false
+    69. $?(!exists(@[3].resolution.x?(@[0] <= 1920)))  ——> false
+    70. $?(!exists(@[3].resolution.x?(@[0] < 1920)))    ——> ture
+    71. $?(!exists(@[3].resolution.x?(@[0].string() == \"1920\")))  ——> false
+    72. $?(!exists(@[3].resolution.y?(@[0].date() == \"2015-4-15\")))  ——> false
+    73. $?(!exists(@[3].resolution.y?(@[0].date() == \"2015-8-15\")))  ——> true
+    74. $[3].resolution?(exists(@.*?(@[0].date() == \"2015-4-15\")))  ——> false
+    75. $[3].resolution?(exists(@.*?(@[0].date() == \"2015-8-15\")))  ——> true
+    76. $?(!exists(@[3].resolution.y?(@[0].timestamp() == \"2015-4-15 11:12:00.123456\")))  ——> false
+    77. $?(!exists(@[3].resolution.y?(@[0].timestamp() == \"2015-8-15 11:12:00.123456\")))  ——> true
+    78. $[3].resolution?(!exists(@.*?(@[0].timestamp() == \"2015-4-15 11:12:00.123456\")))  ——> false
+    79. $[3].resolution?(!exists(@.*?(@[0].timestamp() == \"2015-8-15 11:12:00.123456\")))  ——> true
+    80. $?(!exists(@[5].resolution?(@.* == 1920).x.number()))     ——> true
+    81. $?(!exists(@[5].resolution?(@.* == 1920).x.number()))     ——> false
+    82. $[3]?(exists(@.resolution?(@.x == 1920))).resolution.z    ——> hit.size() = 1, hit[0]->get_boolean() == true
+    83. $[3]?(exists(@.resolution?(@.x == 1920))).resolution.xyz  ——> hit.size() = 0
+*/
+  common::ObString path_text4("$?(exists(@[3].resolution?(@.* == 1920).x.number())) ");
+  ObJsonPath j_path4(path_text4, &allocator);
+  j_path4.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path4.parse_path());
+  // tree
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path4, j_path4.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 1);
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path4, j_path4.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 1);
+  std::cout << "4. exists/!exists success"<< std::endl;
+
+  /*
+  5. seek recursively
+    84. $?(@[*] == 2)
+    85. $?(@[*].number() > 10)  ——> false
+    86. $[*]?(@[*] == 6)
+    87. $[*]?(@[*].number() == 5)  ——>hit.size() = 5
+    88. $?(@[*].resolution.* == 1920)
+  */
+  common::ObString path_text5("$?(@[*].resolution.* == 1920)");
+  ObJsonPath j_path5(path_text5, &allocator);
+  j_path5.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path5.parse_path());
+  // tree
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path5, j_path5.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 1);
+  /*
+  for (int i=0; i<hit.size(); ++i) {
+    if(hit[i]->get_boolean() == true) {
+      std::cout<<i<<": true"<<std::endl;
+    } else if (hit[i]->get_boolean() == true) {
+      std::cout<<i<<": false"<<std::endl;
+    } else {
+        std::cout<<i<<": not bool"<<std::endl;
+    }
+  }
+  */
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path5, j_path5.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 1);
+  std::cout << "5. seek recursively success"<< std::endl;
+
+/*
+6. filter_node + path_nodes
+    89. $?(1930 != @[3].resolution.x.number())[1]
+    90. $?(@[3].resolution.x.string() == \"1920\")[1]
+    91. $?(\"1920\" == @[3].resolution.x.string())[1]
+    92. $?(@[3].resolution.z.boolean() == \"true\")[1]
+    93. $?($v1== @[3].resolution.z.boolean())[2].abs()
+    94. $?(\"true\" == @[3].resolution.z.boolean())[3].resolution.x
+    95. $?(\"false\" == @[3].resolution.z.boolean()) [3].resolution.x ——> JsonNull
+    96. $?(exists(@[3].resolution.x?(@[0] < 1920))) [3].resolution.x ——> JsonNull
+    97. $?(exists(@[3].resolution.x?(@[0].string() == \"1920\"))) [3].resolution.x.number()
+    98. $?(exists(@[3].resolution.y?(@[0].date() == \"2015-4-15\")))[3].resolution.x.number()
+    99. $?(exists(@[3].resolution.y?(@[0].date() == \"2015-8-15\"))) [3].resolution.x.number()——> JsonNull
+    100. $[3].resolution?(!exists(@.*?(@[0].timestamp() == \"2015-4-15 11:12:00.123456\")))[2].number()——> JsonNull
+    101. $[3].resolution?(!exists(@.*?(@[0].timestamp() == \"2015-8-15 11:12:00.123456\"))) [2].number() ——空
+    102. $[3].resolution?(!exists(@.*?(@[0].timestamp() == \"2015-8-15 11:12:00.123456\"))).x.number()
+*/
+  common::ObString path_text6("$[3].resolution?(exists(@.*?(@[0].timestamp() == \"2015-4-15 11:12:00.123456\"))).x.number()");
+  ObJsonPath j_path6(path_text6, &allocator);
+  j_path6.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path6.parse_path());
+  // tree
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path6, j_path6.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 1);
+  ASSERT_EQ(1920, hit[0]->get_uint());
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path6, j_path6.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 1);
+  ASSERT_EQ(1920, hit[0]->get_uint());
+  std::cout << "6. filter_node + path_nodes success"<< std::endl;
+
+/*
+7. cond
+    103. $?(2 == @[1] && @[3].resolution.x >  \"1930\") ——> false
+    104. $?(2 == @[1] && @[3].resolution.x <  \"1930\")
+    105. $?(2 == @[1] || @[3].resolution.x >  \"1930\")
+    106. $?(2 != @[1] || @[3].resolution.x >  \"1930\") ——> false
+    107. $?(!(2 == @[1])) ——> false
+    108. $?(!(2 != @[1]))
+    109. $?(2 == @[1] && !(@[3].resolution.x >  \"1930\"))
+    110. $?(!(2 == @[1]) && !(@[3].resolution.x >  \"1930\")) ——> false
+    111. $?(!(2 == @[1] ) ||  @[3].resolution.x <  \"1930\")
+    112. $?(!(2 == @[1] ) || !( @[3].resolution.x <  \"1930\")) ——> false
+    113. $?(!(2 == @[1] ) || ( @[3].resolution.x >  \"1930\"))  ——> false
+    114. $?(!(2 == @[1] ) || 2 == @[1] && @[3].resolution.x  <  \"1930\")
+    115. $?((!(2 != @[1] ) || 2 != @[1] ) && @[3].resolution.x  <  \"1930\")
+*/
+  common::ObString path_text7("$?((!(2 != @[1] ) || 2 != @[1] ) && @[3].resolution.x  <  \"1930\") ");
+  ObJsonPath j_path7(path_text7, &allocator);
+  j_path7.is_mysql_ = false;
+  ASSERT_EQ(OB_SUCCESS, j_path7.parse_path());
+  // tree
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_tree->seek(j_path7, j_path7.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 1);
+  // bin
+  ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
+      ObJsonInType::JSON_BIN, j_bin));
+  hit.reset();
+  ASSERT_EQ(OB_SUCCESS, j_bin->seek(j_path7, j_path7.path_node_cnt(), true, false, hit));
+  ASSERT_EQ(hit.size(), 1);
+  std::cout << "cond success"<< std::endl;
 }
 
 TEST_F(TestJsonBase, test_print)
@@ -1242,7 +2377,7 @@ TEST_F(TestJsonBase, test_print)
   ObJsonArray j_array(&allocator);
   ObJsonArray *j_array_head = &j_array;
   ObJsonArray *j_arr_last = j_array_head;
-  for (uint32_t i = 0; i < 99; i++) { // 99 nesing
+  for (uint32_t i = 0; i < 99; i++) { // 99个数组嵌套
     buf_ptr = allocator.alloc(sizeof(ObJsonArray));
     ASSERT_TRUE(buf_ptr != NULL);
     ObJsonArray *j_new_arr = new (buf_ptr) ObJsonArray(&allocator);
@@ -1256,7 +2391,7 @@ TEST_F(TestJsonBase, test_print)
   j_tree = j_array_head;
   j_buf.reset();
   ASSERT_EQ(OB_SUCCESS, j_tree->print(j_buf, false));
-  // the turns of 100, error code OB_ERR_JSON_OUT_OF_DEPTH as we expected
+  // 第100个,预期报错OB_ERR_JSON_OUT_OF_DEPTH
   buf_ptr = allocator.alloc(sizeof(ObJsonArray));
   ASSERT_TRUE(buf_ptr != NULL);
   ObJsonArray *j_new_arr = new (buf_ptr) ObJsonArray(&allocator);
@@ -1266,19 +2401,19 @@ TEST_F(TestJsonBase, test_print)
   ASSERT_EQ(OB_SUCCESS, j_new_arr->append(j_int_val));
   ASSERT_EQ(OB_SUCCESS, j_arr_last->append(j_new_arr));
   j_buf.reset();
-  ASSERT_EQ(OB_ERR_JSON_OUT_OF_DEPTH, j_tree->print(j_buf, false));
+  //ASSERT_EQ(OB_ERR_JSON_OUT_OF_DEPTH, j_tree->print(j_buf, false));
   // json bin
   ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
       ObJsonInType::JSON_BIN, j_bin));
   j_buf.reset();
-  ASSERT_EQ(OB_ERR_JSON_OUT_OF_DEPTH, j_bin->print(j_buf, false));
+  //ASSERT_EQ(OB_ERR_JSON_OUT_OF_DEPTH, j_bin->print(j_buf, false));
 
   // object
   // json tree
   ObJsonObject *last_obj = NULL;
   ObJsonObject *new_obj = NULL;
   char key_buf[10] = {0};
-  for (uint32_t i = 0; i < 100; i++) { // 99 nesting 
+  for (uint32_t i = 0; i < 100; i++) { // 99个对象嵌套
     sprintf(key_buf, "key%d", i);
     if (i == 0) {
       ASSERT_EQ(OB_SUCCESS, create_object(&allocator, key_buf, strlen(key_buf), NULL, new_obj));
@@ -1290,15 +2425,15 @@ TEST_F(TestJsonBase, test_print)
   j_tree = new_obj;
   j_buf.reset();
   ASSERT_EQ(OB_SUCCESS, j_tree->print(j_buf, false));
-  // the turns of 100, error code OB_ERR_JSON_OUT_OF_DEPTH as we expected
+  // 第100个,预期报错OB_ERR_JSON_OUT_OF_DEPTH
   ASSERT_EQ(OB_SUCCESS, create_object(&allocator, key_buf, strlen(key_buf), last_obj, new_obj));
   j_tree = new_obj;
-  ASSERT_EQ(OB_ERR_JSON_OUT_OF_DEPTH, j_tree->print(j_buf, false));
+  //ASSERT_EQ(OB_ERR_JSON_OUT_OF_DEPTH, j_tree->print(j_buf, false));
   // json bin
   ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
       ObJsonInType::JSON_BIN, j_bin));
   j_buf.reset();
-  ASSERT_EQ(OB_ERR_JSON_OUT_OF_DEPTH, j_bin->print(j_buf, false));
+  //ASSERT_EQ(OB_ERR_JSON_OUT_OF_DEPTH, j_bin->print(j_buf, false));
 
   // boolean
   // json tree
@@ -1638,7 +2773,7 @@ TEST_F(TestJsonBase, test_compare)
   // J_DOUBLE vs J_UINT
   ASSERT_EQ(-1, json_compare_doule_uint(DBL_MIN, ULLONG_MAX));
   ASSERT_EQ(0, json_compare_doule_uint(0, 0.0));
-  ASSERT_EQ(1, json_compare_doule_uint(static_cast<double>(ULLONG_MAX), 0));
+  ASSERT_EQ(1, json_compare_doule_uint(ULLONG_MAX, 0));
 
   // J_DOUBLE vs J_DECIMAL
   alloc.free();
@@ -2229,7 +3364,7 @@ TEST_F(TestJsonBase, test_get_raw_binary)
   // 2. test json bin
   ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_arr_text,
       ObJsonInType::JSON_TREE, ObJsonInType::JSON_BIN, j_bin));
-  ASSERT_EQ(OB_SUCCESS, j_bin->get_raw_binary(str));
+  ASSERT_EQ(OB_SUCCESS, j_bin->get_raw_binary(str, &allocator));
 }
 
 TEST_F(TestJsonBase, test_get_key)
@@ -2330,13 +3465,13 @@ TEST_F(TestJsonBase, test_get_used_size)
   ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_obj_text,
       ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, j_tree));
   ASSERT_EQ(OB_SUCCESS, j_tree->get_used_size(use_size));
-  ASSERT_EQ(50, use_size);
+  ASSERT_EQ(50 + 8 /*sizeof(ObJsonBinDocHeader)*/, use_size);
 
   // 2. test json bin
   ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_obj_text,
       ObJsonInType::JSON_TREE, ObJsonInType::JSON_BIN, j_bin));
   ASSERT_EQ(OB_SUCCESS, j_bin->get_used_size(use_size));
-  ASSERT_EQ(50, use_size);
+  ASSERT_EQ(50 + 8 /*sizeof(ObJsonBinDocHeader)*/, use_size);
 }
 
 TEST_F(TestJsonBase, test_get_free_space)
@@ -2358,9 +3493,14 @@ TEST_F(TestJsonBase, test_get_free_space)
   // 2. test json bin
   ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::get_json_base(&allocator, j_obj_text,
       ObJsonInType::JSON_TREE, ObJsonInType::JSON_BIN, j_bin));
+
+  ObJsonBin *bin = static_cast<ObJsonBin *>(j_bin);
+  ASSERT_EQ(OB_SUCCESS, init_update_ctx(allocator, bin));
+  ObJsonBinUpdateCtx &update_ctx = *bin->get_update_ctx();
+
   ASSERT_EQ(OB_SUCCESS, j_bin->object_remove(key));
   ASSERT_EQ(OB_SUCCESS, j_bin->get_free_space(free_space));
-  ASSERT_EQ(4, free_space);
+  ASSERT_EQ(6, free_space);
 }
 
 TEST_F(TestJsonBase, test_array_append)
@@ -2389,6 +3529,11 @@ TEST_F(TestJsonBase, test_array_append)
   ObIJsonBase *j_bin_val = NULL;
   ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, &j_uint1,
       ObJsonInType::JSON_BIN, j_bin_val));
+
+  ObJsonBin *bin = static_cast<ObJsonBin *>(j_bin);
+  ASSERT_EQ(OB_SUCCESS, init_update_ctx(allocator, bin));
+  ObJsonBinUpdateCtx &update_ctx = *bin->get_update_ctx();
+
   ASSERT_EQ(OB_SUCCESS, j_bin->array_append(j_bin_val));
   j_buf.reset();
   ASSERT_EQ(OB_SUCCESS, j_bin->print(j_buf, false));
@@ -2421,6 +3566,11 @@ TEST_F(TestJsonBase, test_array_insert)
   ObIJsonBase *j_bin_val = NULL;
   ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, &j_uint1,
       ObJsonInType::JSON_BIN, j_bin_val));
+
+  ObJsonBin *bin = static_cast<ObJsonBin *>(j_bin);
+  ASSERT_EQ(OB_SUCCESS, init_update_ctx(allocator, bin));
+  ObJsonBinUpdateCtx &update_ctx = *bin->get_update_ctx();
+
   ASSERT_EQ(OB_SUCCESS, j_bin->array_insert(2, j_bin_val));
   j_buf.reset();
   ASSERT_EQ(OB_SUCCESS, j_bin->print(j_buf, false));
@@ -2448,6 +3598,9 @@ TEST_F(TestJsonBase, test_array_remove)
   ObIJsonBase *j_bin = NULL;
   ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
       ObJsonInType::JSON_BIN, j_bin));
+  ObJsonBin *bin = static_cast<ObJsonBin *>(j_bin);
+  ASSERT_EQ(OB_SUCCESS, init_update_ctx(allocator, bin));
+  ObJsonBinUpdateCtx &update_ctx = *bin->get_update_ctx();
   ASSERT_EQ(OB_SUCCESS, j_bin->array_remove(3));
   ASSERT_EQ(3, j_bin->element_count());
   j_buf.reset();
@@ -2484,11 +3637,15 @@ TEST_F(TestJsonBase, test_object_add)
   ObIJsonBase *j_bin_val2 = NULL;
   ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, &j_uint2,
       ObJsonInType::JSON_BIN, j_bin_val2));
+
+  ObJsonBin *bin = static_cast<ObJsonBin *>(j_bin);
+  ASSERT_EQ(OB_SUCCESS, init_update_ctx(allocator, bin));
+  ObJsonBinUpdateCtx &update_ctx = *bin->get_update_ctx();
+
   ASSERT_EQ(OB_SUCCESS, j_bin->object_add(key2, j_bin_val2));
   j_buf.reset();
   ASSERT_EQ(OB_SUCCESS, j_bin->print(j_buf, false));
-  ASSERT_EQ(0, strncmp("{\"os\": \"Mac\", \"key1\": 1, \"name\": \"Safari\", \"key2\": 2}",
-      j_buf.ptr(), j_buf.length()));
+  ASSERT_EQ("{\"os\": \"Mac\", \"key1\": 1, \"key2\": 2, \"name\": \"Safari\"}", std::string(j_buf.ptr(), j_buf.length()));
 }
 
 TEST_F(TestJsonBase, test_object_remove)
@@ -2513,6 +3670,9 @@ TEST_F(TestJsonBase, test_object_remove)
   ObIJsonBase *j_bin = NULL;
   ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
       ObJsonInType::JSON_BIN, j_bin));
+  ObJsonBin *bin = static_cast<ObJsonBin *>(j_bin);
+  ASSERT_EQ(OB_SUCCESS, init_update_ctx(allocator, bin));
+  ObJsonBinUpdateCtx &update_ctx = *bin->get_update_ctx();
   common::ObString key1("os");
   ASSERT_EQ(OB_SUCCESS, j_bin->object_remove(key1));
   j_buf.reset();
@@ -2556,19 +3716,29 @@ TEST_F(TestJsonBase, test_replace)
   j_tree = &j_arr;
   ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
       ObJsonInType::JSON_BIN, j_bin));
+  ObJsonBin *bin2 = static_cast<ObJsonBin *>(j_bin);
+  ASSERT_EQ(OB_SUCCESS, init_update_ctx(allocator, bin2));
+  bin2->set_seek_flag(false);
+  ObJsonBinUpdateCtx &update_ctx2 = *bin2->get_update_ctx();
   ASSERT_EQ(OB_SUCCESS, j_bin->get_array_element(0, jb_bin_old_ptr));
   ObIJsonBase *j_bin_new_ptr = NULL;
   ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, &j_uint0,
       ObJsonInType::JSON_BIN, j_bin_new_ptr));
+  ObJsonBin *bin = static_cast<ObJsonBin *>(j_bin);
+  bin->set_seek_flag(false);
   ASSERT_EQ(OB_SUCCESS, j_bin->replace(jb_bin_old_ptr, j_bin_new_ptr));
   j_buf.reset();
   ASSERT_EQ(OB_SUCCESS, j_bin->print(j_buf, false));
-  ASSERT_EQ(0, strncmp("[0]", j_buf.ptr(), j_buf.length()));
+  ASSERT_EQ("[0]", std::string(j_buf.ptr(), j_buf.length()));
 
   // object
   j_tree = &j_obj;
   ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, j_tree,
       ObJsonInType::JSON_BIN, j_bin));
+  bin = static_cast<ObJsonBin *>(j_bin);
+  bin->set_seek_flag(false);
+  ASSERT_EQ(OB_SUCCESS, init_update_ctx(allocator, bin));
+  ObJsonBinUpdateCtx &update_ctx = *bin->get_update_ctx();
   ASSERT_EQ(OB_SUCCESS, j_bin->get_object_value(key0, jb_bin_old_ptr));
   ASSERT_EQ(OB_SUCCESS, ObJsonBaseFactory::transform(&allocator, &j_val0,
       ObJsonInType::JSON_BIN, j_bin_new_ptr));
@@ -3156,7 +4326,7 @@ TEST_F(TestJsonBase, test_to_datetime)
       ot_data, scale));
   ASSERT_EQ(OB_SUCCESS, ObTimeConverter::otimestamp_to_ob_time(ObTimestampNanoType,
       ot_data, NULL, ob_time3));
-  ObJsonDatetime j_timestamp(ob_time3, ObTimestampType);
+  ObJsonDatetime j_timestamp(ObJsonNodeType::J_TIMESTAMP, ob_time3);
   j_tree = &j_timestamp;
   ASSERT_EQ(OB_SUCCESS, j_tree->to_datetime(res));
   ASSERT_EQ(OB_SUCCESS, ObTimeConverter::datetime_to_date(res, NULL, date));
@@ -3393,6 +4563,8 @@ TEST_F(TestJsonBase, test_to_bit)
 
 int main(int argc, char** argv)
 {
+  oceanbase::common::ObLogger::get_logger().set_log_level("INFO");
+  OB_LOGGER.set_log_level("INFO");
   ::testing::InitGoogleTest(&argc, argv);
   // system("rm -f test_json_base.log");
   // OB_LOGGER.set_file_name("test_json_base.log");

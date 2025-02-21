@@ -1,6 +1,6 @@
 /**
- * Copyright (c) 2021 OceanBase
- * OceanBase CE is licensed under Mulan PubL v2.
+ * Copyright (c) 2023 OceanBase
+ * OceanBase is licensed under Mulan PubL v2.
  * You can use this software according to the terms and conditions of the Mulan PubL v2.
  * You may obtain a copy of Mulan PubL v2 at:
  *          http://license.coscl.org.cn/MulanPubL-2.0
@@ -10,122 +10,146 @@
  * See the Mulan PubL v2 for more details.
  */
 
-#define USING_LOG_PREFIX SQL_ENG
+#define USING_LOG_PREFIX STORAGE_FTS
 
 #include "sql/engine/expr/ob_expr_word_segment.h"
-#include "lib/word_segment/ob_word_segment.h"
+#include "sql/engine/expr/ob_expr_lob_utils.h"
 
-namespace oceanbase {
+namespace oceanbase
+{
 using namespace common;
-namespace sql {
-ObExprWordSegment::ObExprWordSegment(ObIAllocator& allocator)
-    : ObFuncExprOperator(allocator, T_FUN_SYS_WORD_SEGMENT, N_WORD_SEGMENT, MORE_THAN_ZERO, NOT_ROW_DIMENSION)
+namespace sql
+{
+ObExprWordSegment::ObExprWordSegment(ObIAllocator &allocator)
+  : ObFuncExprOperator(allocator, T_FUN_SYS_WORD_SEGMENT, N_WORD_SEGMENT, MORE_THAN_ZERO, VALID_FOR_GENERATED_COL, NOT_ROW_DIMENSION)
 {
   need_charset_convert_ = false;
 }
 
-int ObExprWordSegment::calc_result_typeN(
-    ObExprResType& type, ObExprResType* types, int64_t param_num, ObExprTypeCtx& type_ctx) const
+int ObExprWordSegment::calc_result_typeN(ObExprResType &type,
+                                         ObExprResType *types,
+                                         int64_t param_num,
+                                         ObExprTypeCtx &type_ctx) const
 {
-  UNUSED(type_ctx);
   int ret = OB_SUCCESS;
-  ObLength max_len = 0;
-  for (int64_t i = 0; /*OB_SUCCESS == ret && */ i < param_num; ++i) {
-    types[i].set_calc_type(ObVarcharType);
-    max_len += types[i].get_length();
+  if (OB_UNLIKELY(param_num < 1) || OB_ISNULL(types)) {
+    ret = OB_INVALID_ARGUMENT;
+    LOG_WARN("invalid argument for fulltext expr", K(ret), K(param_num), KP(types));
+  } else {
+    ObLength max_len = 0;
+    for (int64_t i = 0; i < param_num; ++i) {
+      max_len += types[i].get_length();
+    }
+    type.set_varchar();
+    type.set_length(max_len);
+    type.set_collation_type(types[0].get_collation_type());
   }
-  type.set_varchar();
-  type.set_length(max_len);
-  ret = aggregate_charsets_for_string_result(type, types, param_num, type_ctx.get_coll_type());
   return ret;
 }
 
-int ObExprWordSegment::calc_resultN(
-    ObObj& result, const ObObj* objs_array, int64_t param_num, ObExprCtx& expr_ctx) const
+int ObExprWordSegment::calc_resultN(ObObj &result,
+                                    const ObObj *objs_array,
+                                    int64_t param_num,
+                                    ObExprCtx &expr_ctx) const
+{
+  return OB_NOT_SUPPORTED;
+}
+
+int ObExprWordSegment::cg_expr(
+    ObExprCGCtx &cg_ctx,
+    const ObRawExpr &raw_expr,
+    ObExpr &rt_expr) const
 {
   int ret = OB_SUCCESS;
-  ObSEArray<ObString, 32> words;
-  ObWordSegment ws;
-  common::hash::ObHashSet<ObObj, common::hash::NoPthreadDefendMode> hashset;
-  const int64_t BUCKET_SIZE = 64;
-  if (OB_ISNULL(objs_array) || OB_ISNULL(expr_ctx.calc_buf_) || param_num < 1) {
+  UNUSED(raw_expr);
+  UNUSED(cg_ctx);
+  if (OB_UNLIKELY(rt_expr.arg_cnt_ < 1) || OB_ISNULL(rt_expr.args_)) {
     ret = OB_INVALID_ARGUMENT;
-    LOG_WARN("Invalid argument passed in", K(objs_array), K(expr_ctx.calc_buf_), K(param_num), K(ret));
-  } else if (OB_FAIL(ws.init(tokenizer_))) {
-    LOG_WARN("failed to init ObWordSegment", K(ret));
-  } else if (OB_FAIL(hashset.create(BUCKET_SIZE))) {
-    LOG_ERROR("failed to create hashset", K(ret));
+    LOG_WARN("invalid arguments", K(rt_expr.arg_cnt_), KP(rt_expr.args_), K(rt_expr.type_));
   } else {
-    ObSEArray<ObObj, 8> tmp_result;
-    for (int64_t i = 0; OB_SUCC(ret) && i < param_num; ++i) {
-      tmp_result.reset();
-      if (objs_array[i].is_null()) {
-      } else if (!objs_array[i].is_string_type()) {
-        ret = OB_ERR_INVALID_TYPE_FOR_OP;
-        LOG_WARN("Unsupported type to word segment", K(objs_array[i].get_type()), K(ret));
-      } else if (OB_FAIL(ws.segment(objs_array[i], tmp_result))) {
-        LOG_WARN("failed to segment string in index cell", K(i), K(objs_array[i]), K(ret));
-      } else {
-        ObObj word;
-        for (int64_t j = 0; OB_SUCC(ret) && j < tmp_result.count(); j++) {
-          word.reset();
-          int hash_ret = hashset.exist_refactored(tmp_result.at(j));
-          if (OB_HASH_EXIST == hash_ret) {
-            // do nothing
-          } else if (OB_HASH_NOT_EXIST != hash_ret) {
-            ret = hash_ret;
-            LOG_WARN("failed to check exist in hashset", K(ret));
-          } else if (OB_FAIL(ob_write_obj(*expr_ctx.calc_buf_, tmp_result.at(j), word))) {
-            LOG_WARN("failed to copy string", K(i), K(tmp_result.at(j).get_string()), K(ret));
-          } else if (OB_FAIL(hashset.set_refactored(word))) {
-            LOG_WARN("failed to set item", K(word), K(ret));
-          } else if (OB_FAIL(words.push_back(word.get_string()))) {
-            LOG_WARN("failed to push back word", K(ret));
-          } else { /*do nothing*/
-          }
-        }
-        // recover original data and free memory allocated by ws regardless of any error
-        int tmp_ret = ws.reset();
-        if (OB_SUCCESS != tmp_ret) {
-          ret = OB_SUCCESS == ret ? tmp_ret : ret;
-          LOG_WARN("Fail to reset ws", K(ret));
-        }
-      }
-    }
-    if (OB_SUCC(ret) && !words.empty()) {
-      int64_t len = words.count();  // for delimiters
-      for (int64_t i = 0; OB_SUCC(ret) && i < words.count(); ++i) {
-        len += words.at(i).length();
-      }
-      if (OB_SUCC(ret)) {
-        char* ptr = static_cast<char*>(expr_ctx.calc_buf_->alloc(len));
-        if (OB_UNLIKELY(NULL == ptr)) {
-          ret = OB_ALLOCATE_MEMORY_FAILED;
-          LOG_WARN("failed to allocate memory", K(expr_ctx.calc_buf_), K(len), K(ret));
-        } else {
-          char* cur_ptr = ptr;
-          for (int64_t i = 0; OB_SUCC(ret) && i < words.count(); ++i) {
-            MEMCPY(cur_ptr, words.at(i).ptr(), words.at(i).length());
-            cur_ptr += words.at(i).length();
-            cur_ptr++[0] = ',';
-          }
-          if (OB_SUCC(ret)) {
-            ObString str(len, ptr);
-            result.set_varchar(str);
-            if (!result.is_null()) {
-              result.set_collation(result_type_);
-            }
-          }
-        }
-      }
-    }
-    // must destory hash anyway and free unused memory
-    hashset.destroy();
-    for (int64_t i = 0; OB_SUCC(ret) && i < words.count(); ++i) {
-      expr_ctx.calc_buf_->free(words.at(i).ptr());
-    }
+    rt_expr.eval_func_ = generate_fulltext_column;
   }
   return ret;
 }
+
+/*static*/ int ObExprWordSegment::generate_fulltext_column(
+    const ObExpr &raw_ctx,
+    ObEvalCtx &eval_ctx,
+    ObDatum &expr_datum)
+{
+  int ret = OB_SUCCESS;
+  const ObCharsetInfo *cs = nullptr;
+  if (OB_UNLIKELY(raw_ctx.arg_cnt_ <= 0) || OB_ISNULL(raw_ctx.args_)) {
+    ret = OB_INVALID_ARGUMENT;
+    LOG_WARN("invalid arguments", K(ret), K(raw_ctx), KP(raw_ctx.args_));
+  } else if (OB_ISNULL(cs = ObCharset::get_charset(raw_ctx.args_[0]->obj_meta_.get_collation_type()))) {
+    ret = OB_ERR_UNEXPECTED;
+    LOG_WARN("unexpected error, charset info is nullptr", K(ret), KP(cs), K(raw_ctx.args_[0]->obj_meta_));
+  } else {
+    ObEvalCtx::TempAllocGuard alloc_guard(eval_ctx);
+    int64_t res_str_len = 0;
+    ObSEArray<ObString, 1> ft_parts;
+    const int64_t mb_max_len = cs->mbmaxlen;
+    char mb_separator[mb_max_len];
+    int32_t length_of_separator = 0;
+    for (int64_t i = 0; OB_SUCC(ret) && i < raw_ctx.arg_cnt_; ++i) {
+      ObString res;
+      common::ObDatum *datum = nullptr;
+      if (OB_ISNULL(raw_ctx.args_[i])) {
+        ret = OB_ERR_UNEXPECTED;
+        LOG_WARN("unexpected error, nullptr", K(ret), KP(raw_ctx.args_[i]), K(i), K(raw_ctx.arg_cnt_));
+      } else if (OB_FAIL(raw_ctx.args_[i]->eval(eval_ctx, datum))) {
+        LOG_WARN("fail to eval expr", K(ret), K(raw_ctx), K(eval_ctx));
+      } else if (OB_ISNULL(datum)) {
+        ret = OB_ERR_UNEXPECTED;
+        LOG_WARN("unexpected error, datum is nullptr", K(ret), KP(datum));
+      } else if (datum->is_null()) {
+        LOG_TRACE("the column value is null", K(i), KPC(datum));
+      } else if (FALSE_IT(res = datum->get_string())) {
+      } else if (OB_FAIL(ObTextStringHelper::read_real_string_data(alloc_guard.get_allocator(), *datum, raw_ctx.args_[i]->datum_meta_,
+              raw_ctx.args_[i]->obj_meta_.has_lob_header(), res))) {
+        LOG_WARN("fail to get real data.", K(ret), K(res));
+      } else if (OB_FAIL(ft_parts.push_back(res))) {
+        LOG_WARN("fail to push back ft part array", K(ret), K(res));
+      } else {
+        res_str_len += ft_parts.at(ft_parts.count() - 1).length();
+      }
+    }
+    wchar_t wide_char = L' ';
+    if (OB_FAIL(ret)) {
+    } else if (0 == ft_parts.count()) {
+      expr_datum.set_null();
+      LOG_TRACE("generate fulltext column is null", K(raw_ctx), K(eval_ctx), K(expr_datum));
+    } else if (OB_FAIL(ObCharset::wc_mb(raw_ctx.args_[0]->obj_meta_.get_collation_type(), wide_char, mb_separator,
+              mb_max_len, length_of_separator))) {
+      LOG_WARN("fail to wc_mb", K(ret), K(mb_max_len), KPHEX(mb_separator, mb_max_len));
+    } else {
+      res_str_len = res_str_len + length_of_separator * (ft_parts.count() - 1);
+      ObExprStrResAlloc res_alloc(raw_ctx, eval_ctx);
+      char *ptr = static_cast<char*>(res_alloc.alloc(res_str_len));
+      if (OB_UNLIKELY(NULL == ptr)) {
+        ret = OB_ALLOCATE_MEMORY_FAILED;
+        LOG_WARN("failed to allocate memory", K(ret), K(res_str_len));
+      } else {
+        char* cur_ptr = ptr;
+        for (int64_t i = 0; OB_SUCC(ret) && i < ft_parts.count(); ++i) {
+          if (0 != i) {
+            MEMCPY(cur_ptr, mb_separator, length_of_separator);
+            cur_ptr += length_of_separator;
+          }
+          MEMCPY(cur_ptr, ft_parts.at(i).ptr(), ft_parts.at(i).length());
+          cur_ptr += ft_parts.at(i).length();
+        }
+        if (OB_SUCC(ret)) {
+          ObString str(res_str_len, ptr);
+          expr_datum.set_string(str);
+          LOG_TRACE("generate fulltext column", K(str), K(raw_ctx), K(eval_ctx), K(expr_datum));
+        }
+      }
+    }
+  }
+  return OB_SUCCESS;
+}
+
 }  // namespace sql
 }  // namespace oceanbase

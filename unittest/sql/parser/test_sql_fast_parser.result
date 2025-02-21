@@ -12,7 +12,7 @@ T_STMT_LIST (null) off: -1 len: -1
 ----------T_IDENT (t1) off: 103 len: 2
 ----T_HINT_OPTION_LIST (null) off: 42 len: 37
 ------T_NO_REWRITE (null) off: -1 len: -1
-------T_INDEX (null) off: -1 len: -1
+------T_INDEX_HINT (null) off: -1 len: -1
 --------T_RELATION_FACTOR_IN_HINT (null) off: -1 len: -1
 ----------T_RELATION_FACTOR (t1) off: -1 len: -1
 ------------T_IDENT (t1) off: 62 len: 2
@@ -52,7 +52,7 @@ T_STMT_LIST (null) off: -1 len: -1
 ------------T_INT (2) off: 53 len: 1
 ----------T_SORT_ASC (null) off: -1 len: -1
 ----T_LIMIT_CLAUSE (limit 1) off: 55 len: 7
-------T_LIMIT_INT (1) off: 61 len: 1
+------T_INT (1) off: 61 len: 1
 select * from t1 where c1 = c2+1*2/3-4 order by c1 + 2 limit 1 offset 1;
 T_STMT_LIST (null) off: -1 len: -1
 --T_SELECT (null) off: 0 len: 6
@@ -86,7 +86,7 @@ T_STMT_LIST (null) off: -1 len: -1
 ------------T_INT (2) off: 53 len: 1
 ----------T_SORT_ASC (null) off: -1 len: -1
 ----T_LIMIT_CLAUSE (limit 1 offset 1) off: 55 len: 16
-------T_LIMIT_INT (1) off: 61 len: 1
+------T_INT (1) off: 61 len: 1
 ------T_INT (1) off: 70 len: 1
 select /*+ index(t1.c1 primary) */* from t1 where `name` = 'abc';
 T_STMT_LIST (null) off: -1 len: -1
@@ -105,7 +105,7 @@ T_STMT_LIST (null) off: -1 len: -1
 --------T_VARCHAR ('abc') off: 59 len: 5
 ----------T_VARCHAR (abc) off: 60 len: 3
 ----T_HINT_OPTION_LIST (null) off: 9 len: 25
-------T_INDEX (null) off: -1 len: -1
+------T_INDEX_HINT (null) off: -1 len: -1
 --------T_RELATION_FACTOR_IN_HINT (null) off: -1 len: -1
 ----------T_RELATION_FACTOR (c1) off: -1 len: -1
 ------------T_IDENT (t1) off: 17 len: 2
@@ -128,7 +128,7 @@ T_STMT_LIST (null) off: -1 len: -1
 --------T_VARCHAR ('abc') off: 59 len: 5
 ----------T_VARCHAR (abc) off: 60 len: 3
 ----T_HINT_OPTION_LIST (null) off: 9 len: 27
-------T_INDEX (null) off: -1 len: -1
+------T_INDEX_HINT (null) off: -1 len: -1
 --------T_RELATION_FACTOR_IN_HINT (null) off: -1 len: -1
 ----------T_RELATION_FACTOR (name) off: -1 len: -1
 ------------T_IDENT (t1) off: 17 len: 2
@@ -148,7 +148,7 @@ T_STMT_LIST (null) off: -1 len: -1
 ----------T_IDENT (T1) off: 103 len: 2
 ----T_HINT_OPTION_LIST (null) off: 78 len: 37
 ------T_NO_REWRITE (null) off: -1 len: -1
-------T_INDEX (null) off: -1 len: -1
+------T_INDEX_HINT (null) off: -1 len: -1
 --------T_RELATION_FACTOR_IN_HINT (null) off: -1 len: -1
 ----------T_RELATION_FACTOR (t1) off: -1 len: -1
 ------------T_IDENT (t1) off: 62 len: 2
@@ -248,7 +248,7 @@ T_STMT_LIST (null) off: -1 len: -1
 --------T_CHAR ('abc') off: 59 len: 5
 ----------T_VARCHAR (abc) off: 60 len: 3
 ----T_HINT_OPTION_LIST (null) off: 33 len: 25
-------T_INDEX (null) off: -1 len: -1
+------T_INDEX_HINT (null) off: -1 len: -1
 --------T_RELATION_FACTOR_IN_HINT (null) off: -1 len: -1
 ----------T_RELATION_FACTOR (c1) off: -1 len: -1
 ------------T_IDENT (t1) off: 17 len: 2
@@ -271,7 +271,7 @@ T_STMT_LIST (null) off: -1 len: -1
 --------T_CHAR ('abc') off: 59 len: 5
 ----------T_VARCHAR (abc) off: 60 len: 3
 ----T_HINT_OPTION_LIST (null) off: 35 len: 27
-------T_INDEX (null) off: -1 len: -1
+------T_INDEX_HINT (null) off: -1 len: -1
 --------T_RELATION_FACTOR_IN_HINT (null) off: -1 len: -1
 ----------T_RELATION_FACTOR (name) off: -1 len: -1
 ------------T_IDENT (t1) off: 17 len: 2

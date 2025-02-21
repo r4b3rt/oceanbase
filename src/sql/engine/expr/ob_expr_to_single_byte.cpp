@@ -12,39 +12,51 @@
 
 #define USING_LOG_PREFIX SQL_ENG
 
-#include "lib/ob_name_def.h"
 #include "sql/engine/expr/ob_expr_to_single_byte.h"
 #include "sql/session/ob_sql_session_info.h"
 #include "sql/engine/expr/ob_expr_result_type_util.h"
+#include "lib/charset/ob_charset_string_helper.h"
 
-namespace oceanbase {
+namespace oceanbase
+{
 using namespace common;
 using namespace share;
-namespace sql {
+namespace sql
+{
 
-ObExprToSingleByte::ObExprToSingleByte(ObIAllocator& alloc)
-    : ObFuncExprOperator(alloc, T_FUN_SYS_TO_SINGLE_BYTE, N_TO_SINGLE_BYTE, 1, NOT_ROW_DIMENSION)
-{}
+ObExprToSingleByte::ObExprToSingleByte(ObIAllocator &alloc)
+    : ObFuncExprOperator(alloc, T_FUN_SYS_TO_SINGLE_BYTE, N_TO_SINGLE_BYTE, 1, VALID_FOR_GENERATED_COL, NOT_ROW_DIMENSION)
+{
+}
 ObExprToSingleByte::~ObExprToSingleByte()
-{}
+{
+}
 
-int ObExprToSingleByte::calc_result_type1(ObExprResType& type, ObExprResType& type1, ObExprTypeCtx& type_ctx) const
+int ObExprToSingleByte::calc_result_type1(ObExprResType &type,
+                                          ObExprResType &type1,
+                                          ObExprTypeCtx &type_ctx) const
 {
   int ret = OB_SUCCESS;
-  ObArray<ObExprResType*> params;
+  ObArray<ObExprResType *> params;
   ObLength length = 0;
   CK(OB_NOT_NULL(type_ctx.get_session()));
-  OZ(params.push_back(&type1));
-  OZ(aggregate_string_type_and_charset_oracle(*type_ctx.get_session(), params, type, true));
+  OZ (params.push_back(&type1));
+  // 推导结果的字符集和长度语义
+  OZ (aggregate_string_type_and_charset_oracle(*type_ctx.get_session(),
+                                               params,
+                                               type,
+                                               PREFER_VAR_LEN_CHAR));
+  // clob 是一种比较特殊的类型，当参数为clob时，结果为varchar2, byte 语义
   if (OB_SUCC(ret) && type1.is_clob()) {
     type.set_varchar();
     type.set_length_semantics(LS_BYTE);
   }
-  CK(LS_CHAR == type.get_length_semantics() || LS_BYTE == type.get_length_semantics());
-  OZ(ObExprResultTypeUtil::deduce_max_string_length_oracle(
-      *type_ctx.get_session(), type1, type.get_length_semantics(), length));
-  OX(type.set_length(length));
-  OZ(deduce_string_param_calc_type_and_charset(*type_ctx.get_session(), type, params));
+  // 设置参数的 calc_type
+  OZ (deduce_string_param_calc_type_and_charset(*type_ctx.get_session(),
+                                                type,
+                                                params));
+  // 推导结果的长度
+  OX (type.set_length(type1.get_calc_length()));
   return ret;
 }
 
@@ -66,65 +78,42 @@ int calc_to_single_byte_expr(const ObString &input, const ObCollationType cs_typ
       pos = output.length();
     }
   } else {
-    ObStringScanner scanner(input, cs_type);
-    ObString encoding;
-    int32_t wc = 0;
     char *ptr = buf;
+    struct Functor {
+      Functor(const ObCollationType cs_type, char *&ptr, char *&buf, const int64_t buf_len)
+          : cs_type(cs_type), ptr(ptr), buf(buf), buf_len(buf_len) {}
+      const ObCollationType cs_type;
+      char *&ptr;
+      char *&buf;
+      const int64_t buf_len;
+      int operator() (const ObString &encoding, ob_wc_t wc) {
+        int ret = OB_SUCCESS;
+        int32_t length = 0;
 
-    while (OB_SUCC(ret)
-           && scanner.next_character(encoding, wc, ret)) {
-      int32_t length = 0;
+        if (wc == 0x3000) { //处理空格
+          wc = 0x20;
+        //smart quote not support https://gerry.lamost.org/blog/?p=295757
+        //} else if (wc == 0x201D) { // ” --> " smart double quote
+        //  wc = 0x22;
+        //} else if (wc == 0x2019) { // ’ --> ' smart single quote
+        //  wc = 0x27;
+        } else if (wc >= 0xFF01 && wc <= 0xFF5E) {
+          wc -= 65248;
+        } else {
+          //do nothing
+        }
+        OZ (ObCharset::wc_mb(cs_type, wc, ptr, buf + buf_len - ptr, length));
+        ptr += length;
+        LOG_DEBUG("process char", K(ret), K(wc));
 
-      if (wc == 0x3000) { //处理空格
-        wc = 0x20;
-      //smart quote not support https://gerry.lamost.org/blog/?p=295757
-      //} else if (wc == 0x201D) { // ” --> " smart double quote
-      //  wc = 0x22;
-      //} else if (wc == 0x2019) { // ’ --> ' smart single quote
-      //  wc = 0x27;
-      } else if (wc >= 0xFF01 && wc <= 0xFF5E) {
-        wc -= 65248;
-      } else {
-        //do nothing
-      }
-      OZ (ObCharset::wc_mb(cs_type, wc, ptr, buf + buf_len - ptr, length));
-      ptr += length;
-      LOG_DEBUG("process char", K(ret), K(wc));
-    }
+        return ret;
+      };
+    };
+
+    Functor temp_handler(cs_type, ptr, buf, buf_len);
+    ObCharsetType charset_type = ObCharset::charset_type_by_coll(cs_type);
+    OZ(ObFastStringScanner::foreach_char(input, charset_type, temp_handler));
     pos = ptr - buf;
-  }
-
-  return ret;
-}
-
-int ObExprToSingleByte::calc_result1(ObObj &result,
-                                     const ObObj &obj,
-                                     ObExprCtx &expr_ctx) const
-{
-  int ret = OB_SUCCESS;
-  ObString src_string;
-  ObCollationType src_collation = obj.get_collation_type();
-
-  if (obj.is_null_oracle()) {
-    result.set_null();
-  } else {
-    CK (OB_NOT_NULL(expr_ctx.calc_buf_));
-    OZ (obj.get_string(src_string));
-    if (OB_SUCC(ret)) {
-      char* buff = NULL;
-      int64_t buff_len = src_string.length();
-      int32_t pos = 0;
-
-      if (OB_ISNULL(buff = static_cast<char*>(expr_ctx.calc_buf_->alloc(buff_len)))) {
-        ret = OB_ALLOCATE_MEMORY_FAILED;
-        LOG_WARN("fail to allocate buffer", K(ret), K(buff_len));
-      } else if (OB_FAIL(calc_to_single_byte_expr(src_string, src_collation, buff, buff_len, pos))) {
-        LOG_WARN("fail to calc", K(ret));
-      } else {
-        result.set_common_value(ObString(pos, buff));
-        result.set_meta_type(result_type_);
-      }
-    }
   }
 
   return ret;
@@ -147,7 +136,7 @@ int ObExprToSingleByte::calc_to_single_byte(const ObExpr &expr,
 {
   int ret = OB_SUCCESS;
   ObDatum *src_param = NULL;
-  if (expr.args_[0]->eval(ctx, src_param)) {
+  if (OB_FAIL(expr.args_[0]->eval(ctx, src_param))) {
     LOG_WARN("eval arg failed", K(ret));
   } else {
     if (src_param->is_null()) {
@@ -172,5 +161,5 @@ int ObExprToSingleByte::calc_to_single_byte(const ObExpr &expr,
   return ret;
 }
 
-}  // namespace sql
-}  // namespace oceanbase
+}
+}

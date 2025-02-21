@@ -25,6 +25,13 @@ static const ObObjType NVL_TYPE_PROMOTION[ObMaxTC][ObMaxTC] =
     ObMaxType, /*RowID*/
     ObMaxType, /*Lob*/
     ObJsonType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObDecimalIntType,/*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMySQLDateType, /*mysql date*/
+    ObMySQLDateTimeType, /*mysql datetime*/
+    ObRoaringBitmapType, /*RoaringBitmap*/
   },
   {
     /*int -> XXX*/
@@ -51,6 +58,13 @@ static const ObObjType NVL_TYPE_PROMOTION[ObMaxTC][ObMaxTC] =
     ObMaxType, /*RowID*/
     ObMaxType, /*Lob*/
     ObJsonType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObDecimalIntType,/*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObVarcharType, /*mysql date*/
+    ObVarcharType, /*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
   },
   {
     /*uint -> XXX*/
@@ -77,6 +91,13 @@ static const ObObjType NVL_TYPE_PROMOTION[ObMaxTC][ObMaxTC] =
     ObMaxType, /*RowID*/
     ObMaxType, /*Lob*/
     ObJsonType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObDecimalIntType,/*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObVarcharType, /*mysql date*/
+    ObVarcharType, /*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
   },
   {
     /*float -> XXX*/
@@ -103,6 +124,13 @@ static const ObObjType NVL_TYPE_PROMOTION[ObMaxTC][ObMaxTC] =
     ObMaxType, /*RowID*/
     ObMaxType, /*Lob*/
     ObJsonType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObDoubleType,/*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObVarcharType, /*mysql date*/
+    ObVarcharType, /*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
   },
   {
     /*double -> XXX*/
@@ -129,6 +157,13 @@ static const ObObjType NVL_TYPE_PROMOTION[ObMaxTC][ObMaxTC] =
     ObMaxType, /*RowID*/
     ObMaxType, /*Lob*/
     ObJsonType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObDoubleType,/*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObVarcharType, /*mysql date*/
+    ObVarcharType, /*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
   },
   {
     /*number -> XXX*/
@@ -155,6 +190,13 @@ static const ObObjType NVL_TYPE_PROMOTION[ObMaxTC][ObMaxTC] =
     ObMaxType, /*RowID*/
     ObMaxType, /*Lob*/
     ObJsonType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObDecimalIntType,/*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObVarcharType, /*mysql date*/
+    ObVarcharType, /*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
   },
   {
     /*datetime -> XXX*/
@@ -181,6 +223,13 @@ static const ObObjType NVL_TYPE_PROMOTION[ObMaxTC][ObMaxTC] =
     ObMaxType, /*RowID*/
     ObMaxType, /*Lob*/
     ObJsonType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObVarcharType,/*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMySQLDateTimeType, /*mysql date*/
+    ObMySQLDateTimeType, /*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
   },
   {
     /*date -> XXX*/
@@ -207,6 +256,13 @@ static const ObObjType NVL_TYPE_PROMOTION[ObMaxTC][ObMaxTC] =
     ObMaxType, /*RowID*/
     ObMaxType, /*Lob*/
     ObJsonType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObVarcharType,/*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMySQLDateType, /*mysql date*/
+    ObMySQLDateTimeType, /*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
   },
   {
     /*time -> XXX*/
@@ -233,6 +289,13 @@ static const ObObjType NVL_TYPE_PROMOTION[ObMaxTC][ObMaxTC] =
     ObMaxType, /*RowID*/
     ObMaxType, /*Lob*/
     ObJsonType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObVarcharType,/*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMySQLDateTimeType, /*mysql date*/
+    ObMySQLDateTimeType, /*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
   },
   {
     /*year -> XXX*/
@@ -259,6 +322,13 @@ static const ObObjType NVL_TYPE_PROMOTION[ObMaxTC][ObMaxTC] =
     ObMaxType, /*RowID*/
     ObMaxType, /*Lob*/
     ObJsonType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObDecimalIntType,/*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObVarcharType, /*mysql date*/
+    ObVarcharType, /*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
   },
   {
     /*string -> XXX*/
@@ -285,6 +355,13 @@ static const ObObjType NVL_TYPE_PROMOTION[ObMaxTC][ObMaxTC] =
     ObMaxType, /*RowID*/
     ObMaxType, /*Lob*/
     ObJsonType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObVarcharType,/*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObVarcharType, /*mysql date*/
+    ObVarcharType, /*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
   },
   {
     /*extend -> XXX*/
@@ -311,6 +388,13 @@ static const ObObjType NVL_TYPE_PROMOTION[ObMaxTC][ObMaxTC] =
     ObMaxType, /*RowID*/
     ObMaxType, /*Lob*/
     ObMaxType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObMaxType,/*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMaxType, /*mysql date*/
+    ObMaxType, /*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
   },
   {
     /*unknown -> XXX*/
@@ -337,6 +421,13 @@ static const ObObjType NVL_TYPE_PROMOTION[ObMaxTC][ObMaxTC] =
     ObMaxType, /*RowID*/
     ObMaxType, /*Lob*/
     ObJsonType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObDecimalIntType,/*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMaxType, /*mysql date*/
+    ObMaxType, /*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
   },
   {
     /*text -> XXX*/
@@ -363,6 +454,13 @@ static const ObObjType NVL_TYPE_PROMOTION[ObMaxTC][ObMaxTC] =
     ObMaxType, /*RowID*/
     ObMaxType, /*Lob*/
     ObJsonType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObLongTextType,/*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObLongTextType, /*mysql date*/
+    ObLongTextType, /*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
   },
   {
     /*bit -> XXX*/
@@ -389,6 +487,13 @@ static const ObObjType NVL_TYPE_PROMOTION[ObMaxTC][ObMaxTC] =
     ObMaxType, /*RowID*/
     ObMaxType, /*Lob*/
     ObJsonType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObDecimalIntType,/*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObVarcharType, /*mysql date*/
+    ObVarcharType, /*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
   },
   {
     /*EnumSet -> XXX*/
@@ -415,6 +520,13 @@ static const ObObjType NVL_TYPE_PROMOTION[ObMaxTC][ObMaxTC] =
     ObMaxType, /*RowID*/
     ObMaxType, /*Lob*/
     ObJsonType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObVarcharType,/*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObVarcharType, /*mysql date*/
+    ObVarcharType, /*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
   },
   {
     /*EnumSetInner -> XXX*/
@@ -441,6 +553,13 @@ static const ObObjType NVL_TYPE_PROMOTION[ObMaxTC][ObMaxTC] =
     ObMaxType, /*RowID*/
     ObMaxType, /*Lob*/
     ObMaxType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObMaxType, /*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMaxType, /*mysql date*/
+    ObMaxType, /*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
   },
   {
     /*OTimestamp -> XXX*/
@@ -467,6 +586,13 @@ static const ObObjType NVL_TYPE_PROMOTION[ObMaxTC][ObMaxTC] =
     ObMaxType, /*RowID*/
     ObMaxType, /*Lob*/
     ObJsonType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObVarcharType,/*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObTimestampTZType, /*mysql date*/
+    ObTimestampTZType, /*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
   },
   {
     /*Raw -> XXX*/
@@ -493,6 +619,13 @@ static const ObObjType NVL_TYPE_PROMOTION[ObMaxTC][ObMaxTC] =
     ObMaxType, /*RowID*/
     ObMaxType, /*Lob*/
     ObMaxType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObMaxType, /*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMaxType, /*mysql date*/
+    ObMaxType, /*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
   },
   {
     /*Interval -> XXX*/
@@ -519,6 +652,13 @@ static const ObObjType NVL_TYPE_PROMOTION[ObMaxTC][ObMaxTC] =
     ObMaxType, /*RowID*/
     ObMaxType, /*Lob*/
     ObMaxType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObMaxType, /*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMaxType, /*mysql date*/
+    ObMaxType, /*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
   },
   {
     /*RowID -> XXX*/
@@ -545,6 +685,13 @@ static const ObObjType NVL_TYPE_PROMOTION[ObMaxTC][ObMaxTC] =
     ObMaxType, /*RowID*/
     ObMaxType, /*Lob*/
     ObMaxType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObMaxType, /*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMaxType, /*mysql date*/
+    ObMaxType, /*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
   },
   {
     /*Lob -> XXX*/
@@ -571,6 +718,13 @@ static const ObObjType NVL_TYPE_PROMOTION[ObMaxTC][ObMaxTC] =
     ObMaxType, /*RowID*/
     ObMaxType, /*Lob*/
     ObMaxType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObMaxType, /*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMaxType, /*mysql date*/
+    ObMaxType, /*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
   },
   {
     /*Json -> XXX*/
@@ -597,6 +751,244 @@ static const ObObjType NVL_TYPE_PROMOTION[ObMaxTC][ObMaxTC] =
     ObMaxType, /*RowID*/
     ObMaxType, /*Lob*/
     ObJsonType, /*Json*/
+    ObMaxType,  /*Geometry*/
+    ObMaxType,  /*UDT*/
+    ObJsonType, /*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObJsonType, /*mysql date*/
+    ObJsonType, /*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
+  },
+  {
+    /*Geometry -> XXX*/
+    ObMaxType, /*null*/
+    ObMaxType, /*int*/
+    ObMaxType, /*uint*/
+    ObMaxType, /*float*/
+    ObMaxType, /*double*/
+    ObMaxType, /*number*/
+    ObMaxType, /*datetime*/
+    ObMaxType, /*date*/
+    ObMaxType, /*time*/
+    ObMaxType, /*year*/
+    ObMaxType, /*string*/
+    ObMaxType, /*extend*/
+    ObMaxType, /*unknown*/
+    ObMaxType, /*text*/
+    ObMaxType, /*bit*/
+    ObMaxType, /*EnumSet*/
+    ObMaxType, /*EnumSetInner*/
+    ObMaxType, /*OTimestamp*/
+    ObMaxType, /*Raw*/
+    ObMaxType, /*Interval*/
+    ObMaxType, /*RowID*/
+    ObMaxType, /*Lob*/
+    ObMaxType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*UDT*/
+    ObMaxType, /*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMaxType, /*mysql date*/
+    ObMaxType, /*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
+  },
+  {
+    /*UDT -> XXX*/
+    ObMaxType, /*null*/
+    ObMaxType, /*int*/
+    ObMaxType, /*uint*/
+    ObMaxType, /*float*/
+    ObMaxType, /*double*/
+    ObMaxType, /*number*/
+    ObMaxType, /*datetime*/
+    ObMaxType, /*date*/
+    ObMaxType, /*time*/
+    ObMaxType, /*year*/
+    ObMaxType, /*string*/
+    ObMaxType, /*extend*/
+    ObMaxType, /*unknown*/
+    ObMaxType, /*text*/
+    ObMaxType, /*bit*/
+    ObMaxType, /*EnumSet*/
+    ObMaxType, /*EnumSetInner*/
+    ObMaxType, /*OTimestamp*/
+    ObMaxType, /*Raw*/
+    ObMaxType, /*Interval*/
+    ObMaxType, /*RowID*/
+    ObMaxType, /*Lob*/
+    ObMaxType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*UDT*/
+    ObMaxType, /*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMaxType, /*mysql date*/
+    ObMaxType, /*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
+  },
+  {
+    /*DecimalInt -> XXX*/
+    ObDecimalIntType,/*null*/
+    ObDecimalIntType,/*int*/
+    ObDecimalIntType,/*uint*/
+    ObDoubleType,/*float*/
+    ObDoubleType,/*double*/
+    ObDecimalIntType,/*number*/
+    ObVarcharType,/*datetime*/
+    ObVarcharType,/*date*/
+    ObVarcharType,/*time*/
+    ObDecimalIntType,/*year*/
+    ObVarcharType,/*string*/
+    ObMaxType,/*extend*/
+    ObDecimalIntType, /*unknown*/
+    ObLongTextType, /*text*/
+    ObDecimalIntType,  /*bit*/
+    ObVarcharType,  /*EnumSet*/
+    ObMaxType,  /*EnumSetInner*/
+    ObVarcharType, /*OTimestamp*/
+    ObRawType, /*Raw*/
+    ObMaxType, /*Interval*/
+    ObMaxType, /*RowID*/
+    ObMaxType, /*Lob*/
+    ObJsonType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*UDT*/
+    ObDecimalIntType,/*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObVarcharType, /*mysql date*/
+    ObVarcharType, /*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
+  },
+  {
+    /*Collection Sql Type -> XXX*/
+    ObMaxType, /*null*/
+    ObMaxType, /*int*/
+    ObMaxType, /*uint*/
+    ObMaxType, /*float*/
+    ObMaxType, /*double*/
+    ObMaxType, /*number*/
+    ObMaxType, /*datetime*/
+    ObMaxType, /*date*/
+    ObMaxType, /*time*/
+    ObMaxType, /*year*/
+    ObMaxType, /*string*/
+    ObMaxType, /*extend*/
+    ObMaxType, /*unknown*/
+    ObMaxType, /*text*/
+    ObMaxType, /*bit*/
+    ObMaxType, /*EnumSet*/
+    ObMaxType, /*EnumSetInner*/
+    ObMaxType, /*OTimestamp*/
+    ObMaxType, /*Raw*/
+    ObMaxType, /*Interval*/
+    ObMaxType, /*RowID*/
+    ObMaxType, /*Lob*/
+    ObMaxType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*UDT*/
+    ObMaxType, /*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMaxType, /*mysql date*/
+    ObMaxType, /*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
+  },
+  {
+    /*mysql date -> XXX*/
+    ObMySQLDateType,/*null*/
+    ObVarcharType,/*int*/
+    ObVarcharType,/*uint*/
+    ObVarcharType,/*float*/
+    ObVarcharType,/*double*/
+    ObVarcharType,/*number*/
+    ObMySQLDateTimeType,/*datetime*/
+    ObMySQLDateType,/*date*/
+    ObMySQLDateTimeType,/*time*/
+    ObVarcharType,/*year*/
+    ObVarcharType,/*string*/
+    ObMaxType,/*extend*/
+    ObMaxType, /*unknown*/
+    ObLongTextType, /*text*/
+    ObVarcharType, /*bit*/
+    ObVarcharType, /*EnumSet*/
+    ObMaxType, /*EnumSetInner*/
+    ObTimestampTZType, /*OTimestamp*/
+    ObRawType, /*Raw*/
+    ObMaxType, /*Interval*/
+    ObMaxType, /*RowID*/
+    ObMaxType, /*Lob*/
+    ObJsonType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObVarcharType,/*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMySQLDateType, /*mysql date*/
+    ObMySQLDateTimeType, /*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
+  },
+  {
+    /*mysql datetime -> XXX*/
+    ObMySQLDateTimeType,/*null*/
+    ObVarcharType,/*int*/
+    ObVarcharType,/*uint*/
+    ObVarcharType,/*float*/
+    ObVarcharType,/*double*/
+    ObVarcharType,/*number*/
+    ObMySQLDateTimeType,/*datetime*/
+    ObMySQLDateTimeType,/*date*/
+    ObMySQLDateTimeType,/*time*/
+    ObVarcharType,/*year*/
+    ObVarcharType,/*string*/
+    ObMaxType,/*extend*/
+    ObMaxType, /*unknown*/
+    ObLongTextType, /*text*/
+    ObVarcharType,  /*bit*/
+    ObVarcharType,  /*EnumSet*/
+    ObMaxType,  /*EnumSetInner*/
+    ObTimestampTZType, /*OTimestamp*/
+    ObRawType, /*Raw*/
+    ObMaxType, /*Interval*/
+    ObMaxType, /*RowID*/
+    ObMaxType, /*Lob*/
+    ObJsonType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObVarcharType,/*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMySQLDateTimeType, /*mysql date*/
+    ObMySQLDateTimeType, /*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
+  },
+ {
+    /*RoaringBitmap -> XXX*/
+    ObRoaringBitmapType, /*null*/
+    ObMaxType, /*int*/
+    ObMaxType, /*uint*/
+    ObMaxType, /*float*/
+    ObMaxType, /*double*/
+    ObMaxType, /*number*/
+    ObMaxType, /*datetime*/
+    ObMaxType, /*date*/
+    ObMaxType, /*time*/
+    ObMaxType, /*year*/
+    ObMaxType, /*string*/
+    ObMaxType, /*extend*/
+    ObMaxType, /*unknown*/
+    ObMaxType, /*text*/
+    ObMaxType, /*bit*/
+    ObMaxType, /*EnumSet*/
+    ObMaxType, /*EnumSetInner*/
+    ObMaxType, /*OTimestamp*/
+    ObMaxType, /*Raw*/
+    ObMaxType, /*Interval*/
+    ObMaxType, /*RowID*/
+    ObMaxType, /*Lob*/
+    ObMaxType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*UDT*/
+    ObMaxType, /*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMaxType, /*mysql date*/
+    ObMaxType, /*mysql datetime*/
+    ObRoaringBitmapType, /*RoaringBitmap*/
   },
 };
 
@@ -607,50 +999,67 @@ static const ObObjType NVL_TYPE_PROMOTION_ORACLE[ObMaxTC][ObMaxTC] =
     /*null -> XXX*/
     ObNullType,/*null*/
     ObNumberType,/*int*/
-      ObMaxType,/*uint*/
+    ObMaxType,/*uint*/
     ObFloatType,/*float*/
     ObDoubleType,/*double*/
     ObNumberType,/*number*/
     ObDateTimeType,/*datetime*/
-      ObMaxType,/*date*/
-      ObMaxType,/*time*/
-      ObMaxType,/*year*/
+    ObMaxType,/*date*/
+    ObMaxType,/*time*/
+    ObMaxType,/*year*/
     ObVarcharType,/*string*/
-      ObMaxType,/*extend*/
-      ObMaxType,/*unknown*/
+    ObExtendType,/*extend*/
+    ObMaxType,/*unknown*/
     ObLongTextType,/*text*/
-      ObMaxType,/*bit*/
-      ObMaxType,/*EnumSet*/
-      ObMaxType,/*EnumSetInner*/
+    ObMaxType,/*bit*/
+    ObMaxType,/*EnumSet*/
+    ObMaxType,/*EnumSetInner*/
     ObTimestampTZType,/*OTimestamp*/
     ObRawType, /*Raw*/
     ObIntervalYMType, /*Interval*/
     ObURowIDType, /*Rowid*/
+    ObMaxType, /*Lob*/
+    ObMaxType, /*Json*/
+    ObGeometryType, /*Geometry*/
+    ObUserDefinedSQLType, /*User Defined Type*/
+    ObNumberType, /*DecimalInt*/
+    ObCollectionSQLType, /*Collection Sql Type*/
+    ObMaxType,/*mysql date*/
+    ObMaxType,/*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
   },
   {
     // treat int as number, because const 1 will be parsed to bigint 1, not number 1 now.
     /*int -> XXX*/
     ObNumberType,/*null*/
     ObNumberType,/*int*/
-      ObMaxType,/*uint*/
+    ObMaxType,/*uint*/
     ObFloatType,/*float*/
     ObDoubleType,/*double*/
     ObNumberType,/*number*/
-      ObMaxType,/*datetime*/
-      ObMaxType,/*date*/
-      ObMaxType,/*time*/
-      ObMaxType,/*year*/
+    ObMaxType,/*datetime*/
+    ObMaxType,/*date*/
+    ObMaxType,/*time*/
+    ObMaxType,/*year*/
     ObNumberType,/*string*/
-      ObMaxType,/*extend*/
-      ObMaxType,/*unknown*/
+    ObMaxType,/*extend*/
+    ObMaxType,/*unknown*/
     ObNumberType,/*text*/
-      ObMaxType,/*bit*/
-      ObMaxType,/*EnumSet*/
-      ObMaxType,/*EnumSetInner*/
-      ObMaxType,/*OTimestamp*/
+    ObMaxType,/*bit*/
+    ObMaxType,/*EnumSet*/
+    ObMaxType,/*EnumSetInner*/
+    ObMaxType,/*OTimestamp*/
     ObNumberType,/*Raw*/
     ObMaxType, /*Interval*/
     ObMaxType, /*RowID*/
+    ObMaxType, /*Lob*/
+    ObMaxType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObNumberType, /*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMaxType,/*mysql date*/
+    ObMaxType,/*mysql datetime*/
   },
   {
     /*uint -> XXX*/
@@ -675,102 +1084,146 @@ static const ObObjType NVL_TYPE_PROMOTION_ORACLE[ObMaxTC][ObMaxTC] =
       ObMaxType,/*Raw*/
       ObMaxType, /*Interval*/
       ObMaxType, /*RowID*/
+      ObMaxType, /*Lob*/
+      ObMaxType, /*Json*/
+      ObMaxType, /*Geometry*/
+      ObMaxType, /*User Defined Type*/
+      ObMaxType, /*DecimalInt*/
+      ObMaxType, /*Collection Sql Type*/
+      ObMaxType,/*mysql date*/
+      ObMaxType,/*mysql datetime*/
   },
   {
     /*float -> XXX*/
     ObFloatType,/*null*/
     ObFloatType,/*int*/
-      ObMaxType,/*uint*/
+    ObMaxType,/*uint*/
     ObFloatType,/*float*/
     ObDoubleType,/*double*/
     ObFloatType,/*number*/
-      ObMaxType,/*datetime*/
-      ObMaxType,/*date*/
-      ObMaxType,/*time*/
-      ObMaxType,/*year*/
+    ObMaxType,/*datetime*/
+    ObMaxType,/*date*/
+    ObMaxType,/*time*/
+    ObMaxType,/*year*/
     ObFloatType,/*string*/
-      ObMaxType,/*extend*/
-      ObMaxType,/*unknown*/
-      ObMaxType,/*text*/
-      ObMaxType,/*bit*/
-      ObMaxType,/*EnumSet*/
-      ObMaxType,/*EnumSetInner*/
-      ObMaxType,/*OTimestamp*/
+    ObMaxType,/*extend*/
+    ObMaxType,/*unknown*/
+    ObMaxType,/*text*/
+    ObMaxType,/*bit*/
+    ObMaxType,/*EnumSet*/
+    ObMaxType,/*EnumSetInner*/
+    ObMaxType,/*OTimestamp*/
     ObFloatType,/*Raw*/
     ObMaxType, /*Interval*/
     ObMaxType, /*RowID*/
+    ObMaxType, /*Lob*/
+    ObMaxType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObFloatType, /*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMaxType,/*mysql date*/
+    ObMaxType,/*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
   },
   {
     /*double -> XXX*/
     ObDoubleType,/*null*/
     ObDoubleType,/*int*/
-      ObMaxType,/*uint*/
+    ObMaxType,/*uint*/
     ObDoubleType,/*float*/
     ObDoubleType,/*double*/
     ObDoubleType,/*number*/
-      ObMaxType,/*datetime*/
-      ObMaxType,/*date*/
-      ObMaxType,/*time*/
-      ObMaxType,/*year*/
+    ObMaxType,/*datetime*/
+    ObMaxType,/*date*/
+    ObMaxType,/*time*/
+    ObMaxType,/*year*/
     ObDoubleType,/*string*/
-      ObMaxType,/*extend*/
-      ObMaxType,/*unknown*/
-      ObMaxType,/*text*/
-      ObMaxType,/*bit*/
-      ObMaxType,/*EnumSet*/
-      ObMaxType,/*EnumSetInner*/
-      ObMaxType,/*OTimestamp*/
+    ObMaxType,/*extend*/
+    ObMaxType,/*unknown*/
+    ObMaxType,/*text*/
+    ObMaxType,/*bit*/
+    ObMaxType,/*EnumSet*/
+    ObMaxType,/*EnumSetInner*/
+    ObMaxType,/*OTimestamp*/
     ObDoubleType,/*Raw*/
     ObMaxType, /*Interval*/
     ObMaxType, /*RowID*/
+    ObMaxType, /*Lob*/
+    ObMaxType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObDoubleType, /*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMaxType,/*mysql date*/
+    ObMaxType,/*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
   },
   {
     /*number -> XXX*/
     ObNumberType,/*null*/
     ObNumberType,/*int*/
-      ObMaxType,/*uint*/
+    ObMaxType,/*uint*/
     ObFloatType,/*float*/
     ObDoubleType,/*double*/
     ObNumberType,/*number*/
-      ObMaxType,/*datetime*/
-      ObMaxType,/*date*/
-      ObMaxType,/*time*/
-      ObMaxType,/*year*/
+    ObMaxType,/*datetime*/
+    ObMaxType,/*date*/
+    ObMaxType,/*time*/
+    ObMaxType,/*year*/
     ObNumberType,/*string*/
-      ObMaxType,/*extend*/
-      ObMaxType,/*unknown*/
+    ObMaxType,/*extend*/
+    ObMaxType,/*unknown*/
     ObNumberType,/*text*/
-      ObMaxType,/*bit*/
-      ObMaxType,/*EnumSet*/
-      ObMaxType,/*EnumSetInner*/
-      ObMaxType,/*OTimestamp*/
+    ObMaxType,/*bit*/
+    ObMaxType,/*EnumSet*/
+    ObMaxType,/*EnumSetInner*/
+    ObMaxType,/*OTimestamp*/
     ObNumberType,/*Raw*/
     ObMaxType,/*Interval*/
     ObMaxType, /*RowID*/
+    ObMaxType, /*Lob*/
+    ObMaxType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObNumberType, /*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMaxType,/*mysql date*/
+    ObMaxType,/*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
   },
   {
     /*datetime -> XXX*/
     ObDateTimeType,/*null*/
-      ObMaxType,/*int*/
-      ObMaxType,/*uint*/
-      ObMaxType,/*float*/
-      ObMaxType,/*double*/
-      ObMaxType,/*number*/
+    ObMaxType,/*int*/
+    ObMaxType,/*uint*/
+    ObMaxType,/*float*/
+    ObMaxType,/*double*/
+    ObMaxType,/*number*/
     ObDateTimeType,/*datetime*/
-      ObMaxType,/*date*/
-      ObMaxType,/*time*/
-      ObMaxType,/*year*/
+    ObMaxType,/*date*/
+    ObMaxType,/*time*/
+    ObMaxType,/*year*/
     ObDateTimeType,/*string*/
-      ObMaxType,/*extend*/
-      ObMaxType,/*unknown*/
-      ObMaxType,/*text*/
-      ObMaxType,/*bit*/
-      ObMaxType,/*EnumSet*/
-      ObMaxType,/*EnumSetInner*/
+    ObMaxType,/*extend*/
+    ObMaxType,/*unknown*/
+    ObMaxType,/*text*/
+    ObMaxType,/*bit*/
+    ObMaxType,/*EnumSet*/
+    ObMaxType,/*EnumSetInner*/
     ObDateTimeType,/*OTimestamp*/
     ObDateTimeType,/*Raw*/
     ObMaxType,/*Interval*/
     ObMaxType, /*RowID*/
+    ObMaxType, /*Lob*/
+    ObMaxType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObMaxType, /*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMaxType,/*mysql date*/
+    ObMaxType,/*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
   },
   {
     /*date -> XXX*/
@@ -795,6 +1248,15 @@ static const ObObjType NVL_TYPE_PROMOTION_ORACLE[ObMaxTC][ObMaxTC] =
       ObMaxType,/*Raw*/
       ObMaxType,/*Interval*/
       ObMaxType,/*RowID*/
+      ObMaxType, /*Lob*/
+      ObMaxType, /*Json*/
+      ObMaxType, /*Geometry*/
+      ObMaxType, /*User Defined Type*/
+      ObMaxType, /*DecimalInt*/
+      ObMaxType, /*Collection Sql Type*/
+      ObMaxType,/*mysql date*/
+      ObMaxType,/*mysql datetime*/
+      ObMaxType, /*RoaringBitmap*/
   },
   {
     /*time -> XXX*/
@@ -819,6 +1281,15 @@ static const ObObjType NVL_TYPE_PROMOTION_ORACLE[ObMaxTC][ObMaxTC] =
       ObMaxType,/*Raw*/
       ObMaxType,/*Interval*/
       ObMaxType,/*RowID*/
+      ObMaxType, /*Lob*/
+      ObMaxType, /*Json*/
+      ObMaxType, /*Geometry*/
+      ObMaxType, /*User Defined Type*/
+      ObMaxType, /*DecimalInt*/
+      ObMaxType, /*Collection Sql Type*/
+      ObMaxType,/*mysql date*/
+      ObMaxType,/*mysql datetime*/
+      ObMaxType, /*RoaringBitmap*/
   },
   {
     /*year -> XXX*/
@@ -843,34 +1314,52 @@ static const ObObjType NVL_TYPE_PROMOTION_ORACLE[ObMaxTC][ObMaxTC] =
       ObMaxType,/*Raw*/
       ObMaxType,/*Interval*/
       ObMaxType,/*RowID*/
+      ObMaxType, /*Lob*/
+      ObMaxType, /*Json*/
+      ObMaxType, /*Geometry*/
+      ObMaxType, /*User Defined Type*/
+      ObMaxType, /*DecimalInt*/
+      ObMaxType, /*Collection Sql Type*/
+      ObMaxType,/*mysql date*/
+      ObMaxType,/*mysql datetime*/
+      ObMaxType, /*RoaringBitmap*/
   },
   {
     /*string -> XXX*/
     ObVarcharType,/*null*/
     ObVarcharType,/*int*/
-      ObMaxType,/*uint*/
+    ObMaxType,/*uint*/
     ObVarcharType,/*float*/
     ObVarcharType,/*double*/
     ObVarcharType,/*number*/
     ObVarcharType,/*datetime*/
-      ObMaxType,/*date*/
-      ObMaxType,/*time*/
-      ObMaxType,/*year*/
+    ObMaxType,/*date*/
+    ObMaxType,/*time*/
+    ObMaxType,/*year*/
     ObVarcharType,/*string*/
-      ObMaxType,/*extend*/
-      ObMaxType,/*unknown*/
+    ObMaxType,/*extend*/
+    ObMaxType,/*unknown*/
     ObVarcharType,/*text*/
-      ObMaxType,/*bit*/
-      ObMaxType,/*EnumSet*/
-      ObMaxType,/*EnumSetInner*/
+    ObMaxType,/*bit*/
+    ObMaxType,/*EnumSet*/
+    ObMaxType,/*EnumSetInner*/
     ObVarcharType,/*OTimestamp*/
     ObVarcharType,/*Raw*/
     ObVarcharType,/*Interval*/
     ObVarcharType,/*RowID*/
+    ObMaxType, /*Lob*/
+    ObMaxType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObVarcharType, /*User Defined Type*/
+    ObVarcharType, /*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMaxType,/*mysql date*/
+    ObMaxType,/*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
   },
   {
     /*extend -> XXX*/
-      ObMaxType,/*null*/
+      ObExtendType,/*null*/
       ObMaxType,/*int*/
       ObMaxType,/*uint*/
       ObMaxType,/*float*/
@@ -881,7 +1370,7 @@ static const ObObjType NVL_TYPE_PROMOTION_ORACLE[ObMaxTC][ObMaxTC] =
       ObMaxType,/*time*/
       ObMaxType,/*year*/
       ObMaxType,/*string*/
-      ObMaxType,/*extend*/
+      ObExtendType,/*extend*/
       ObMaxType,/*unknown*/
       ObMaxType,/*text*/
       ObMaxType,/*bit*/
@@ -891,6 +1380,15 @@ static const ObObjType NVL_TYPE_PROMOTION_ORACLE[ObMaxTC][ObMaxTC] =
       ObMaxType,/*Raw*/
       ObMaxType,/*Interval*/
       ObMaxType,/*RowID*/
+      ObMaxType, /*Lob*/
+      ObMaxType, /*Json*/
+      ObMaxType, /*Geometry*/
+      ObUserDefinedSQLType, /*User Defined Type*/
+      ObMaxType, /*DecimalInt*/
+      ObMaxType, /*Collection Sql Type*/
+      ObMaxType,/*mysql date*/
+      ObMaxType,/*mysql datetime*/
+      ObMaxType, /*RoaringBitmap*/
   },
   {
     /*unknown -> XXX*/
@@ -915,30 +1413,48 @@ static const ObObjType NVL_TYPE_PROMOTION_ORACLE[ObMaxTC][ObMaxTC] =
       ObMaxType,/*Raw*/
       ObMaxType,/*Interval*/
       ObMaxType,/*RowID*/
+      ObMaxType, /*Lob*/
+      ObMaxType, /*Json*/
+      ObMaxType, /*Geometry*/
+      ObMaxType, /*User Defined Type*/
+      ObMaxType, /*DecimalInt*/
+      ObMaxType, /*Collection Sql Type*/
+      ObMaxType,/*mysql date*/
+      ObMaxType,/*mysql datetime*/
+      ObMaxType, /*RoaringBitmap*/
   },
   {
     /*text -> XXX*/
     ObLongTextType,/*null*/
     ObLongTextType,/*int*/
-      ObMaxType,/*uint*/
+    ObMaxType,/*uint*/
     ObLongTextType,/*float*/
     ObLongTextType,/*double*/
     ObLongTextType,/*number*/
     ObLongTextType,/*datetime*/
-      ObMaxType,/*date*/
-      ObMaxType,/*time*/
-      ObMaxType,/*year*/
+    ObMaxType,/*date*/
+    ObMaxType,/*time*/
+    ObMaxType,/*year*/
     ObLongTextType,/*string*/
-      ObMaxType,/*extend*/
-      ObMaxType,/*unknown*/
+    ObMaxType,/*extend*/
+    ObMaxType,/*unknown*/
     ObLongTextType,/*text*/
-      ObMaxType,/*bit*/
-      ObMaxType,/*EnumSet*/
-      ObMaxType,/*EnumSetInner*/
+    ObMaxType,/*bit*/
+    ObMaxType,/*EnumSet*/
+    ObMaxType,/*EnumSetInner*/
     ObLongTextType,/*OTimestamp*/
     ObLongTextType,/*Raw*/
     ObLongTextType,/*Interval*/
     ObMaxType,/*RowID*/
+    ObMaxType, /*Lob*/
+    ObMaxType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObLongTextType, /*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMaxType,/*mysql date*/
+    ObMaxType,/*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
   },
   {
     /*bit -> XXX*/
@@ -963,6 +1479,15 @@ static const ObObjType NVL_TYPE_PROMOTION_ORACLE[ObMaxTC][ObMaxTC] =
       ObMaxType,/*Raw*/
       ObMaxType,/*Interval*/
       ObMaxType,/*RowID*/
+      ObMaxType, /*Lob*/
+      ObMaxType, /*Json*/
+      ObMaxType, /*Geometry*/
+      ObMaxType, /*User Defined Type*/
+      ObMaxType, /*DecimalInt*/
+      ObMaxType, /*Collection Sql Type*/
+      ObMaxType,/*mysql date*/
+      ObMaxType,/*mysql datetime*/
+      ObMaxType, /*RoaringBitmap*/
   },
   {
     /*EnumSet -> XXX*/
@@ -987,6 +1512,15 @@ static const ObObjType NVL_TYPE_PROMOTION_ORACLE[ObMaxTC][ObMaxTC] =
       ObMaxType,/*Raw*/
       ObMaxType,/*Interval*/
       ObMaxType,/*RowID*/
+      ObMaxType, /*Lob*/
+      ObMaxType, /*Json*/
+      ObMaxType, /*Geometry*/
+      ObMaxType, /*User Defined Type*/
+      ObMaxType, /*DecimalInt*/
+      ObMaxType, /*Collection Sql Type*/
+      ObMaxType,/*mysql date*/
+      ObMaxType,/*mysql datetime*/
+      ObMaxType, /*RoaringBitmap*/
   },
   {
     /*EnumSetInner -> XXX*/
@@ -1011,78 +1545,114 @@ static const ObObjType NVL_TYPE_PROMOTION_ORACLE[ObMaxTC][ObMaxTC] =
       ObMaxType,/*Raw*/
       ObMaxType,/*Interval*/
       ObMaxType,/*RowID*/
+      ObMaxType, /*Lob*/
+      ObMaxType, /*Json*/
+      ObMaxType, /*Geometry*/
+      ObMaxType, /*User Defined Type*/
+      ObMaxType, /*DecimalInt*/
+      ObMaxType, /*Collection Sql Type*/
+      ObMaxType,/*mysql date*/
+      ObMaxType,/*mysql datetime*/
+      ObMaxType, /*RoaringBitmap*/
   },
   {
     /*otimestamp-> XXX*/
     ObTimestampNanoType,/*null*/
-      ObMaxType,/*int*/
-      ObMaxType,/*uint*/
-      ObMaxType,/*float*/
-      ObMaxType,/*double*/
-      ObMaxType,/*number*/
+    ObMaxType,/*int*/
+    ObMaxType,/*uint*/
+    ObMaxType,/*float*/
+    ObMaxType,/*double*/
+    ObMaxType,/*number*/
     ObTimestampNanoType,/*datetime*/
-      ObMaxType,/*date*/
-      ObMaxType,/*time*/
-      ObMaxType,/*year*/
+    ObMaxType,/*date*/
+    ObMaxType,/*time*/
+    ObMaxType,/*year*/
     ObTimestampNanoType,/*string*/
-      ObMaxType,/*extend*/
-      ObMaxType,/*unknown*/
-      ObMaxType,/*text*/
-      ObMaxType,/*bit*/
-      ObMaxType,/*EnumSet*/
-      ObMaxType,/*EnumSetInner*/
+    ObMaxType,/*extend*/
+    ObMaxType,/*unknown*/
+    ObMaxType,/*text*/
+    ObMaxType,/*bit*/
+    ObMaxType,/*EnumSet*/
+    ObMaxType,/*EnumSetInner*/
     ObTimestampNanoType,/*OTimestamp*/
-      ObMaxType,/*Raw*/
-      ObMaxType,/*Interval*/
-      ObMaxType,/*RowID*/
+    ObMaxType,/*Raw*/
+    ObMaxType,/*Interval*/
+    ObMaxType,/*RowID*/
+    ObMaxType, /*Lob*/
+    ObMaxType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObMaxType, /*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMaxType,/*mysql date*/
+    ObMaxType,/*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
   },
   {
     /*Raw-> XXX*/
     ObRawType,/*null*/
-      ObMaxType,/*int*/
-      ObMaxType,/*uint*/
-      ObMaxType,/*float*/
-      ObMaxType,/*double*/
-      ObMaxType,/*number*/
-      ObMaxType,/*datetime*/
-      ObMaxType,/*date*/
-      ObMaxType,/*time*/
-      ObMaxType,/*year*/
+    ObMaxType,/*int*/
+    ObMaxType,/*uint*/
+    ObMaxType,/*float*/
+    ObMaxType,/*double*/
+    ObMaxType,/*number*/
+    ObMaxType,/*datetime*/
+    ObMaxType,/*date*/
+    ObMaxType,/*time*/
+    ObMaxType,/*year*/
     ObRawType,/*string*/
-      ObMaxType,/*extend*/
-      ObMaxType,/*unknown*/
+    ObMaxType,/*extend*/
+    ObMaxType,/*unknown*/
     ObRawType,/*text*/
-      ObMaxType,/*bit*/
-      ObMaxType,/*EnumSet*/
-      ObMaxType,/*EnumSetInner*/
-      ObMaxType,/*OTimestamp*/
+    ObMaxType,/*bit*/
+    ObMaxType,/*EnumSet*/
+    ObMaxType,/*EnumSetInner*/
+    ObMaxType,/*OTimestamp*/
     ObRawType,/*Raw*/
     ObMaxType,/*Interval*/
     ObMaxType, /*RowID*/
+    ObMaxType, /*Lob*/
+    ObMaxType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObMaxType, /*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMaxType,/*mysql date*/
+    ObMaxType,/*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
   },
   {
     /*Interval-> XXX*/
     ObIntervalYMType,/*null*/
-      ObMaxType,/*int*/
-      ObMaxType,/*uint*/
-      ObMaxType,/*float*/
-      ObMaxType,/*double*/
-      ObMaxType,/*number*/
-      ObMaxType,/*datetime*/
-      ObMaxType,/*date*/
-      ObMaxType,/*time*/
-      ObMaxType,/*year*/
+    ObMaxType,/*int*/
+    ObMaxType,/*uint*/
+    ObMaxType,/*float*/
+    ObMaxType,/*double*/
+    ObMaxType,/*number*/
+    ObMaxType,/*datetime*/
+    ObMaxType,/*date*/
+    ObMaxType,/*time*/
+    ObMaxType,/*year*/
     ObIntervalYMType,/*string*/
-      ObMaxType,/*extend*/
-      ObMaxType,/*unknown*/
+    ObMaxType,/*extend*/
+    ObMaxType,/*unknown*/
     ObIntervalYMType,/*text*/
-      ObMaxType,/*bit*/
-      ObMaxType,/*EnumSet*/
-      ObMaxType,/*EnumSetInner*/
-      ObMaxType,/*OTimestamp*/
+    ObMaxType,/*bit*/
+    ObMaxType,/*EnumSet*/
+    ObMaxType,/*EnumSetInner*/
+    ObMaxType,/*OTimestamp*/
     ObMaxType,/*Raw*/
     ObIntervalYMType,/*Interval*/
     ObMaxType,/*RowID*/
+    ObMaxType, /*Lob*/
+    ObMaxType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObMaxType, /*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMaxType,/*mysql date*/
+    ObMaxType,/*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
   },
   {
     /*RowID-> XXX*/
@@ -1107,5 +1677,311 @@ static const ObObjType NVL_TYPE_PROMOTION_ORACLE[ObMaxTC][ObMaxTC] =
     ObMaxType,/*Raw*/
     ObMaxType,/*Interval*/
     ObURowIDType,/*RowID*/
+    ObMaxType, /*Lob*/
+    ObMaxType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObMaxType, /*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMaxType,/*mysql date*/
+    ObMaxType,/*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
+  },
+  {
+    /*Lob -> XXX*/
+    ObMaxType, /*null*/
+    ObMaxType, /*int*/
+    ObMaxType, /*uint*/
+    ObMaxType, /*float*/
+    ObMaxType, /*double*/
+    ObMaxType, /*number*/
+    ObMaxType, /*datetime*/
+    ObMaxType, /*date*/
+    ObMaxType, /*time*/
+    ObMaxType, /*year*/
+    ObMaxType, /*string*/
+    ObMaxType, /*extend*/
+    ObMaxType, /*unknown*/
+    ObMaxType, /*text*/
+    ObMaxType, /*bit*/
+    ObMaxType, /*EnumSet*/
+    ObMaxType, /*EnumSetInner*/
+    ObMaxType, /*OTimestamp*/
+    ObMaxType, /*Raw*/
+    ObMaxType, /*Interval*/
+    ObMaxType, /*RowID*/
+    ObMaxType, /*Lob*/
+    ObMaxType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObMaxType, /*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMaxType,/*mysql date*/
+    ObMaxType,/*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
+  },
+  {
+    /*Json -> XXX*/
+    ObJsonType, /*null*/
+    ObJsonType, /*int*/
+    ObJsonType, /*uint*/
+    ObJsonType, /*float*/
+    ObJsonType, /*double*/
+    ObJsonType, /*number*/
+    ObJsonType, /*datetime*/
+    ObJsonType, /*date*/
+    ObJsonType, /*time*/
+    ObJsonType, /*year*/
+    ObJsonType, /*string*/
+    ObMaxType, /*extend*/
+    ObJsonType, /*unknown*/
+    ObJsonType, /*text*/
+    ObJsonType, /*bit*/
+    ObJsonType, /*EnumSet*/
+    ObMaxType, /*EnumSetInner*/
+    ObJsonType, /*OTimestamp*/
+    ObMaxType, /*Raw*/
+    ObMaxType, /*Interval*/
+    ObMaxType, /*RowID*/
+    ObMaxType, /*Lob*/
+    ObJsonType, /*Json*/
+    ObMaxType,  /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObMaxType, /*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMaxType,/*mysql date*/
+    ObMaxType,/*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
+  },
+  {
+    /*Geometry -> XXX*/
+    ObGeometryType, /*null*/
+    ObMaxType, /*int*/
+    ObMaxType, /*uint*/
+    ObMaxType, /*float*/
+    ObMaxType, /*double*/
+    ObMaxType, /*number*/
+    ObMaxType, /*datetime*/
+    ObMaxType, /*date*/
+    ObMaxType, /*time*/
+    ObMaxType, /*year*/
+    ObMaxType, /*string*/
+    ObMaxType, /*extend*/
+    ObMaxType, /*unknown*/
+    ObMaxType, /*text*/
+    ObMaxType, /*bit*/
+    ObMaxType, /*EnumSet*/
+    ObMaxType, /*EnumSetInner*/
+    ObMaxType, /*OTimestamp*/
+    ObMaxType, /*Raw*/
+    ObMaxType, /*Interval*/
+    ObMaxType, /*RowID*/
+    ObMaxType, /*Lob*/
+    ObMaxType, /*Json*/
+    ObGeometryType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObMaxType, /*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMaxType,/*mysql date*/
+    ObMaxType,/*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
+  },
+  {
+    /*User Defined Type -> XXX*/
+    ObUserDefinedSQLType, /*null*/
+    ObMaxType, /*int*/
+    ObMaxType, /*uint*/
+    ObMaxType, /*float*/
+    ObMaxType, /*double*/
+    ObMaxType, /*number*/
+    ObMaxType, /*datetime*/
+    ObMaxType, /*date*/
+    ObMaxType, /*time*/
+    ObMaxType, /*year*/
+    ObUserDefinedSQLType, /*string*/
+    ObUserDefinedSQLType, /*extend*/
+    ObMaxType, /*unknown*/
+    ObMaxType, /*text*/
+    ObMaxType, /*bit*/
+    ObMaxType, /*EnumSet*/
+    ObMaxType, /*EnumSetInner*/
+    ObMaxType, /*OTimestamp*/
+    ObMaxType, /*Raw*/
+    ObMaxType, /*Interval*/
+    ObMaxType, /*RowID*/
+    ObMaxType, /*Lob*/
+    ObMaxType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObUserDefinedSQLType, /*User Defined Type*/
+    ObMaxType, /*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMaxType,/*mysql date*/
+    ObMaxType,/*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
+  },
+  {
+    /*DecimalInt -> XXX*/
+    ObNumberType,/*null*/
+    ObNumberType,/*int*/
+    ObMaxType,/*uint*/
+    ObFloatType,/*float*/
+    ObDoubleType,/*double*/
+    ObNumberType,/*number*/
+    ObMaxType,/*datetime*/
+    ObMaxType,/*date*/
+    ObMaxType,/*time*/
+    ObMaxType,/*year*/
+    ObNumberType,/*string*/
+    ObMaxType,/*extend*/
+    ObMaxType,/*unknown*/
+    ObNumberType,/*text*/
+    ObMaxType,/*bit*/
+    ObMaxType,/*EnumSet*/
+    ObMaxType,/*EnumSetInner*/
+    ObMaxType,/*OTimestamp*/
+    ObNumberType,/*Raw*/
+    ObMaxType,/*Interval*/
+    ObMaxType, /*RowID*/
+    ObMaxType, /*Lob*/
+    ObMaxType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*UDT*/
+    ObNumberType, /*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMaxType,/*mysql date*/
+    ObMaxType,/*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
+  },
+  {
+    /*User Defined Type -> XXX*/
+    ObUserDefinedSQLType, /*null*/
+    ObMaxType, /*int*/
+    ObMaxType, /*uint*/
+    ObMaxType, /*float*/
+    ObMaxType, /*double*/
+    ObMaxType, /*number*/
+    ObMaxType, /*datetime*/
+    ObMaxType, /*date*/
+    ObMaxType, /*time*/
+    ObMaxType, /*year*/
+    ObUserDefinedSQLType, /*string*/
+    ObUserDefinedSQLType, /*extend*/
+    ObMaxType, /*unknown*/
+    ObMaxType, /*text*/
+    ObMaxType, /*bit*/
+    ObMaxType, /*EnumSet*/
+    ObMaxType, /*EnumSetInner*/
+    ObMaxType, /*OTimestamp*/
+    ObMaxType, /*Raw*/
+    ObMaxType, /*Interval*/
+    ObMaxType, /*RowID*/
+    ObMaxType, /*Lob*/
+    ObMaxType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObMaxType, /*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMaxType,/*mysql date*/
+    ObMaxType,/*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
+  },
+  {
+    /*MySQL Date -> XXX*/
+    ObMaxType, /*null*/
+    ObMaxType, /*int*/
+    ObMaxType, /*uint*/
+    ObMaxType, /*float*/
+    ObMaxType, /*double*/
+    ObMaxType, /*number*/
+    ObMaxType, /*datetime*/
+    ObMaxType, /*date*/
+    ObMaxType, /*time*/
+    ObMaxType, /*year*/
+    ObMaxType, /*string*/
+    ObMaxType, /*extend*/
+    ObMaxType, /*unknown*/
+    ObMaxType, /*text*/
+    ObMaxType, /*bit*/
+    ObMaxType, /*EnumSet*/
+    ObMaxType, /*EnumSetInner*/
+    ObMaxType, /*OTimestamp*/
+    ObMaxType, /*Raw*/
+    ObMaxType, /*Interval*/
+    ObMaxType, /*RowID*/
+    ObMaxType, /*Lob*/
+    ObMaxType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObMaxType, /*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMaxType,/*mysql date*/
+    ObMaxType,/*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
+  },
+  {
+    /*MySQL DateTime -> XXX*/
+    ObMaxType, /*null*/
+    ObMaxType, /*int*/
+    ObMaxType, /*uint*/
+    ObMaxType, /*float*/
+    ObMaxType, /*double*/
+    ObMaxType, /*number*/
+    ObMaxType, /*datetime*/
+    ObMaxType, /*date*/
+    ObMaxType, /*time*/
+    ObMaxType, /*year*/
+    ObMaxType, /*string*/
+    ObMaxType, /*extend*/
+    ObMaxType, /*unknown*/
+    ObMaxType, /*text*/
+    ObMaxType, /*bit*/
+    ObMaxType, /*EnumSet*/
+    ObMaxType, /*EnumSetInner*/
+    ObMaxType, /*OTimestamp*/
+    ObMaxType, /*Raw*/
+    ObMaxType, /*Interval*/
+    ObMaxType, /*RowID*/
+    ObMaxType, /*Lob*/
+    ObMaxType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*User Defined Type*/
+    ObMaxType, /*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMaxType,/*mysql date*/
+    ObMaxType,/*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
+  },
+  {
+    /*RoaringBitmap -> XXX*/
+    ObMaxType, /*null*/
+    ObMaxType, /*int*/
+    ObMaxType, /*uint*/
+    ObMaxType, /*float*/
+    ObMaxType, /*double*/
+    ObMaxType, /*number*/
+    ObMaxType, /*datetime*/
+    ObMaxType, /*date*/
+    ObMaxType, /*time*/
+    ObMaxType, /*year*/
+    ObMaxType, /*string*/
+    ObMaxType, /*extend*/
+    ObMaxType, /*unknown*/
+    ObMaxType, /*text*/
+    ObMaxType, /*bit*/
+    ObMaxType, /*EnumSet*/
+    ObMaxType, /*EnumSetInner*/
+    ObMaxType, /*OTimestamp*/
+    ObMaxType, /*Raw*/
+    ObMaxType, /*Interval*/
+    ObMaxType, /*RowID*/
+    ObMaxType, /*Lob*/
+    ObMaxType, /*Json*/
+    ObMaxType, /*Geometry*/
+    ObMaxType, /*UDT*/
+    ObMaxType, /*DecimalInt*/
+    ObMaxType, /*Collection Sql Type*/
+    ObMaxType, /*mysql date*/
+    ObMaxType, /*mysql datetime*/
+    ObMaxType, /*RoaringBitmap*/
   },
 };

@@ -15,16 +15,17 @@
 #include "lib/thread/ob_reentrant_thread.h"
 #include "lib/thread/ob_thread_name.h"
 
-#include <sys/ptrace.h>
-#include "lib/ob_define.h"
 
-namespace oceanbase {
+namespace oceanbase
+{
 using namespace lib;
 using namespace common;
-namespace share {
-ObReentrantThread::ObReentrantThread()
-    : stop_(true), created_(false), running_cnt_(0), blocking_runnign_cnt_(0), thread_name_("")
-{}
+namespace share
+{
+ObReentrantThread::ObReentrantThread() : stop_(true), created_(false),
+    running_cnt_(0), thread_name_("")
+{
+}
 
 ObReentrantThread::~ObReentrantThread()
 {
@@ -34,28 +35,23 @@ ObReentrantThread::~ObReentrantThread()
   }
 }
 
-int ObReentrantThread::create(const int64_t thread_cnt, const char* thread_name)
+int ObReentrantThread::create(const int64_t thread_cnt, const char* thread_name,
+                              const int64_t wait_event_id)
 {
   int ret = OB_SUCCESS;
   if (created_) {
     ret = OB_INIT_TWICE;
     LOG_WARN("already created", K(ret));
-  } else if (thread_cnt <= 0) {
+  }  else if (thread_cnt <= 0) {
     ret = OB_INVALID_ARGUMENT;
     LOG_WARN("invalid argument", K(ret), K(thread_cnt));
-  } else if (OB_FAIL(cond_.init(ObWaitEventIds::REENTRANT_THREAD_COND_WAIT))) {
+  } else if (OB_FAIL(cond_.init(wait_event_id))) {
     LOG_WARN("fail to init cond, ", K(ret));
   } else {
     thread_name_ = thread_name;
     ThreadPool::set_thread_count(thread_cnt);
     created_ = true;
-    if (OB_SUCC(ThreadPool::start())) {
-      // wait all thread started
-      ObThreadCondGuard guard(cond_);
-      while (thread_cnt != blocking_runnign_cnt_) {
-        cond_.wait();
-      }
-    }
+    ret = ThreadPool::start();
   }
   return ret;
 }
@@ -79,7 +75,7 @@ int ObReentrantThread::destroy()
   return ret;
 }
 
-int ObReentrantThread::start()
+int ObReentrantThread::logical_start()
 {
   int ret = OB_SUCCESS;
   if (!created_) {
@@ -98,7 +94,7 @@ int ObReentrantThread::start()
   return ret;
 }
 
-void ObReentrantThread::stop()
+void ObReentrantThread::logical_stop()
 {
   int ret = OB_SUCCESS;
   if (!created_) {
@@ -107,15 +103,13 @@ void ObReentrantThread::stop()
   } else {
     ObThreadCondGuard guard(cond_);
     stop_ = true;
-    ThreadPool::stop();
     int tmp_ret = cond_.broadcast();
     if (OB_SUCCESS != tmp_ret) {
       LOG_WARN("condition broadcast failed", K(tmp_ret));
     }
   }
 }
-
-void ObReentrantThread::wait()
+void ObReentrantThread::logical_wait()
 {
   int ret = OB_SUCCESS;
   if (!created_) {
@@ -128,10 +122,26 @@ void ObReentrantThread::wait()
       LOG_WARN("inner status error", K(ret), K_(running_cnt));
     } else {
       while (running_cnt_ > 0) {
+        ObBKGDSessInActiveGuard inactive_guard;
         cond_.wait();
       }
     }
   }
+}
+int ObReentrantThread::start()
+{
+  return ThreadPool::start();
+}
+
+void ObReentrantThread::stop()
+{
+  logical_stop();
+  ThreadPool::stop();
+}
+
+void ObReentrantThread::wait()
+{
+  ThreadPool::wait();
 }
 
 void ObReentrantThread::run1()
@@ -152,30 +162,13 @@ void ObReentrantThread::run1()
     LOG_WARN("blocking run failed", K(ret));
   } else if (OB_FAIL(after_blocking_run())) {
     LOG_WARN("Failed to do after run", K(ret));
-  } else {
-  }  // do nothing
+  } else { }//do nothing
   LOG_INFO("reentrant thread exited", K(idx));
 }
 
 int ObReentrantThread::blocking_run()
 {
   int ret = OB_SUCCESS;
-  // may be executed before created, can not check created_ here
-  {
-    ObThreadCondGuard guard(cond_);
-    if (blocking_runnign_cnt_ < 0 || running_cnt_ < 0) {
-      ret = OB_INNER_STAT_ERROR;
-      LOG_WARN("inner status error", K(ret), K_(blocking_runnign_cnt), K_(running_cnt));
-    } else {
-      blocking_runnign_cnt_++;
-      if (blocking_runnign_cnt_ >= get_thread_count()) {
-        int tmp_ret = cond_.broadcast();
-        if (OB_SUCCESS != tmp_ret) {
-          LOG_WARN("condition broadcast failed", K(tmp_ret));
-        }
-      }
-    }
-  }
   while (OB_SUCC(ret)) {
     bool need_run = false;
     {
@@ -185,6 +178,10 @@ int ObReentrantThread::blocking_run()
       }
       static const int64_t WAIT_TIME_MS = 3000;
       if (stop_) {
+        if (ThreadPool::has_set_stop()) {
+          break;
+        }
+        ObBKGDSessInActiveGuard inactive_guard;
         cond_.wait(WAIT_TIME_MS);
       } else {
         need_run = true;
@@ -201,15 +198,28 @@ int ObReentrantThread::blocking_run()
       }
     }
   }
-  if (OB_SUCC(ret)) {
-    ObThreadCondGuard guard(cond_);
-    blocking_runnign_cnt_--;
-  }
   return ret;
 }
 
 void ObReentrantThread::nothing()
-{}
+{
+}
 
-}  // end namespace share
-}  // end namespace oceanbase
+int ObReentrantThread::idle_wait(const int64_t idle_time_ms)
+{
+  int ret = OB_SUCCESS;
+  ObBKGDSessInActiveGuard inactive_guard;
+  ret = get_cond().wait(idle_time_ms);
+  return ret;
+}
+
+int ObReentrantThread::idle_wait_us(const int64_t idle_time_us)
+{
+  int ret = OB_SUCCESS;
+  ObBKGDSessInActiveGuard inactive_guard;
+  ret = get_cond().wait_us(idle_time_us);
+  return ret;
+}
+
+} // end namespace share
+} // end namespace oceanbase

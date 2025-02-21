@@ -48,6 +48,13 @@
 <NULL, ROWID> : defined
 <NULL, LOB> : defined
 <NULL, JSON> : defined
+<NULL, GEOMETRY> : defined
+<NULL, UDT> : not defined
+<NULL, DECIMAL_INT> : defined
+<NULL, ARRAY> : defined
+<NULL, MYSQL_DATE> : defined
+<NULL, MYSQL_DATETIME> : defined
+<NULL, ROARINGBITMAP> : defined
 
 /**************** TINYINT ****************/
 
@@ -99,6 +106,13 @@
 <TINYINT, ROWID> : not defined
 <TINYINT, LOB> : not defined
 <TINYINT, JSON> : not defined
+<TINYINT, GEOMETRY> : not defined
+<TINYINT, UDT> : not defined
+<TINYINT, DECIMAL_INT> : not defined
+<TINYINT, ARRAY> : not defined
+<TINYINT, MYSQL_DATE> : not defined
+<TINYINT, MYSQL_DATETIME> : not defined
+<TINYINT, ROARINGBITMAP> : not defined
 
 /**************** SMALLINT ****************/
 
@@ -150,6 +164,13 @@
 <SMALLINT, ROWID> : not defined
 <SMALLINT, LOB> : not defined
 <SMALLINT, JSON> : not defined
+<SMALLINT, GEOMETRY> : not defined
+<SMALLINT, UDT> : not defined
+<SMALLINT, DECIMAL_INT> : not defined
+<SMALLINT, ARRAY> : not defined
+<SMALLINT, MYSQL_DATE> : not defined
+<SMALLINT, MYSQL_DATETIME> : not defined
+<SMALLINT, ROARINGBITMAP> : not defined
 
 /**************** MEDIUMINT ****************/
 
@@ -201,6 +222,13 @@
 <MEDIUMINT, ROWID> : not defined
 <MEDIUMINT, LOB> : not defined
 <MEDIUMINT, JSON> : not defined
+<MEDIUMINT, GEOMETRY> : not defined
+<MEDIUMINT, UDT> : not defined
+<MEDIUMINT, DECIMAL_INT> : not defined
+<MEDIUMINT, ARRAY> : not defined
+<MEDIUMINT, MYSQL_DATE> : not defined
+<MEDIUMINT, MYSQL_DATETIME> : not defined
+<MEDIUMINT, ROARINGBITMAP> : not defined
 
 /**************** INT ****************/
 
@@ -252,6 +280,13 @@
 <INT, ROWID> : not defined
 <INT, LOB> : not defined
 <INT, JSON> : not defined
+<INT, GEOMETRY> : not defined
+<INT, UDT> : not defined
+<INT, DECIMAL_INT> : not defined
+<INT, ARRAY> : not defined
+<INT, MYSQL_DATE> : not defined
+<INT, MYSQL_DATETIME> : not defined
+<INT, ROARINGBITMAP> : not defined
 
 /**************** BIGINT ****************/
 
@@ -303,6 +338,13 @@
 <BIGINT, ROWID> : not defined
 <BIGINT, LOB> : not defined
 <BIGINT, JSON> : not defined
+<BIGINT, GEOMETRY> : not defined
+<BIGINT, UDT> : not defined
+<BIGINT, DECIMAL_INT> : not defined
+<BIGINT, ARRAY> : not defined
+<BIGINT, MYSQL_DATE> : not defined
+<BIGINT, MYSQL_DATETIME> : not defined
+<BIGINT, ROARINGBITMAP> : not defined
 
 /**************** TINYINT UNSIGNED ****************/
 
@@ -354,6 +396,13 @@
 <TINYINT UNSIGNED, ROWID> : not defined
 <TINYINT UNSIGNED, LOB> : not defined
 <TINYINT UNSIGNED, JSON> : not defined
+<TINYINT UNSIGNED, GEOMETRY> : not defined
+<TINYINT UNSIGNED, UDT> : not defined
+<TINYINT UNSIGNED, DECIMAL_INT> : not defined
+<TINYINT UNSIGNED, ARRAY> : not defined
+<TINYINT UNSIGNED, MYSQL_DATE> : not defined
+<TINYINT UNSIGNED, MYSQL_DATETIME> : not defined
+<TINYINT UNSIGNED, ROARINGBITMAP> : not defined
 
 /**************** SMALLINT UNSIGNED ****************/
 
@@ -405,6 +454,13 @@
 <SMALLINT UNSIGNED, ROWID> : not defined
 <SMALLINT UNSIGNED, LOB> : not defined
 <SMALLINT UNSIGNED, JSON> : not defined
+<SMALLINT UNSIGNED, GEOMETRY> : not defined
+<SMALLINT UNSIGNED, UDT> : not defined
+<SMALLINT UNSIGNED, DECIMAL_INT> : not defined
+<SMALLINT UNSIGNED, ARRAY> : not defined
+<SMALLINT UNSIGNED, MYSQL_DATE> : not defined
+<SMALLINT UNSIGNED, MYSQL_DATETIME> : not defined
+<SMALLINT UNSIGNED, ROARINGBITMAP> : not defined
 
 /**************** MEDIUMINT UNSIGNED ****************/
 
@@ -456,6 +512,13 @@
 <MEDIUMINT UNSIGNED, ROWID> : not defined
 <MEDIUMINT UNSIGNED, LOB> : not defined
 <MEDIUMINT UNSIGNED, JSON> : not defined
+<MEDIUMINT UNSIGNED, GEOMETRY> : not defined
+<MEDIUMINT UNSIGNED, UDT> : not defined
+<MEDIUMINT UNSIGNED, DECIMAL_INT> : not defined
+<MEDIUMINT UNSIGNED, ARRAY> : not defined
+<MEDIUMINT UNSIGNED, MYSQL_DATE> : not defined
+<MEDIUMINT UNSIGNED, MYSQL_DATETIME> : not defined
+<MEDIUMINT UNSIGNED, ROARINGBITMAP> : not defined
 
 /**************** INT UNSIGNED ****************/
 
@@ -507,6 +570,13 @@
 <INT UNSIGNED, ROWID> : not defined
 <INT UNSIGNED, LOB> : not defined
 <INT UNSIGNED, JSON> : not defined
+<INT UNSIGNED, GEOMETRY> : not defined
+<INT UNSIGNED, UDT> : not defined
+<INT UNSIGNED, DECIMAL_INT> : not defined
+<INT UNSIGNED, ARRAY> : not defined
+<INT UNSIGNED, MYSQL_DATE> : not defined
+<INT UNSIGNED, MYSQL_DATETIME> : not defined
+<INT UNSIGNED, ROARINGBITMAP> : not defined
 
 /**************** BIGINT UNSIGNED ****************/
 
@@ -558,6 +628,13 @@
 <BIGINT UNSIGNED, ROWID> : not defined
 <BIGINT UNSIGNED, LOB> : not defined
 <BIGINT UNSIGNED, JSON> : not defined
+<BIGINT UNSIGNED, GEOMETRY> : not defined
+<BIGINT UNSIGNED, UDT> : not defined
+<BIGINT UNSIGNED, DECIMAL_INT> : not defined
+<BIGINT UNSIGNED, ARRAY> : not defined
+<BIGINT UNSIGNED, MYSQL_DATE> : not defined
+<BIGINT UNSIGNED, MYSQL_DATETIME> : not defined
+<BIGINT UNSIGNED, ROARINGBITMAP> : not defined
 
 /**************** FLOAT ****************/
 
@@ -609,6 +686,13 @@
 <FLOAT, ROWID> : not defined
 <FLOAT, LOB> : not defined
 <FLOAT, JSON> : not defined
+<FLOAT, GEOMETRY> : not defined
+<FLOAT, UDT> : not defined
+<FLOAT, DECIMAL_INT> : not defined
+<FLOAT, ARRAY> : not defined
+<FLOAT, MYSQL_DATE> : not defined
+<FLOAT, MYSQL_DATETIME> : not defined
+<FLOAT, ROARINGBITMAP> : not defined
 
 /**************** DOUBLE ****************/
 
@@ -660,6 +744,13 @@
 <DOUBLE, ROWID> : not defined
 <DOUBLE, LOB> : not defined
 <DOUBLE, JSON> : not defined
+<DOUBLE, GEOMETRY> : not defined
+<DOUBLE, UDT> : not defined
+<DOUBLE, DECIMAL_INT> : not defined
+<DOUBLE, ARRAY> : not defined
+<DOUBLE, MYSQL_DATE> : not defined
+<DOUBLE, MYSQL_DATETIME> : not defined
+<DOUBLE, ROARINGBITMAP> : not defined
 
 /**************** FLOAT UNSIGNED ****************/
 
@@ -711,6 +802,13 @@
 <FLOAT UNSIGNED, ROWID> : not defined
 <FLOAT UNSIGNED, LOB> : not defined
 <FLOAT UNSIGNED, JSON> : not defined
+<FLOAT UNSIGNED, GEOMETRY> : not defined
+<FLOAT UNSIGNED, UDT> : not defined
+<FLOAT UNSIGNED, DECIMAL_INT> : not defined
+<FLOAT UNSIGNED, ARRAY> : not defined
+<FLOAT UNSIGNED, MYSQL_DATE> : not defined
+<FLOAT UNSIGNED, MYSQL_DATETIME> : not defined
+<FLOAT UNSIGNED, ROARINGBITMAP> : not defined
 
 /**************** DOUBLE UNSIGNED ****************/
 
@@ -762,6 +860,13 @@
 <DOUBLE UNSIGNED, ROWID> : not defined
 <DOUBLE UNSIGNED, LOB> : not defined
 <DOUBLE UNSIGNED, JSON> : not defined
+<DOUBLE UNSIGNED, GEOMETRY> : not defined
+<DOUBLE UNSIGNED, UDT> : not defined
+<DOUBLE UNSIGNED, DECIMAL_INT> : not defined
+<DOUBLE UNSIGNED, ARRAY> : not defined
+<DOUBLE UNSIGNED, MYSQL_DATE> : not defined
+<DOUBLE UNSIGNED, MYSQL_DATETIME> : not defined
+<DOUBLE UNSIGNED, ROARINGBITMAP> : not defined
 
 /**************** DECIMAL ****************/
 
@@ -813,6 +918,13 @@
 <DECIMAL, ROWID> : not defined
 <DECIMAL, LOB> : not defined
 <DECIMAL, JSON> : not defined
+<DECIMAL, GEOMETRY> : not defined
+<DECIMAL, UDT> : not defined
+<DECIMAL, DECIMAL_INT> : not defined
+<DECIMAL, ARRAY> : not defined
+<DECIMAL, MYSQL_DATE> : not defined
+<DECIMAL, MYSQL_DATETIME> : not defined
+<DECIMAL, ROARINGBITMAP> : not defined
 
 /**************** DECIMAL UNSIGNED ****************/
 
@@ -864,6 +976,13 @@
 <DECIMAL UNSIGNED, ROWID> : not defined
 <DECIMAL UNSIGNED, LOB> : not defined
 <DECIMAL UNSIGNED, JSON> : not defined
+<DECIMAL UNSIGNED, GEOMETRY> : not defined
+<DECIMAL UNSIGNED, UDT> : not defined
+<DECIMAL UNSIGNED, DECIMAL_INT> : not defined
+<DECIMAL UNSIGNED, ARRAY> : not defined
+<DECIMAL UNSIGNED, MYSQL_DATE> : not defined
+<DECIMAL UNSIGNED, MYSQL_DATETIME> : not defined
+<DECIMAL UNSIGNED, ROARINGBITMAP> : not defined
 
 /**************** DATETIME ****************/
 
@@ -915,6 +1034,13 @@
 <DATETIME, ROWID> : not defined
 <DATETIME, LOB> : not defined
 <DATETIME, JSON> : not defined
+<DATETIME, GEOMETRY> : not defined
+<DATETIME, UDT> : not defined
+<DATETIME, DECIMAL_INT> : not defined
+<DATETIME, ARRAY> : not defined
+<DATETIME, MYSQL_DATE> : not defined
+<DATETIME, MYSQL_DATETIME> : not defined
+<DATETIME, ROARINGBITMAP> : not defined
 
 /**************** TIMESTAMP ****************/
 
@@ -966,6 +1092,13 @@
 <TIMESTAMP, ROWID> : not defined
 <TIMESTAMP, LOB> : not defined
 <TIMESTAMP, JSON> : not defined
+<TIMESTAMP, GEOMETRY> : not defined
+<TIMESTAMP, UDT> : not defined
+<TIMESTAMP, DECIMAL_INT> : not defined
+<TIMESTAMP, ARRAY> : not defined
+<TIMESTAMP, MYSQL_DATE> : not defined
+<TIMESTAMP, MYSQL_DATETIME> : not defined
+<TIMESTAMP, ROARINGBITMAP> : not defined
 
 /**************** DATE ****************/
 
@@ -1017,6 +1150,13 @@
 <DATE, ROWID> : not defined
 <DATE, LOB> : not defined
 <DATE, JSON> : not defined
+<DATE, GEOMETRY> : not defined
+<DATE, UDT> : not defined
+<DATE, DECIMAL_INT> : not defined
+<DATE, ARRAY> : not defined
+<DATE, MYSQL_DATE> : not defined
+<DATE, MYSQL_DATETIME> : not defined
+<DATE, ROARINGBITMAP> : not defined
 
 /**************** TIME ****************/
 
@@ -1068,6 +1208,13 @@
 <TIME, ROWID> : not defined
 <TIME, LOB> : not defined
 <TIME, JSON> : not defined
+<TIME, GEOMETRY> : not defined
+<TIME, UDT> : not defined
+<TIME, DECIMAL_INT> : not defined
+<TIME, ARRAY> : not defined
+<TIME, MYSQL_DATE> : not defined
+<TIME, MYSQL_DATETIME> : not defined
+<TIME, ROARINGBITMAP> : not defined
 
 /**************** YEAR ****************/
 
@@ -1119,6 +1266,13 @@
 <YEAR, ROWID> : not defined
 <YEAR, LOB> : not defined
 <YEAR, JSON> : not defined
+<YEAR, GEOMETRY> : not defined
+<YEAR, UDT> : not defined
+<YEAR, DECIMAL_INT> : not defined
+<YEAR, ARRAY> : not defined
+<YEAR, MYSQL_DATE> : not defined
+<YEAR, MYSQL_DATETIME> : not defined
+<YEAR, ROARINGBITMAP> : not defined
 
 /**************** VARCHAR ****************/
 
@@ -1170,6 +1324,13 @@
 <VARCHAR, ROWID> : not defined
 <VARCHAR, LOB> : not defined
 <VARCHAR, JSON> : not defined
+<VARCHAR, GEOMETRY> : not defined
+<VARCHAR, UDT> : not defined
+<VARCHAR, DECIMAL_INT> : not defined
+<VARCHAR, ARRAY> : not defined
+<VARCHAR, MYSQL_DATE> : not defined
+<VARCHAR, MYSQL_DATETIME> : not defined
+<VARCHAR, ROARINGBITMAP> : not defined
 
 /**************** CHAR ****************/
 
@@ -1221,6 +1382,13 @@
 <CHAR, ROWID> : not defined
 <CHAR, LOB> : not defined
 <CHAR, JSON> : not defined
+<CHAR, GEOMETRY> : not defined
+<CHAR, UDT> : not defined
+<CHAR, DECIMAL_INT> : not defined
+<CHAR, ARRAY> : not defined
+<CHAR, MYSQL_DATE> : not defined
+<CHAR, MYSQL_DATETIME> : not defined
+<CHAR, ROARINGBITMAP> : not defined
 
 /**************** HEX_STRING ****************/
 
@@ -1272,6 +1440,13 @@
 <HEX_STRING, ROWID> : not defined
 <HEX_STRING, LOB> : not defined
 <HEX_STRING, JSON> : not defined
+<HEX_STRING, GEOMETRY> : not defined
+<HEX_STRING, UDT> : not defined
+<HEX_STRING, DECIMAL_INT> : not defined
+<HEX_STRING, ARRAY> : not defined
+<HEX_STRING, MYSQL_DATE> : not defined
+<HEX_STRING, MYSQL_DATETIME> : not defined
+<HEX_STRING, ROARINGBITMAP> : not defined
 
 /**************** EXT ****************/
 
@@ -1323,6 +1498,13 @@
 <EXT, ROWID> : defined
 <EXT, LOB> : defined
 <EXT, JSON> : defined
+<EXT, GEOMETRY> : defined
+<EXT, UDT> : not defined
+<EXT, DECIMAL_INT> : defined
+<EXT, ARRAY> : defined
+<EXT, MYSQL_DATE> : defined
+<EXT, MYSQL_DATETIME> : defined
+<EXT, ROARINGBITMAP> : defined
 
 /**************** UNKNOWN ****************/
 
@@ -1352,7 +1534,7 @@
 <UNKNOWN, CHAR> : not defined
 <UNKNOWN, HEX_STRING> : not defined
 <UNKNOWN, EXT> : defined
-<UNKNOWN, UNKNOWN> : defined
+<UNKNOWN, UNKNOWN> : not defined
 <UNKNOWN, TINYTEXT> : not defined
 <UNKNOWN, TEXT> : not defined
 <UNKNOWN, MEDIUMTEXT> : not defined
@@ -1374,6 +1556,13 @@
 <UNKNOWN, ROWID> : not defined
 <UNKNOWN, LOB> : not defined
 <UNKNOWN, JSON> : not defined
+<UNKNOWN, GEOMETRY> : not defined
+<UNKNOWN, UDT> : not defined
+<UNKNOWN, DECIMAL_INT> : not defined
+<UNKNOWN, ARRAY> : not defined
+<UNKNOWN, MYSQL_DATE> : not defined
+<UNKNOWN, MYSQL_DATETIME> : not defined
+<UNKNOWN, ROARINGBITMAP> : not defined
 
 /**************** TINYTEXT ****************/
 
@@ -1425,6 +1614,13 @@
 <TINYTEXT, ROWID> : not defined
 <TINYTEXT, LOB> : not defined
 <TINYTEXT, JSON> : not defined
+<TINYTEXT, GEOMETRY> : not defined
+<TINYTEXT, UDT> : not defined
+<TINYTEXT, DECIMAL_INT> : not defined
+<TINYTEXT, ARRAY> : not defined
+<TINYTEXT, MYSQL_DATE> : not defined
+<TINYTEXT, MYSQL_DATETIME> : not defined
+<TINYTEXT, ROARINGBITMAP> : not defined
 
 /**************** TEXT ****************/
 
@@ -1476,6 +1672,13 @@
 <TEXT, ROWID> : not defined
 <TEXT, LOB> : not defined
 <TEXT, JSON> : not defined
+<TEXT, GEOMETRY> : not defined
+<TEXT, UDT> : not defined
+<TEXT, DECIMAL_INT> : not defined
+<TEXT, ARRAY> : not defined
+<TEXT, MYSQL_DATE> : not defined
+<TEXT, MYSQL_DATETIME> : not defined
+<TEXT, ROARINGBITMAP> : not defined
 
 /**************** MEDIUMTEXT ****************/
 
@@ -1527,6 +1730,13 @@
 <MEDIUMTEXT, ROWID> : not defined
 <MEDIUMTEXT, LOB> : not defined
 <MEDIUMTEXT, JSON> : not defined
+<MEDIUMTEXT, GEOMETRY> : not defined
+<MEDIUMTEXT, UDT> : not defined
+<MEDIUMTEXT, DECIMAL_INT> : not defined
+<MEDIUMTEXT, ARRAY> : not defined
+<MEDIUMTEXT, MYSQL_DATE> : not defined
+<MEDIUMTEXT, MYSQL_DATETIME> : not defined
+<MEDIUMTEXT, ROARINGBITMAP> : not defined
 
 /**************** LONGTEXT ****************/
 
@@ -1578,6 +1788,13 @@
 <LONGTEXT, ROWID> : not defined
 <LONGTEXT, LOB> : not defined
 <LONGTEXT, JSON> : not defined
+<LONGTEXT, GEOMETRY> : not defined
+<LONGTEXT, UDT> : not defined
+<LONGTEXT, DECIMAL_INT> : not defined
+<LONGTEXT, ARRAY> : not defined
+<LONGTEXT, MYSQL_DATE> : not defined
+<LONGTEXT, MYSQL_DATETIME> : not defined
+<LONGTEXT, ROARINGBITMAP> : not defined
 
 /**************** BIT ****************/
 
@@ -1629,6 +1846,13 @@
 <BIT, ROWID> : not defined
 <BIT, LOB> : not defined
 <BIT, JSON> : not defined
+<BIT, GEOMETRY> : not defined
+<BIT, UDT> : not defined
+<BIT, DECIMAL_INT> : not defined
+<BIT, ARRAY> : not defined
+<BIT, MYSQL_DATE> : not defined
+<BIT, MYSQL_DATETIME> : not defined
+<BIT, ROARINGBITMAP> : not defined
 
 /**************** ENUM ****************/
 
@@ -1680,6 +1904,13 @@
 <ENUM, ROWID> : not defined
 <ENUM, LOB> : not defined
 <ENUM, JSON> : not defined
+<ENUM, GEOMETRY> : not defined
+<ENUM, UDT> : not defined
+<ENUM, DECIMAL_INT> : not defined
+<ENUM, ARRAY> : not defined
+<ENUM, MYSQL_DATE> : not defined
+<ENUM, MYSQL_DATETIME> : not defined
+<ENUM, ROARINGBITMAP> : not defined
 
 /**************** SET ****************/
 
@@ -1731,6 +1962,13 @@
 <SET, ROWID> : not defined
 <SET, LOB> : not defined
 <SET, JSON> : not defined
+<SET, GEOMETRY> : not defined
+<SET, UDT> : not defined
+<SET, DECIMAL_INT> : not defined
+<SET, ARRAY> : not defined
+<SET, MYSQL_DATE> : not defined
+<SET, MYSQL_DATETIME> : not defined
+<SET, ROARINGBITMAP> : not defined
 
 /**************** ENUM_INNER ****************/
 
@@ -1782,6 +2020,13 @@
 <ENUM_INNER, ROWID> : not defined
 <ENUM_INNER, LOB> : not defined
 <ENUM_INNER, JSON> : not defined
+<ENUM_INNER, GEOMETRY> : not defined
+<ENUM_INNER, UDT> : not defined
+<ENUM_INNER, DECIMAL_INT> : not defined
+<ENUM_INNER, ARRAY> : not defined
+<ENUM_INNER, MYSQL_DATE> : not defined
+<ENUM_INNER, MYSQL_DATETIME> : not defined
+<ENUM_INNER, ROARINGBITMAP> : not defined
 
 /**************** SET_INNER ****************/
 
@@ -1833,6 +2078,13 @@
 <SET_INNER, ROWID> : not defined
 <SET_INNER, LOB> : not defined
 <SET_INNER, JSON> : not defined
+<SET_INNER, GEOMETRY> : not defined
+<SET_INNER, UDT> : not defined
+<SET_INNER, DECIMAL_INT> : not defined
+<SET_INNER, ARRAY> : not defined
+<SET_INNER, MYSQL_DATE> : not defined
+<SET_INNER, MYSQL_DATETIME> : not defined
+<SET_INNER, ROARINGBITMAP> : not defined
 
 /**************** TIMESTAMP_WITH_TIME_ZONE ****************/
 
@@ -1884,6 +2136,13 @@
 <TIMESTAMP_WITH_TIME_ZONE, ROWID> : not defined
 <TIMESTAMP_WITH_TIME_ZONE, LOB> : not defined
 <TIMESTAMP_WITH_TIME_ZONE, JSON> : not defined
+<TIMESTAMP_WITH_TIME_ZONE, GEOMETRY> : not defined
+<TIMESTAMP_WITH_TIME_ZONE, UDT> : not defined
+<TIMESTAMP_WITH_TIME_ZONE, DECIMAL_INT> : not defined
+<TIMESTAMP_WITH_TIME_ZONE, ARRAY> : not defined
+<TIMESTAMP_WITH_TIME_ZONE, MYSQL_DATE> : not defined
+<TIMESTAMP_WITH_TIME_ZONE, MYSQL_DATETIME> : not defined
+<TIMESTAMP_WITH_TIME_ZONE, ROARINGBITMAP> : not defined
 
 /**************** TIMESTAMP_WITH_LOCAL_TIME_ZONE ****************/
 
@@ -1935,6 +2194,13 @@
 <TIMESTAMP_WITH_LOCAL_TIME_ZONE, ROWID> : not defined
 <TIMESTAMP_WITH_LOCAL_TIME_ZONE, LOB> : not defined
 <TIMESTAMP_WITH_LOCAL_TIME_ZONE, JSON> : not defined
+<TIMESTAMP_WITH_LOCAL_TIME_ZONE, GEOMETRY> : not defined
+<TIMESTAMP_WITH_LOCAL_TIME_ZONE, UDT> : not defined
+<TIMESTAMP_WITH_LOCAL_TIME_ZONE, DECIMAL_INT> : not defined
+<TIMESTAMP_WITH_LOCAL_TIME_ZONE, ARRAY> : not defined
+<TIMESTAMP_WITH_LOCAL_TIME_ZONE, MYSQL_DATE> : not defined
+<TIMESTAMP_WITH_LOCAL_TIME_ZONE, MYSQL_DATETIME> : not defined
+<TIMESTAMP_WITH_LOCAL_TIME_ZONE, ROARINGBITMAP> : not defined
 
 /**************** TIMESTAMP ****************/
 
@@ -1986,6 +2252,13 @@
 <TIMESTAMP, ROWID> : not defined
 <TIMESTAMP, LOB> : not defined
 <TIMESTAMP, JSON> : not defined
+<TIMESTAMP, GEOMETRY> : not defined
+<TIMESTAMP, UDT> : not defined
+<TIMESTAMP, DECIMAL_INT> : not defined
+<TIMESTAMP, ARRAY> : not defined
+<TIMESTAMP, MYSQL_DATE> : not defined
+<TIMESTAMP, MYSQL_DATETIME> : not defined
+<TIMESTAMP, ROARINGBITMAP> : not defined
 
 /**************** RAW ****************/
 
@@ -2037,6 +2310,13 @@
 <RAW, ROWID> : not defined
 <RAW, LOB> : not defined
 <RAW, JSON> : not defined
+<RAW, GEOMETRY> : not defined
+<RAW, UDT> : not defined
+<RAW, DECIMAL_INT> : not defined
+<RAW, ARRAY> : not defined
+<RAW, MYSQL_DATE> : not defined
+<RAW, MYSQL_DATETIME> : not defined
+<RAW, ROARINGBITMAP> : not defined
 
 /**************** INTERVAL_YEAR_TO_MONTH ****************/
 
@@ -2088,6 +2368,13 @@
 <INTERVAL_YEAR_TO_MONTH, ROWID> : not defined
 <INTERVAL_YEAR_TO_MONTH, LOB> : not defined
 <INTERVAL_YEAR_TO_MONTH, JSON> : not defined
+<INTERVAL_YEAR_TO_MONTH, GEOMETRY> : not defined
+<INTERVAL_YEAR_TO_MONTH, UDT> : not defined
+<INTERVAL_YEAR_TO_MONTH, DECIMAL_INT> : not defined
+<INTERVAL_YEAR_TO_MONTH, ARRAY> : not defined
+<INTERVAL_YEAR_TO_MONTH, MYSQL_DATE> : not defined
+<INTERVAL_YEAR_TO_MONTH, MYSQL_DATETIME> : not defined
+<INTERVAL_YEAR_TO_MONTH, ROARINGBITMAP> : not defined
 
 /**************** INTERVAL_DAY_TO_SECOND ****************/
 
@@ -2139,6 +2426,13 @@
 <INTERVAL_DAY_TO_SECOND, ROWID> : not defined
 <INTERVAL_DAY_TO_SECOND, LOB> : not defined
 <INTERVAL_DAY_TO_SECOND, JSON> : not defined
+<INTERVAL_DAY_TO_SECOND, GEOMETRY> : not defined
+<INTERVAL_DAY_TO_SECOND, UDT> : not defined
+<INTERVAL_DAY_TO_SECOND, DECIMAL_INT> : not defined
+<INTERVAL_DAY_TO_SECOND, ARRAY> : not defined
+<INTERVAL_DAY_TO_SECOND, MYSQL_DATE> : not defined
+<INTERVAL_DAY_TO_SECOND, MYSQL_DATETIME> : not defined
+<INTERVAL_DAY_TO_SECOND, ROARINGBITMAP> : not defined
 
 /**************** NUMBER_FLOAT ****************/
 
@@ -2190,6 +2484,13 @@
 <NUMBER_FLOAT, ROWID> : not defined
 <NUMBER_FLOAT, LOB> : not defined
 <NUMBER_FLOAT, JSON> : not defined
+<NUMBER_FLOAT, GEOMETRY> : not defined
+<NUMBER_FLOAT, UDT> : not defined
+<NUMBER_FLOAT, DECIMAL_INT> : not defined
+<NUMBER_FLOAT, ARRAY> : not defined
+<NUMBER_FLOAT, MYSQL_DATE> : not defined
+<NUMBER_FLOAT, MYSQL_DATETIME> : not defined
+<NUMBER_FLOAT, ROARINGBITMAP> : not defined
 
 /**************** NVARCHAR2 ****************/
 
@@ -2241,6 +2542,13 @@
 <NVARCHAR2, ROWID> : not defined
 <NVARCHAR2, LOB> : not defined
 <NVARCHAR2, JSON> : not defined
+<NVARCHAR2, GEOMETRY> : not defined
+<NVARCHAR2, UDT> : not defined
+<NVARCHAR2, DECIMAL_INT> : not defined
+<NVARCHAR2, ARRAY> : not defined
+<NVARCHAR2, MYSQL_DATE> : not defined
+<NVARCHAR2, MYSQL_DATETIME> : not defined
+<NVARCHAR2, ROARINGBITMAP> : not defined
 
 /**************** NCHAR ****************/
 
@@ -2292,6 +2600,13 @@
 <NCHAR, ROWID> : not defined
 <NCHAR, LOB> : not defined
 <NCHAR, JSON> : not defined
+<NCHAR, GEOMETRY> : not defined
+<NCHAR, UDT> : not defined
+<NCHAR, DECIMAL_INT> : not defined
+<NCHAR, ARRAY> : not defined
+<NCHAR, MYSQL_DATE> : not defined
+<NCHAR, MYSQL_DATETIME> : not defined
+<NCHAR, ROARINGBITMAP> : not defined
 
 /**************** ROWID ****************/
 
@@ -2343,6 +2658,13 @@
 <ROWID, ROWID> : defined
 <ROWID, LOB> : not defined
 <ROWID, JSON> : not defined
+<ROWID, GEOMETRY> : not defined
+<ROWID, UDT> : not defined
+<ROWID, DECIMAL_INT> : not defined
+<ROWID, ARRAY> : not defined
+<ROWID, MYSQL_DATE> : not defined
+<ROWID, MYSQL_DATETIME> : not defined
+<ROWID, ROARINGBITMAP> : not defined
 
 /**************** LOB ****************/
 
@@ -2394,6 +2716,13 @@
 <LOB, ROWID> : not defined
 <LOB, LOB> : not defined
 <LOB, JSON> : not defined
+<LOB, GEOMETRY> : not defined
+<LOB, UDT> : not defined
+<LOB, DECIMAL_INT> : not defined
+<LOB, ARRAY> : not defined
+<LOB, MYSQL_DATE> : not defined
+<LOB, MYSQL_DATETIME> : not defined
+<LOB, ROARINGBITMAP> : not defined
 
 /**************** JSON ****************/
 
@@ -2445,4 +2774,417 @@
 <JSON, ROWID> : not defined
 <JSON, LOB> : not defined
 <JSON, JSON> : defined
+<JSON, GEOMETRY> : not defined
+<JSON, UDT> : not defined
+<JSON, DECIMAL_INT> : not defined
+<JSON, ARRAY> : not defined
+<JSON, MYSQL_DATE> : not defined
+<JSON, MYSQL_DATETIME> : not defined
+<JSON, ROARINGBITMAP> : not defined
+
+/**************** GEOMETRY ****************/
+
+<GEOMETRY, NULL> : defined
+<GEOMETRY, TINYINT> : not defined
+<GEOMETRY, SMALLINT> : not defined
+<GEOMETRY, MEDIUMINT> : not defined
+<GEOMETRY, INT> : not defined
+<GEOMETRY, BIGINT> : not defined
+<GEOMETRY, TINYINT UNSIGNED> : not defined
+<GEOMETRY, SMALLINT UNSIGNED> : not defined
+<GEOMETRY, MEDIUMINT UNSIGNED> : not defined
+<GEOMETRY, INT UNSIGNED> : not defined
+<GEOMETRY, BIGINT UNSIGNED> : not defined
+<GEOMETRY, FLOAT> : not defined
+<GEOMETRY, DOUBLE> : not defined
+<GEOMETRY, FLOAT UNSIGNED> : not defined
+<GEOMETRY, DOUBLE UNSIGNED> : not defined
+<GEOMETRY, DECIMAL> : not defined
+<GEOMETRY, DECIMAL UNSIGNED> : not defined
+<GEOMETRY, DATETIME> : not defined
+<GEOMETRY, TIMESTAMP> : not defined
+<GEOMETRY, DATE> : not defined
+<GEOMETRY, TIME> : not defined
+<GEOMETRY, YEAR> : not defined
+<GEOMETRY, VARCHAR> : not defined
+<GEOMETRY, CHAR> : not defined
+<GEOMETRY, HEX_STRING> : not defined
+<GEOMETRY, EXT> : defined
+<GEOMETRY, UNKNOWN> : not defined
+<GEOMETRY, TINYTEXT> : not defined
+<GEOMETRY, TEXT> : not defined
+<GEOMETRY, MEDIUMTEXT> : not defined
+<GEOMETRY, LONGTEXT> : not defined
+<GEOMETRY, BIT> : not defined
+<GEOMETRY, ENUM> : not defined
+<GEOMETRY, SET> : not defined
+<GEOMETRY, ENUM_INNER> : not defined
+<GEOMETRY, SET_INNER> : not defined
+<GEOMETRY, TIMESTAMP_WITH_TIME_ZONE> : not defined
+<GEOMETRY, TIMESTAMP_WITH_LOCAL_TIME_ZONE> : not defined
+<GEOMETRY, TIMESTAMP> : not defined
+<GEOMETRY, RAW> : not defined
+<GEOMETRY, INTERVAL_YEAR_TO_MONTH> : not defined
+<GEOMETRY, INTERVAL_DAY_TO_SECOND> : not defined
+<GEOMETRY, NUMBER_FLOAT> : not defined
+<GEOMETRY, NVARCHAR2> : not defined
+<GEOMETRY, NCHAR> : not defined
+<GEOMETRY, ROWID> : not defined
+<GEOMETRY, LOB> : not defined
+<GEOMETRY, JSON> : not defined
+<GEOMETRY, GEOMETRY> : defined
+<GEOMETRY, UDT> : not defined
+<GEOMETRY, DECIMAL_INT> : not defined
+<GEOMETRY, ARRAY> : not defined
+<GEOMETRY, MYSQL_DATE> : not defined
+<GEOMETRY, MYSQL_DATETIME> : not defined
+<GEOMETRY, ROARINGBITMAP> : not defined
+
+/**************** UDT ****************/
+
+<UDT, NULL> : not defined
+<UDT, TINYINT> : not defined
+<UDT, SMALLINT> : not defined
+<UDT, MEDIUMINT> : not defined
+<UDT, INT> : not defined
+<UDT, BIGINT> : not defined
+<UDT, TINYINT UNSIGNED> : not defined
+<UDT, SMALLINT UNSIGNED> : not defined
+<UDT, MEDIUMINT UNSIGNED> : not defined
+<UDT, INT UNSIGNED> : not defined
+<UDT, BIGINT UNSIGNED> : not defined
+<UDT, FLOAT> : not defined
+<UDT, DOUBLE> : not defined
+<UDT, FLOAT UNSIGNED> : not defined
+<UDT, DOUBLE UNSIGNED> : not defined
+<UDT, DECIMAL> : not defined
+<UDT, DECIMAL UNSIGNED> : not defined
+<UDT, DATETIME> : not defined
+<UDT, TIMESTAMP> : not defined
+<UDT, DATE> : not defined
+<UDT, TIME> : not defined
+<UDT, YEAR> : not defined
+<UDT, VARCHAR> : not defined
+<UDT, CHAR> : not defined
+<UDT, HEX_STRING> : not defined
+<UDT, EXT> : not defined
+<UDT, UNKNOWN> : not defined
+<UDT, TINYTEXT> : not defined
+<UDT, TEXT> : not defined
+<UDT, MEDIUMTEXT> : not defined
+<UDT, LONGTEXT> : not defined
+<UDT, BIT> : not defined
+<UDT, ENUM> : not defined
+<UDT, SET> : not defined
+<UDT, ENUM_INNER> : not defined
+<UDT, SET_INNER> : not defined
+<UDT, TIMESTAMP_WITH_TIME_ZONE> : not defined
+<UDT, TIMESTAMP_WITH_LOCAL_TIME_ZONE> : not defined
+<UDT, TIMESTAMP> : not defined
+<UDT, RAW> : not defined
+<UDT, INTERVAL_YEAR_TO_MONTH> : not defined
+<UDT, INTERVAL_DAY_TO_SECOND> : not defined
+<UDT, NUMBER_FLOAT> : not defined
+<UDT, NVARCHAR2> : not defined
+<UDT, NCHAR> : not defined
+<UDT, ROWID> : not defined
+<UDT, LOB> : not defined
+<UDT, JSON> : not defined
+<UDT, GEOMETRY> : not defined
+<UDT, UDT> : not defined
+<UDT, DECIMAL_INT> : not defined
+<UDT, ARRAY> : not defined
+<UDT, MYSQL_DATE> : not defined
+<UDT, MYSQL_DATETIME> : not defined
+<UDT, ROARINGBITMAP> : not defined
+
+/**************** DECIMAL_INT ****************/
+
+<DECIMAL_INT, NULL> : defined
+<DECIMAL_INT, TINYINT> : not defined
+<DECIMAL_INT, SMALLINT> : not defined
+<DECIMAL_INT, MEDIUMINT> : not defined
+<DECIMAL_INT, INT> : not defined
+<DECIMAL_INT, BIGINT> : not defined
+<DECIMAL_INT, TINYINT UNSIGNED> : not defined
+<DECIMAL_INT, SMALLINT UNSIGNED> : not defined
+<DECIMAL_INT, MEDIUMINT UNSIGNED> : not defined
+<DECIMAL_INT, INT UNSIGNED> : not defined
+<DECIMAL_INT, BIGINT UNSIGNED> : not defined
+<DECIMAL_INT, FLOAT> : not defined
+<DECIMAL_INT, DOUBLE> : not defined
+<DECIMAL_INT, FLOAT UNSIGNED> : not defined
+<DECIMAL_INT, DOUBLE UNSIGNED> : not defined
+<DECIMAL_INT, DECIMAL> : not defined
+<DECIMAL_INT, DECIMAL UNSIGNED> : not defined
+<DECIMAL_INT, DATETIME> : not defined
+<DECIMAL_INT, TIMESTAMP> : not defined
+<DECIMAL_INT, DATE> : not defined
+<DECIMAL_INT, TIME> : not defined
+<DECIMAL_INT, YEAR> : not defined
+<DECIMAL_INT, VARCHAR> : not defined
+<DECIMAL_INT, CHAR> : not defined
+<DECIMAL_INT, HEX_STRING> : not defined
+<DECIMAL_INT, EXT> : defined
+<DECIMAL_INT, UNKNOWN> : not defined
+<DECIMAL_INT, TINYTEXT> : not defined
+<DECIMAL_INT, TEXT> : not defined
+<DECIMAL_INT, MEDIUMTEXT> : not defined
+<DECIMAL_INT, LONGTEXT> : not defined
+<DECIMAL_INT, BIT> : not defined
+<DECIMAL_INT, ENUM> : not defined
+<DECIMAL_INT, SET> : not defined
+<DECIMAL_INT, ENUM_INNER> : not defined
+<DECIMAL_INT, SET_INNER> : not defined
+<DECIMAL_INT, TIMESTAMP_WITH_TIME_ZONE> : not defined
+<DECIMAL_INT, TIMESTAMP_WITH_LOCAL_TIME_ZONE> : not defined
+<DECIMAL_INT, TIMESTAMP> : not defined
+<DECIMAL_INT, RAW> : not defined
+<DECIMAL_INT, INTERVAL_YEAR_TO_MONTH> : not defined
+<DECIMAL_INT, INTERVAL_DAY_TO_SECOND> : not defined
+<DECIMAL_INT, NUMBER_FLOAT> : not defined
+<DECIMAL_INT, NVARCHAR2> : not defined
+<DECIMAL_INT, NCHAR> : not defined
+<DECIMAL_INT, ROWID> : not defined
+<DECIMAL_INT, LOB> : not defined
+<DECIMAL_INT, JSON> : not defined
+<DECIMAL_INT, GEOMETRY> : not defined
+<DECIMAL_INT, UDT> : not defined
+<DECIMAL_INT, DECIMAL_INT> : defined
+<DECIMAL_INT, ARRAY> : not defined
+<DECIMAL_INT, MYSQL_DATE> : not defined
+<DECIMAL_INT, MYSQL_DATETIME> : not defined
+<DECIMAL_INT, ROARINGBITMAP> : not defined
+
+/**************** ARRAY ****************/
+
+<ARRAY, NULL> : defined
+<ARRAY, TINYINT> : not defined
+<ARRAY, SMALLINT> : not defined
+<ARRAY, MEDIUMINT> : not defined
+<ARRAY, INT> : not defined
+<ARRAY, BIGINT> : not defined
+<ARRAY, TINYINT UNSIGNED> : not defined
+<ARRAY, SMALLINT UNSIGNED> : not defined
+<ARRAY, MEDIUMINT UNSIGNED> : not defined
+<ARRAY, INT UNSIGNED> : not defined
+<ARRAY, BIGINT UNSIGNED> : not defined
+<ARRAY, FLOAT> : not defined
+<ARRAY, DOUBLE> : not defined
+<ARRAY, FLOAT UNSIGNED> : not defined
+<ARRAY, DOUBLE UNSIGNED> : not defined
+<ARRAY, DECIMAL> : not defined
+<ARRAY, DECIMAL UNSIGNED> : not defined
+<ARRAY, DATETIME> : not defined
+<ARRAY, TIMESTAMP> : not defined
+<ARRAY, DATE> : not defined
+<ARRAY, TIME> : not defined
+<ARRAY, YEAR> : not defined
+<ARRAY, VARCHAR> : not defined
+<ARRAY, CHAR> : not defined
+<ARRAY, HEX_STRING> : not defined
+<ARRAY, EXT> : defined
+<ARRAY, UNKNOWN> : not defined
+<ARRAY, TINYTEXT> : not defined
+<ARRAY, TEXT> : not defined
+<ARRAY, MEDIUMTEXT> : not defined
+<ARRAY, LONGTEXT> : not defined
+<ARRAY, BIT> : not defined
+<ARRAY, ENUM> : not defined
+<ARRAY, SET> : not defined
+<ARRAY, ENUM_INNER> : not defined
+<ARRAY, SET_INNER> : not defined
+<ARRAY, TIMESTAMP_WITH_TIME_ZONE> : not defined
+<ARRAY, TIMESTAMP_WITH_LOCAL_TIME_ZONE> : not defined
+<ARRAY, TIMESTAMP> : not defined
+<ARRAY, RAW> : not defined
+<ARRAY, INTERVAL_YEAR_TO_MONTH> : not defined
+<ARRAY, INTERVAL_DAY_TO_SECOND> : not defined
+<ARRAY, NUMBER_FLOAT> : not defined
+<ARRAY, NVARCHAR2> : not defined
+<ARRAY, NCHAR> : not defined
+<ARRAY, ROWID> : not defined
+<ARRAY, LOB> : not defined
+<ARRAY, JSON> : not defined
+<ARRAY, GEOMETRY> : not defined
+<ARRAY, UDT> : not defined
+<ARRAY, DECIMAL_INT> : not defined
+<ARRAY, ARRAY> : defined
+<ARRAY, MYSQL_DATE> : not defined
+<ARRAY, MYSQL_DATETIME> : not defined
+<ARRAY, ROARINGBITMAP> : not defined
+
+/**************** MYSQL_DATE ****************/
+
+<MYSQL_DATE, NULL> : defined
+<MYSQL_DATE, TINYINT> : not defined
+<MYSQL_DATE, SMALLINT> : not defined
+<MYSQL_DATE, MEDIUMINT> : not defined
+<MYSQL_DATE, INT> : not defined
+<MYSQL_DATE, BIGINT> : not defined
+<MYSQL_DATE, TINYINT UNSIGNED> : not defined
+<MYSQL_DATE, SMALLINT UNSIGNED> : not defined
+<MYSQL_DATE, MEDIUMINT UNSIGNED> : not defined
+<MYSQL_DATE, INT UNSIGNED> : not defined
+<MYSQL_DATE, BIGINT UNSIGNED> : not defined
+<MYSQL_DATE, FLOAT> : not defined
+<MYSQL_DATE, DOUBLE> : not defined
+<MYSQL_DATE, FLOAT UNSIGNED> : not defined
+<MYSQL_DATE, DOUBLE UNSIGNED> : not defined
+<MYSQL_DATE, DECIMAL> : not defined
+<MYSQL_DATE, DECIMAL UNSIGNED> : not defined
+<MYSQL_DATE, DATETIME> : not defined
+<MYSQL_DATE, TIMESTAMP> : not defined
+<MYSQL_DATE, DATE> : not defined
+<MYSQL_DATE, TIME> : not defined
+<MYSQL_DATE, YEAR> : not defined
+<MYSQL_DATE, VARCHAR> : not defined
+<MYSQL_DATE, CHAR> : not defined
+<MYSQL_DATE, HEX_STRING> : not defined
+<MYSQL_DATE, EXT> : defined
+<MYSQL_DATE, UNKNOWN> : not defined
+<MYSQL_DATE, TINYTEXT> : not defined
+<MYSQL_DATE, TEXT> : not defined
+<MYSQL_DATE, MEDIUMTEXT> : not defined
+<MYSQL_DATE, LONGTEXT> : not defined
+<MYSQL_DATE, BIT> : not defined
+<MYSQL_DATE, ENUM> : not defined
+<MYSQL_DATE, SET> : not defined
+<MYSQL_DATE, ENUM_INNER> : not defined
+<MYSQL_DATE, SET_INNER> : not defined
+<MYSQL_DATE, TIMESTAMP_WITH_TIME_ZONE> : not defined
+<MYSQL_DATE, TIMESTAMP_WITH_LOCAL_TIME_ZONE> : not defined
+<MYSQL_DATE, TIMESTAMP> : not defined
+<MYSQL_DATE, RAW> : not defined
+<MYSQL_DATE, INTERVAL_YEAR_TO_MONTH> : not defined
+<MYSQL_DATE, INTERVAL_DAY_TO_SECOND> : not defined
+<MYSQL_DATE, NUMBER_FLOAT> : not defined
+<MYSQL_DATE, NVARCHAR2> : not defined
+<MYSQL_DATE, NCHAR> : not defined
+<MYSQL_DATE, ROWID> : not defined
+<MYSQL_DATE, LOB> : not defined
+<MYSQL_DATE, JSON> : not defined
+<MYSQL_DATE, GEOMETRY> : not defined
+<MYSQL_DATE, UDT> : not defined
+<MYSQL_DATE, DECIMAL_INT> : not defined
+<MYSQL_DATE, ARRAY> : not defined
+<MYSQL_DATE, MYSQL_DATE> : defined
+<MYSQL_DATE, MYSQL_DATETIME> : not defined
+<MYSQL_DATE, ROARINGBITMAP> : not defined
+
+/**************** MYSQL_DATETIME ****************/
+
+<MYSQL_DATETIME, NULL> : defined
+<MYSQL_DATETIME, TINYINT> : not defined
+<MYSQL_DATETIME, SMALLINT> : not defined
+<MYSQL_DATETIME, MEDIUMINT> : not defined
+<MYSQL_DATETIME, INT> : not defined
+<MYSQL_DATETIME, BIGINT> : not defined
+<MYSQL_DATETIME, TINYINT UNSIGNED> : not defined
+<MYSQL_DATETIME, SMALLINT UNSIGNED> : not defined
+<MYSQL_DATETIME, MEDIUMINT UNSIGNED> : not defined
+<MYSQL_DATETIME, INT UNSIGNED> : not defined
+<MYSQL_DATETIME, BIGINT UNSIGNED> : not defined
+<MYSQL_DATETIME, FLOAT> : not defined
+<MYSQL_DATETIME, DOUBLE> : not defined
+<MYSQL_DATETIME, FLOAT UNSIGNED> : not defined
+<MYSQL_DATETIME, DOUBLE UNSIGNED> : not defined
+<MYSQL_DATETIME, DECIMAL> : not defined
+<MYSQL_DATETIME, DECIMAL UNSIGNED> : not defined
+<MYSQL_DATETIME, DATETIME> : not defined
+<MYSQL_DATETIME, TIMESTAMP> : not defined
+<MYSQL_DATETIME, DATE> : not defined
+<MYSQL_DATETIME, TIME> : not defined
+<MYSQL_DATETIME, YEAR> : not defined
+<MYSQL_DATETIME, VARCHAR> : not defined
+<MYSQL_DATETIME, CHAR> : not defined
+<MYSQL_DATETIME, HEX_STRING> : not defined
+<MYSQL_DATETIME, EXT> : defined
+<MYSQL_DATETIME, UNKNOWN> : not defined
+<MYSQL_DATETIME, TINYTEXT> : not defined
+<MYSQL_DATETIME, TEXT> : not defined
+<MYSQL_DATETIME, MEDIUMTEXT> : not defined
+<MYSQL_DATETIME, LONGTEXT> : not defined
+<MYSQL_DATETIME, BIT> : not defined
+<MYSQL_DATETIME, ENUM> : not defined
+<MYSQL_DATETIME, SET> : not defined
+<MYSQL_DATETIME, ENUM_INNER> : not defined
+<MYSQL_DATETIME, SET_INNER> : not defined
+<MYSQL_DATETIME, TIMESTAMP_WITH_TIME_ZONE> : not defined
+<MYSQL_DATETIME, TIMESTAMP_WITH_LOCAL_TIME_ZONE> : not defined
+<MYSQL_DATETIME, TIMESTAMP> : not defined
+<MYSQL_DATETIME, RAW> : not defined
+<MYSQL_DATETIME, INTERVAL_YEAR_TO_MONTH> : not defined
+<MYSQL_DATETIME, INTERVAL_DAY_TO_SECOND> : not defined
+<MYSQL_DATETIME, NUMBER_FLOAT> : not defined
+<MYSQL_DATETIME, NVARCHAR2> : not defined
+<MYSQL_DATETIME, NCHAR> : not defined
+<MYSQL_DATETIME, ROWID> : not defined
+<MYSQL_DATETIME, LOB> : not defined
+<MYSQL_DATETIME, JSON> : not defined
+<MYSQL_DATETIME, GEOMETRY> : not defined
+<MYSQL_DATETIME, UDT> : not defined
+<MYSQL_DATETIME, DECIMAL_INT> : not defined
+<MYSQL_DATETIME, ARRAY> : not defined
+<MYSQL_DATETIME, MYSQL_DATE> : not defined
+<MYSQL_DATETIME, MYSQL_DATETIME> : defined
+<MYSQL_DATETIME, ROARINGBITMAP> : not defined
+
+/**************** ROARINGBITMAP ****************/
+
+<ROARINGBITMAP, NULL> : defined
+<ROARINGBITMAP, TINYINT> : not defined
+<ROARINGBITMAP, SMALLINT> : not defined
+<ROARINGBITMAP, MEDIUMINT> : not defined
+<ROARINGBITMAP, INT> : not defined
+<ROARINGBITMAP, BIGINT> : not defined
+<ROARINGBITMAP, TINYINT UNSIGNED> : not defined
+<ROARINGBITMAP, SMALLINT UNSIGNED> : not defined
+<ROARINGBITMAP, MEDIUMINT UNSIGNED> : not defined
+<ROARINGBITMAP, INT UNSIGNED> : not defined
+<ROARINGBITMAP, BIGINT UNSIGNED> : not defined
+<ROARINGBITMAP, FLOAT> : not defined
+<ROARINGBITMAP, DOUBLE> : not defined
+<ROARINGBITMAP, FLOAT UNSIGNED> : not defined
+<ROARINGBITMAP, DOUBLE UNSIGNED> : not defined
+<ROARINGBITMAP, DECIMAL> : not defined
+<ROARINGBITMAP, DECIMAL UNSIGNED> : not defined
+<ROARINGBITMAP, DATETIME> : not defined
+<ROARINGBITMAP, TIMESTAMP> : not defined
+<ROARINGBITMAP, DATE> : not defined
+<ROARINGBITMAP, TIME> : not defined
+<ROARINGBITMAP, YEAR> : not defined
+<ROARINGBITMAP, VARCHAR> : not defined
+<ROARINGBITMAP, CHAR> : not defined
+<ROARINGBITMAP, HEX_STRING> : not defined
+<ROARINGBITMAP, EXT> : defined
+<ROARINGBITMAP, UNKNOWN> : not defined
+<ROARINGBITMAP, TINYTEXT> : not defined
+<ROARINGBITMAP, TEXT> : not defined
+<ROARINGBITMAP, MEDIUMTEXT> : not defined
+<ROARINGBITMAP, LONGTEXT> : not defined
+<ROARINGBITMAP, BIT> : not defined
+<ROARINGBITMAP, ENUM> : not defined
+<ROARINGBITMAP, SET> : not defined
+<ROARINGBITMAP, ENUM_INNER> : not defined
+<ROARINGBITMAP, SET_INNER> : not defined
+<ROARINGBITMAP, TIMESTAMP_WITH_TIME_ZONE> : not defined
+<ROARINGBITMAP, TIMESTAMP_WITH_LOCAL_TIME_ZONE> : not defined
+<ROARINGBITMAP, TIMESTAMP> : not defined
+<ROARINGBITMAP, RAW> : not defined
+<ROARINGBITMAP, INTERVAL_YEAR_TO_MONTH> : not defined
+<ROARINGBITMAP, INTERVAL_DAY_TO_SECOND> : not defined
+<ROARINGBITMAP, NUMBER_FLOAT> : not defined
+<ROARINGBITMAP, NVARCHAR2> : not defined
+<ROARINGBITMAP, NCHAR> : not defined
+<ROARINGBITMAP, ROWID> : not defined
+<ROARINGBITMAP, LOB> : not defined
+<ROARINGBITMAP, JSON> : not defined
+<ROARINGBITMAP, GEOMETRY> : not defined
+<ROARINGBITMAP, UDT> : not defined
+<ROARINGBITMAP, DECIMAL_INT> : not defined
+<ROARINGBITMAP, ARRAY> : not defined
+<ROARINGBITMAP, MYSQL_DATE> : not defined
+<ROARINGBITMAP, MYSQL_DATETIME> : not defined
+<ROARINGBITMAP, ROARINGBITMAP> : defined
 

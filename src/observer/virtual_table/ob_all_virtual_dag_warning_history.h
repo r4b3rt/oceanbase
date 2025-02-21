@@ -14,19 +14,21 @@
 #define OB_ALL_VIRTUAL_DAG_WARNING_HISTORY_H_
 #include "share/ob_virtual_table_scanner_iterator.h"
 #include "lib/container/ob_array.h"
-#include "storage/ob_dag_warning_history_mgr.h"
+#include "share/scheduler/ob_dag_warning_history_mgr.h"
+#include "observer/omt/ob_multi_tenant_operator.h"
 
-namespace oceanbase {
-namespace storage {
-class ObPartitionService;
-class ObSSTable;
-}  // namespace storage
-namespace observer {
+namespace oceanbase
+{
+namespace observer
+{
 
-class ObAllVirtualDagWarningHistory : public common::ObVirtualTableScannerIterator {
+class ObAllVirtualDagWarningHistory : public common::ObVirtualTableScannerIterator,
+                                      public omt::ObMultiTenantOperator
+{
 public:
-  enum COLUMN_ID_LIST {
-    SVR_IP = common::OB_APP_MIN_COLUMN_ID,
+  enum COLUMN_ID_LIST
+  {
+    SVR_IP  = common::OB_APP_MIN_COLUMN_ID,
     SVR_PORT,
     TENANT_ID,
     TASK_ID,
@@ -36,23 +38,30 @@ public:
     STATUS,
     GMT_CREATE,
     GMT_MODIFIED,
+    RETRY_CNT,
     WARNING_INFO,
   };
   ObAllVirtualDagWarningHistory();
   virtual ~ObAllVirtualDagWarningHistory();
-  int init();
-  virtual int inner_get_next_row(common::ObNewRow*& row);
+  virtual int inner_get_next_row(common::ObNewRow *&row);
   virtual void reset();
-
 protected:
-  int fill_cells(storage::ObDagWarningInfo& dag_warning_info);
-
+  int fill_cells(share::ObDagWarningInfo &dag_warning_info);
+private:
+  virtual bool is_need_process(uint64_t tenant_id) override;
+  virtual int process_curr_tenant(common::ObNewRow *&row) override;
+  virtual void release_last_tenant() override
+  {
+    dag_warning_info_iter_.reset();
+  }
 private:
   char ip_buf_[common::OB_IP_STR_BUFF];
   char task_id_buf_[common::OB_TRACE_STAT_BUFFER_SIZE];
-  storage::ObDagWarningInfo dag_warning_info_;
-  storage::ObDagWarningInfoIterator dag_warning_info_iter_;
+  char warning_info_buf_[common::OB_DAG_WARNING_INFO_LENGTH];
+  share::ObDagWarningInfo dag_warning_info_;
+  compaction::ObIDiagnoseInfoMgr::Iterator dag_warning_info_iter_;
   bool is_inited_;
+  char comment_[common::OB_DAG_WARNING_INFO_LENGTH];
   DISALLOW_COPY_AND_ASSIGN(ObAllVirtualDagWarningHistory);
 };
 

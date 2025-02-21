@@ -21,6 +21,12 @@
 #include "ob_table_service.h"
 #include "sql/monitor/ob_exec_stat.h"
 #include "share/table/ob_table.h"
+#include "ob_htable_lock_mgr.h"
+#include "ob_table_schema_cache.h"
+#include "observer/ob_req_time_service.h"
+#include "ob_table_trans_utils.h"
+#include "ob_table_audit.h"
+
 namespace oceanbase
 {
 namespace table
@@ -29,33 +35,9 @@ class ObTableAPITransCb;
 } // end namespace table
 namespace observer
 {
-using namespace oceanbase::table;
+using oceanbase::table::ObTableConsistencyLevel;
 
-class ObGlobalContext;
 class ObTableService;
-
-struct ObTableApiCredential final
-{
-  OB_UNIS_VERSION(1);
-public:
-  ObTableApiCredential();
-  ~ObTableApiCredential();
-public:
-  int64_t cluster_id_;
-  uint64_t tenant_id_;
-  uint64_t user_id_;
-  uint64_t database_id_;
-  int64_t expire_ts_;
-  uint64_t hash_val_;
-public:
-  uint64_t hash(uint64_t seed = 0) const;
-  TO_STRING_KV(K_(cluster_id),
-               K_(tenant_id),
-               K_(user_id),
-               K_(database_id),
-               K_(expire_ts),
-               K_(hash_val));
-};
 
 /// @see RPC_S(PR5 login, obrpc::OB_TABLE_API_LOGIN, (table::ObTableLoginRequest), table::ObTableLoginResult);
 class ObTableLoginP: public obrpc::ObRpcProcessor<obrpc::ObTableRpcProxy::ObRpc<obrpc::OB_TABLE_API_LOGIN> >
@@ -73,11 +55,11 @@ private:
                       const ObString &pass_scramble, const ObString &database, uint64_t &user_token);
   int generate_credential(uint64_t tenant_id, uint64_t user_id, uint64_t database,
                           int64_t ttl_us, uint64_t user_token, ObString &credential);
-private:
-  static const int64_t CREDENTIAL_BUF_SIZE = 256;
+  bool can_use_redis_v2();
 private:
   const ObGlobalContext &gctx_;
-  char credential_buf_[CREDENTIAL_BUF_SIZE];
+  table::ObTableApiCredential credential_;
+  char credential_buf_[table::ObTableApiCredential::CREDENTIAL_BUF_SIZE];
 };
 
 class ObTableRetryPolicy
@@ -99,6 +81,12 @@ public:
   bool allow_rpc_retry_;
   int64_t local_retry_interval_us_;
   int64_t max_local_retry_count_;
+};
+
+class ObTableApiUtils
+{
+public:
+  static int check_user_access(const common::ObString &credential_str, const ObGlobalContext &gctx, table::ObTableApiCredential &credential);
 };
 
 /*
@@ -127,84 +115,82 @@ public:
 public:
   static int init_session();
   int check_user_access(const ObString &credential_str);
+  int check_mode();
   // transaction control
-  int start_trans(bool is_readonly, const sql::stmt::StmtType stmt_type, 
-                  const ObTableConsistencyLevel consistency_level, uint64_t table_id,
-                  const common::ObIArray<int64_t> &part_ids, int64_t timeout_ts);
-  int start_trans(bool is_readonly, const sql::stmt::StmtType stmt_type, uint64_t table_id,
-                  const common::ObIArray<int64_t> &part_ids, int64_t timeout_ts);
-  int end_trans(bool is_rollback, rpc::ObRequest *req, int64_t timeout_ts, bool use_sync = false);
-  inline bool did_async_end_trans() const { return did_async_end_trans_; }
-  inline transaction::ObTransDesc& get_trans_desc() { return *trans_desc_ptr_; }
-  int get_partition_by_rowkey(uint64_t table_id, const ObIArray<common::ObRowkey> &rowkeys,
-                              common::ObIArray<int64_t> &part_ids,
-                              common::ObIArray<sql::RowkeyArray> &rowkeys_per_part);
+  int start_trans(bool is_readonly,
+                  const table::ObTableConsistencyLevel consistency_level,
+                  const share::ObLSID &ls_id,
+                  int64_t timeout_ts,
+                  bool need_global_snapshot);
+  int end_trans(bool is_rollback,
+                rpc::ObRequest *req,
+                table::ObTableCreateCbFunctor *functor,
+                bool use_sync = false);
+  int init_read_trans(const ObTableConsistencyLevel consistency_level,
+                      const ObLSID &ls_id,
+                      int64_t timeout_ts,
+                      bool need_global_snapshot);
 
+  // for get
+  inline transaction::ObTxDesc *get_trans_desc() { return trans_param_.trans_desc_; }
+
+  int get_idx_by_table_tablet_id(uint64_t arg_table_id, ObTabletID arg_tablet_id,
+                                int64_t &part_idx, int64_t &subpart_idx);
+  int get_tablet_by_idx(uint64_t table_id, int64_t part_idx, int64_t subpart_idx, ObTabletID &tablet_ids);
+  inline transaction::ObTxReadSnapshot &get_tx_snapshot() { return trans_param_.tx_snapshot_; }
+  inline bool had_do_response() const { return trans_param_.had_do_response_; }
   int get_table_id(const ObString &table_name, const uint64_t arg_table_id, uint64_t &real_table_id) const;
 protected:
   virtual int check_arg() = 0;
   virtual int try_process() = 0;
-  virtual table::ObTableAPITransCb *new_callback(rpc::ObRequest *req) = 0;
+  virtual table::ObTableAPITransCb *new_callback(rpc::ObRequest *req) { return nullptr; }
   virtual void set_req_has_wokenup() = 0;
   virtual void reset_ctx();
+  int get_ls_id(const ObTabletID &tablet_id, share::ObLSID &ls_id);
+  virtual table::ObTableEntityType get_entity_type() = 0;
+  virtual bool is_kv_processor() = 0;
   int process_with_retry(const ObString &credential, const int64_t timeout_ts);
-
-  // audit
-  bool need_audit() const;
-  void start_audit(const rpc::ObRequest *req);
-  void end_audit();
-  virtual void audit_on_finish() {}
-  virtual void save_request_string() = 0;
-  virtual void generate_sql_id() = 0;
-  virtual int check_table_index_supported(uint64_t table_id, bool &is_supported);
-
-  // set trans consistency level
-  void set_consistency_level(const ObTableConsistencyLevel consistency_level) { consistency_level_ = consistency_level; }
-  ObTableConsistencyLevel consistency_level() const { return consistency_level_; }
-
-private:
-  int get_participants(uint64_t table_id, const common::ObIArray<int64_t> &part_ids,
-                       common::ObPartitionLeaderArray &partition_leaders);
-  int get_participants_from_lc(uint64_t table_id, const common::ObIArray<int64_t> &part_ids,
-                               common::ObPartitionLeaderArray &partition_leaders);
-  int get_participants_optimistic(uint64_t table_id, const common::ObIArray<int64_t> &part_ids,
-                                  common::ObPartitionLeaderArray &partition_leaders);
-
-  int async_commit_trans(rpc::ObRequest *req, int64_t timeout_ts);
-  int sync_end_trans(bool is_rollback, int64_t timeout_ts);
-  int generate_schema_info_arr(const uint64_t table_id,
-                               const common::ObPartitionArray &participants,
-                               transaction::ObPartitionSchemaInfoArray &schema_info_arr);
-  //@}
+  // init schema guard for tablegroup
+  int init_tablegroup_schema(const ObString &arg_tablegroup_name);
+  // init schema guard
+  virtual int init_schema_info(const ObString &arg_table_name, uint64_t arg_table_id);
+  virtual int init_schema_info(uint64_t table_id, const ObString &arg_table_name);
+  virtual int init_schema_info(const ObString &arg_table_name);
+  int check_table_has_global_index(bool &exists, table::ObKvSchemaCacheGuard& schema_cache_guard);
+  int get_tablet_id(const share::schema::ObSimpleTableSchemaV2 * simple_table_schema,
+                    const ObTabletID &arg_tablet_id,
+                    const uint64_t table_id,
+                    ObTabletID &tablet_id);
+  ObTableProccessType get_stat_process_type(bool is_readonly,
+                                            bool is_same_type,
+                                            bool is_same_properties_names,
+                                            table::ObTableOperationType::Type op_type);
 protected:
   const ObGlobalContext &gctx_;
-  storage::ObPartitionService *part_service_;
   ObTableService *table_service_;
-  ObTableApiCredential credential_;
-  int32_t stat_event_type_;
-  int64_t audit_row_count_;
-  bool need_audit_;
-  const char *request_string_;
-  int64_t request_string_len_;
-  sql::ObAuditRecordData audit_record_;
-  ObArenaAllocator audit_allocator_;
+  storage::ObAccessService *access_service_;
+  share::ObLocationService *location_service_;
+  table::ObTableApiCredential credential_;
+  table::ObTableApiSessGuard sess_guard_;
+  share::schema::ObSchemaGetterGuard schema_guard_;
+  const share::schema::ObSimpleTableSchemaV2 *simple_table_schema_;
+  observer::ObReqTimeGuard req_timeinfo_guard_; // 引用cache资源必须加ObReqTimeGuard
+  table::ObKvSchemaCacheGuard schema_cache_guard_;
+  int32_t stat_process_type_;
+  bool enable_query_response_time_stats_;
+  int64_t stat_row_count_;
   ObTableRetryPolicy retry_policy_;
   bool need_retry_in_queue_;
+  bool is_tablegroup_req_; // is table name a tablegroup name
   int32_t retry_count_;
+  uint64_t table_id_;
+  ObTabletID tablet_id_;
 protected:
   // trans control
-  ObPartitionLeaderArray participants_;
-  sql::TransState trans_state_;
-  transaction::ObTransDesc trans_desc_;
-  //part_epoch_list_ record the epoch id of response_partitions_
-  //when start_participants executed in the leader replica
-  transaction::ObPartitionEpochArray part_epoch_list_;
-  bool did_async_end_trans_;
-  ObTableConsistencyLevel consistency_level_;
-  ObPartitionLeaderArray *participants_ptr_;
-  sql::TransState *trans_state_ptr_;
-  transaction::ObTransDesc *trans_desc_ptr_;
-  transaction::ObPartitionEpochArray *part_epoch_list_ptr_;
+  table::ObTableTransParam trans_param_;
+  transaction::ObTxReadSnapshot tx_snapshot_;
+  common::ObAddr user_client_addr_;
+  table::ObTableAuditCtx audit_ctx_;
 };
 
 template<class T>
@@ -217,116 +203,15 @@ public:
   virtual int deserialize() override;
   virtual int before_process() override;
   virtual int process() override;
-  virtual int before_response() override;
+  virtual int before_response(int error_code) override;
   virtual int response(const int retcode) override;
-  virtual int after_process() override;
+  virtual int after_process(int error_code) override;
 
 protected:
   virtual void set_req_has_wokenup() override;
-  virtual int64_t get_timeout_ts() const;
-  virtual void save_request_string() override;
-  virtual void generate_sql_id() override;
+  int64_t get_timeout_ts() const;
+  int64_t get_timeout() const;
   virtual uint64_t get_request_checksum() = 0;
-};
-
-
-class ObHTableDeleteExecutor final
-{
-public:
-  ObHTableDeleteExecutor(common::ObArenaAllocator &alloc,
-                         uint64_t table_id,
-                         uint64_t partition_id,
-                         int64_t timeout_ts,
-                         ObTableApiProcessorBase *processor,
-                         ObTableService *table_service,
-                         storage::ObPartitionService *part_service);
-  ~ObHTableDeleteExecutor() {}
-  // @param affected_rows [out] deleted number of htable cells
-  int htable_delete(const table::ObTableBatchOperation &delete_op, int64_t &affected_rows);
-private:
-  int execute_query(const table::ObTableQuery &query,
-                    table::ObTableQueryResultIterator *&result_iterator);
-  int generate_delete_cells(
-      table::ObTableQueryResult &one_row,
-      table::ObTableEntityFactory<table::ObTableEntity> &entity_factory,
-      table::ObTableBatchOperation &mutations_out);
-  int execute_mutation(const table::ObTableBatchOperation &mutations,
-                       table::ObTableBatchOperationResult &mutations_result);
-private:
-  ObTableService *table_service_;
-  storage::ObPartitionService *part_service_;
-  ObTableServiceQueryCtx query_ctx_;
-  table::ObTableQuery query_;
-  table::ObTableQueryResult one_result_;
-  table::ObTableEntityFactory<table::ObTableEntity> entity_factory_;
-  table::ObTableBatchOperation mutations_;
-  table::ObTableBatchOperationResult mutations_result_;
-  ObTableServiceGetCtx mutate_ctx_;
-  // disallow copy
-  DISALLOW_COPY_AND_ASSIGN(ObHTableDeleteExecutor);
-};
-
-class ObHTablePutExecutor final
-{
-public:
-  ObHTablePutExecutor(common::ObArenaAllocator &alloc,
-                      uint64_t table_id,
-                      uint64_t partition_id,
-                      int64_t timeout_ts,
-                      ObTableApiProcessorBase *processor,
-                      ObTableService *table_service,
-                      storage::ObPartitionService *part_service);
-  ~ObHTablePutExecutor() {}
-
-  int htable_put(const ObTableBatchOperation &put_op, int64_t &affected_rows, int64_t now_ms = 0);
-private:
-  ObTableService *table_service_;
-  storage::ObPartitionService *part_service_;
-  table::ObTableEntityFactory<table::ObTableEntity> entity_factory_;
-  table::ObTableBatchOperationResult mutations_result_;
-  ObTableServiceGetCtx mutate_ctx_;
-  // disallow copy
-  DISALLOW_COPY_AND_ASSIGN(ObHTablePutExecutor);
-};
-
-// executor of Increment and Append
-class ObHTableIncrementExecutor final
-{
-public:
-  ObHTableIncrementExecutor(table::ObTableOperationType::Type type,
-                            common::ObArenaAllocator &alloc,
-                            uint64_t table_id,
-                            uint64_t partition_id,
-                            int64_t timeout_ts,
-                            ObTableApiProcessorBase *processor,
-                            ObTableService *table_service,
-                            storage::ObPartitionService *part_service);
-  ~ObHTableIncrementExecutor() {}
-
-  int htable_increment(ObTableQueryResult &row_cells,
-                       const table::ObTableBatchOperation &increment_op,
-                       int64_t &affected_rows,
-                       table::ObTableQueryResult *results);
-private:
-  typedef std::pair<common::ObString, int32_t> ColumnIdx;
-  class ColumnIdxComparator;
-  int sort_qualifier(const table::ObTableBatchOperation &increment);
-  int execute_mutation(const table::ObTableBatchOperation &mutations,
-                       table::ObTableBatchOperationResult &mutations_result);
-  static int add_to_results(table::ObTableQueryResult &results, const ObObj &rk, const ObObj &cq,
-                            const ObObj &ts, const ObObj &value);
-private:
-  table::ObTableOperationType::Type type_;
-  ObTableService *table_service_;
-  storage::ObPartitionService *part_service_;
-  table::ObTableEntityFactory<table::ObTableEntity> entity_factory_;
-  table::ObTableBatchOperation mutations_;
-  table::ObTableBatchOperationResult mutations_result_;
-  ObTableServiceGetCtx mutate_ctx_;
-  common::ObSEArray<ColumnIdx, OB_DEFAULT_SE_ARRAY_COUNT> columns_;
-  common::ObArenaAllocator allocator_;
-  // disallow copy
-  DISALLOW_COPY_AND_ASSIGN(ObHTableIncrementExecutor);
 };
 
 template<class T>
@@ -339,7 +224,78 @@ int64_t ObTableRpcProcessor<T>::get_timeout_ts() const
   return ts;
 }
 
-}  // end namespace observer
-}  // end namespace oceanbase
+template<class T>
+int64_t ObTableRpcProcessor<T>::get_timeout() const
+{
+  int64_t timeout = 0;
+  if (NULL != RpcProcessor::rpc_pkt_) {
+    timeout = RpcProcessor::rpc_pkt_->get_timeout();
+  }
+  return timeout;
+}
+
+struct ObTableInfoBase {
+  explicit ObTableInfoBase()
+                          : table_id_(OB_INVALID_ID),
+                            simple_schema_(nullptr),
+                            schema_cache_guard_(),
+                            schema_version_(OB_INVALID_VERSION) {}
+
+  virtual ~ObTableInfoBase() {}
+
+  int64_t get_table_id() const {
+    return table_id_;
+  }
+
+  void set_table_id(int64_t table_id) {
+    table_id_ = table_id;
+  }
+
+  const ObString& get_real_table_name() const {
+    return real_table_name_;
+  }
+
+  void set_real_table_name(const ObString& real_table_name) {
+    real_table_name_ = real_table_name;
+  }
+
+  const share::schema::ObSimpleTableSchemaV2* get_simple_schema() {
+    return simple_schema_;
+  }
+
+  void set_simple_schema(const share::schema::ObSimpleTableSchemaV2* simple_schema) {
+    simple_schema_ = simple_schema;
+  }
+
+  table::ObKvSchemaCacheGuard& get_schema_cache_guard() {
+    return schema_cache_guard_;
+  }
+
+  void set_schema_cache_guard(const table::ObKvSchemaCacheGuard& schema_cache_guard) {
+    schema_cache_guard_ = schema_cache_guard;
+  }
+
+  int64_t get_schema_version() const {
+    return schema_version_;
+  }
+
+  void set_schema_version(int64_t schema_version) {
+    schema_version_ = schema_version;
+  }
+
+  TO_STRING_KV(K(table_id_),
+               KP(simple_schema_),
+               K(schema_cache_guard_),
+               K(schema_version_));
+
+  int64_t table_id_;
+  ObString real_table_name_;
+  const share::schema::ObSimpleTableSchemaV2* simple_schema_;
+  table::ObKvSchemaCacheGuard schema_cache_guard_;
+  int64_t schema_version_;
+};
+
+} // end namespace observer
+} // end namespace oceanbase
 
 #endif /* _OB_TABLE_RPC_PROCESSOR_H */

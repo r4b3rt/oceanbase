@@ -19,26 +19,30 @@ void ObAsyncTimerTask::runTimerTask()
 {
   int ret = OB_SUCCESS;
   if (OB_FAIL(work_queue_.add_async_task(*this))) {
-    LOG_ERROR("failed to submit async task", K(ret));
+    LOG_ERROR("failed to submit async task", K(ret), KPC(this));
   } else {
     LOG_INFO("add async task", KPC(this));
   }
 }
 ////////////////////////////////////////////////////////////////
-ObWorkQueue::ObWorkQueue() : inited_(false), timer_(), task_queue_()
+ObWorkQueue::ObWorkQueue()
+    :inited_(false),
+     timer_(),
+     task_queue_()
 {}
 
 ObWorkQueue::~ObWorkQueue()
 {}
 
 // @note queue_size should be 2^n
-int ObWorkQueue::init(const int64_t thread_count, const int64_t queue_size, const char* thread_name)
+int ObWorkQueue::init(const int64_t thread_count, const int64_t queue_size,
+                      const char *thread_name)
 {
   int ret = OB_SUCCESS;
   if (inited_) {
     ret = OB_INIT_TWICE;
     LOG_WARN("rs task queue already inited", K(ret));
-  } else if (OB_FAIL(timer_.init())) {
+  } else if (OB_FAIL(timer_.init(thread_name))) {
     LOG_WARN("failed to init timer", K(ret));
   } else if (OB_FAIL(task_queue_.init(thread_count, queue_size, thread_name))) {
     LOG_WARN("failed to init work queue", K(ret), K(thread_count), K(queue_size));
@@ -59,7 +63,7 @@ void ObWorkQueue::destroy()
   }
 }
 
-int ObWorkQueue::add_timer_task(ObAsyncTimerTask& task, const int64_t delay, bool did_repeat)
+int ObWorkQueue::add_timer_task(ObAsyncTimerTask &task, const int64_t delay, bool did_repeat)
 {
   int ret = OB_SUCCESS;
   if (!inited_) {
@@ -71,7 +75,7 @@ int ObWorkQueue::add_timer_task(ObAsyncTimerTask& task, const int64_t delay, boo
   return ret;
 }
 
-int ObWorkQueue::add_repeat_timer_task_schedule_immediately(ObAsyncTimerTask& task, const int64_t delay)
+int ObWorkQueue::add_repeat_timer_task_schedule_immediately(ObAsyncTimerTask &task, const int64_t delay)
 {
   int ret = OB_SUCCESS;
   if (!inited_) {
@@ -83,7 +87,7 @@ int ObWorkQueue::add_repeat_timer_task_schedule_immediately(ObAsyncTimerTask& ta
   return ret;
 }
 
-bool ObWorkQueue::exist_timer_task(const ObAsyncTimerTask& task)
+bool ObWorkQueue::exist_timer_task(const ObAsyncTimerTask &task)
 {
   bool exist = false;
   int ret = OB_SUCCESS;
@@ -96,7 +100,8 @@ bool ObWorkQueue::exist_timer_task(const ObAsyncTimerTask& task)
   return exist;
 }
 
-int ObWorkQueue::cancel_timer_task(const ObAsyncTimerTask& task)
+
+int ObWorkQueue::cancel_timer_task(const ObAsyncTimerTask &task)
 {
   int ret = OB_SUCCESS;
   if (!inited_) {
@@ -108,7 +113,7 @@ int ObWorkQueue::cancel_timer_task(const ObAsyncTimerTask& task)
   return ret;
 }
 
-int ObWorkQueue::add_async_task(ObAsyncTask& task)
+int ObWorkQueue::add_async_task(const ObAsyncTask &task)
 {
   int ret = OB_SUCCESS;
   if (!inited_) {

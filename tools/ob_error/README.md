@@ -26,15 +26,6 @@ cp tools/ob_error/src/ob_error /usr/local/bin
 
 The compiled product for `ob_error` is stored in `RELEASE_BUILD_DIR/tools/ob_error/src/ob_error` by default.
 
-### RPM packages
-
-`ob_error` is provided in `oceanbase-ce-utils-3.1.1-4.el7.x86_64.rpm`. If you only need `ob_error`, use the `rpm2cpio` command to get `ob_error`.
-
-```bash
-rpm2cpio oceanbase-ce-utils-3.1.1-4.el7.x86_64.rpm | cpio -idmv ./home/admin/oceanbase/bin/ob_error
-cp home/admin/oceanbase/bin/ob_error /usr/local/bin
-```
-
 ## How to use
 
 You can search for error messages by only entering the error code. Then you will get the error message corresponding to the operation system, Oracle mode, MySQL mode, and OceanBase error (if any). For example:
@@ -49,7 +40,7 @@ OceanBase:
     Solution: Contact OceanBase Support
 
 Oracle:
-    Oracle Error Code: ORA-04001
+    Oracle Error Code: OBE-04001
     Message: sequence parameter must be an integer
     Related OceanBase Error Code:
         OB_ERR_SEQ_OPTION_MUST_BE_INTEGER(-4317)
@@ -79,6 +70,7 @@ MySQL:
         OB_INVALID_ARGUMENT(-4002)
         OB_MISS_ARGUMENT(-4277)
         INCORRECT_ARGUMENTS_TO_ESCAPE(-5832)
+        INCORRECT_ARGUMENTS_TO_URL_DECODE(-6286)
 ```
 
 When the facility is `ora` or `pls`, you will get the error info of Oracle mode(if any). For example:
@@ -87,7 +79,7 @@ When the facility is `ora` or `pls`, you will get the error info of Oracle mode(
 $ob_error ora 51
 
 Oracle:
-    Oracle Error Code: ORA-00051
+    Oracle Error Code: OBE-00051
     Message: timeout occurred while waiting for a resource
     Related OceanBase Error Code:
         OB_ERR_TIMEOUT_ON_RESOURCE(-5848)
@@ -105,13 +97,13 @@ OceanBase:
     Solution: Contact OceanBase Support
 
 Oracle:
-    Oracle Error Code: ORA-00600
+    Oracle Error Code: OBE-00600
     Message: internal error code, arguments: -5727, SQL request should be rerouted
     Related OceanBase Error Code:
         OB_ERR_PROXY_REROUTE(-5727)
 ```
 
-> **NOTE**: `-a` option helps to find `ORA-00600` error which has `arguments` (those Oracle internal errors).
+> **NOTE**: `-a` option helps to find `OBE-00600` error which has `arguments` (those Oracle internal errors).
 
 You can find more test examples in [expect_result](test/expect_result.result).
 

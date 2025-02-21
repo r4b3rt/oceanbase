@@ -11,7 +11,6 @@
  */
 
 #include <gtest/gtest.h>
-#include "lib/container/ob_array.h"
 #include "lib/container/ob_array_serialization.h"
 using namespace oceanbase::common;
 
@@ -20,17 +19,49 @@ TEST(ObArrayTest, array_of_array)
   ObArray<ObArray<int> > aai;
   {
     ObArray<int> ai;
-    for (int j = 0; j < 3; ++j) {
+    for (int j = 0; j < 3; ++j)
+    {
       ai.reset();
-      for (int i = 0; i < 32; ++i) {
-        ASSERT_EQ(OB_SUCCESS, ai.push_back(i * j));
+      for (int i = 0; i < 32; ++i)
+      {
+        ASSERT_EQ(OB_SUCCESS, ai.push_back(i*j));
       }
       ASSERT_EQ(OB_SUCCESS, aai.push_back(ai));
-    }  // end for
+    } // end for
   }
-  for (int j = 0; j < 3; ++j) {
-    for (int i = 0; i < 32; ++i) {
-      ASSERT_EQ(i * j, aai.at(j).at(i));
+  for (int j = 0; j < 3; ++j)
+  {
+    for (int i = 0; i < 32; ++i)
+    {
+      ASSERT_EQ(i*j, aai.at(j).at(i));
+    }
+  }
+}
+
+TEST(ObArrayTest, test_array_push_back)
+{
+  const int64_t loop_times = 3;
+  const int64_t array_size = 32;
+  ObArray<int > array;
+  {
+    ObArray<int> ai;
+    for (int j = 0; j < loop_times; ++j)
+    {
+      ai.reset();
+      for (int i = 0; i < array_size; ++i)
+      {
+        ASSERT_EQ(OB_SUCCESS, ai.push_back(i*j));
+      }
+      ASSERT_EQ(OB_SUCCESS, array.push_back(ai));
+    } // end for
+  }
+  ASSERT_EQ(array.count(), loop_times * array_size);
+  int64_t idx = 0;
+  for (int j = 0; j < loop_times; ++j)
+  {
+    for (int i = 0; i < array_size; ++i)
+    {
+      ASSERT_EQ(i*j, array.at(idx++));
     }
   }
 }
@@ -38,7 +69,8 @@ TEST(ObArrayTest, array_of_array)
 TEST(ObArrayTest, array_remove)
 {
   ObArray<int> ai;
-  for (int i = 0; i < 32; ++i) {
+  for (int i = 0; i < 32; ++i)
+  {
     ASSERT_EQ(OB_SUCCESS, ai.push_back(i));
   }
   ASSERT_EQ(32, ai.count());
@@ -50,7 +82,8 @@ TEST(ObArrayTest, array_remove)
   ASSERT_EQ(OB_SUCCESS, ai.remove(10));
   int v = 0;
   ASSERT_EQ(31, static_cast<int>(ai.count()));
-  for (int i = 0; i < 31; ++i) {
+  for (int i = 0; i < 31; ++i)
+  {
     ASSERT_EQ(OB_SUCCESS, ai.at(static_cast<int64_t>(i), v));
     ASSERT_NE(10, v);
   }
@@ -61,7 +94,8 @@ TEST(ObArrayTest, serialize)
   char buf[1024];
   ObSArray<int64_t> array;
   const int64_t NUM = 20;
-  for (int64_t i = 0; i < NUM; i++) {
+  for (int64_t i = 0; i < NUM; i ++)
+  {
     array.push_back(i);
   }
 
@@ -75,12 +109,14 @@ TEST(ObArrayTest, serialize)
   array2.deserialize(buf, data_len, pos);
 
   ASSERT_EQ(array2.count(), NUM);
-  for (int64_t i = 0; i < NUM; i++) {
+  for (int64_t i = 0; i < NUM; i ++)
+  {
     ASSERT_EQ(i, array2.at(i));
   }
 }
 
-class TestItem {
+class TestItem
+{
 public:
   static int64_t construct_cnt_;
   static int64_t copy_construct_cnt_;
@@ -99,7 +135,7 @@ public:
     construct_cnt_++;
   }
 
-  TestItem(const TestItem&)
+  TestItem(const TestItem &)
   {
     copy_construct_cnt_++;
   }
@@ -108,7 +144,7 @@ public:
     destruct_cnt_++;
   }
 
-  TestItem& operator=(const TestItem&)
+  TestItem &operator=(const TestItem &)
   {
     assign_cnt_++;
     return *this;
@@ -170,7 +206,7 @@ TEST(ObArrayTest, item_life_cycle)
   ASSERT_EQ(1, TestItem::destruct_cnt_);
 
   ASSERT_EQ(OB_SUCCESS, array.push_back(item));
-  array.pop_back();  // count_ = 1; valid_count_ = 2
+  array.pop_back(); // count_ = 1; valid_count_ = 2
   ASSERT_EQ(1, array.count());
 
   TestItem::clear();
@@ -188,7 +224,8 @@ TEST(ObArrayTest, item_life_cycle)
     ASSERT_EQ(3, TestItem::copy_construct_cnt_);
     ASSERT_EQ(0, TestItem::assign_cnt_);
 
-    for (int64_t i = array2.count(); i < block_item_cnt; i++) {
+    for (int64_t i = array2.count(); i < block_item_cnt; i++)
+    {
       ASSERT_EQ(OB_SUCCESS, array2.push_back(item));
     }
     ASSERT_EQ(block_item_cnt, array2.count());
@@ -199,7 +236,7 @@ TEST(ObArrayTest, item_life_cycle)
 
     array2.pop_back();
     TestItem::clear();
-    array2.reset();  // more than one block, call destroy
+    array2.reset(); // more than one block, call destroy
     ASSERT_EQ(block_item_cnt + 1, TestItem::destruct_cnt_);
     array2 = array;
     TestItem::clear();
@@ -219,7 +256,8 @@ TEST(ObArrayTest, item_life_cycle)
     ItemArray array2(block_size);
 
     cnt = 3;
-    for (int64_t i = 0; i < cnt; i++) {
+    for (int64_t i = 0; i < cnt; i++)
+    {
       ASSERT_EQ(OB_SUCCESS, array2.push_back(item));
     }
     array2.reuse();
@@ -233,7 +271,8 @@ TEST(ObArrayTest, item_life_cycle)
     ItemArray array2(block_size);
 
     cnt = 3;
-    for (int64_t i = 0; i < cnt; i++) {
+    for (int64_t i = 0; i < cnt; i++)
+    {
       ASSERT_TRUE(NULL != array2.alloc_place_holder());
     }
     ASSERT_EQ(cnt, array2.count());
@@ -253,15 +292,16 @@ TEST(ObArrayTest, memory_leak)
   ob_print_mod_memory_usage();
   ASSERT_EQ(OB_SUCCESS, array_array.push_back(array));
   array_array.reset();
-  for (int i = 0; i < 1024 * 1024; i++) {
+  for (int  i = 0; i < 1024 * 1024; i++)
+  {
     ASSERT_EQ(OB_SUCCESS, array_array.push_back(array));
     array_array.reset();
   }
   ob_print_mod_memory_usage();
 }
 
-int main(int argc, char** argv)
+int main(int argc, char **argv)
 {
-  ::testing::InitGoogleTest(&argc, argv);
+  ::testing::InitGoogleTest(&argc,argv);
   return RUN_ALL_TESTS();
 }

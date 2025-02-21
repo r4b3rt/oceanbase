@@ -14,8 +14,6 @@
 #include "ob_dtl_buf_allocator.h"
 #include "sql/dtl/ob_dtl.h"
 #include "sql/dtl/ob_dtl_basic_channel.h"
-#include "sql/dtl/ob_dtl_linked_buffer.h"
-#include "lib/random/ob_random.h"
 
 using namespace oceanbase::common;
 
@@ -23,12 +21,12 @@ namespace oceanbase {
 namespace sql {
 namespace dtl {
 
-ObDtlLinkedBuffer* ObDtlBufAllocator::alloc_buf(ObDtlBasicChannel& ch, const int64_t payload_size)
+ObDtlLinkedBuffer *ObDtlBufAllocator::alloc_buf(ObDtlBasicChannel &ch, const int64_t payload_size)
 {
   int ret = OB_SUCCESS;
-  ObDtlLinkedBuffer* buf = nullptr;
+  ObDtlLinkedBuffer *buf = nullptr;
   int64_t alloc_size = max(sys_buffer_size_, payload_size);
-  ObDtlTenantMemManager* tenant_mem_mgr = DTL.get_dfc_server().get_tenant_mem_manager(tenant_id_);
+  ObDtlTenantMemManager *tenant_mem_mgr = DTL.get_dfc_server().get_tenant_mem_manager(tenant_id_);
   if (nullptr == tenant_mem_mgr) {
     ret = OB_ERR_UNEXPECTED;
     LOG_ERROR("tenant_mem_mgr is null", K(ret), K(tenant_id_));
@@ -46,10 +44,10 @@ ObDtlLinkedBuffer* ObDtlBufAllocator::alloc_buf(ObDtlBasicChannel& ch, const int
   return buf;
 }
 
-void ObDtlBufAllocator::free_buf(ObDtlBasicChannel& ch, ObDtlLinkedBuffer*& buf)
+void ObDtlBufAllocator::free_buf(ObDtlBasicChannel &ch, ObDtlLinkedBuffer *&buf)
 {
   int ret = OB_SUCCESS;
-  ObDtlTenantMemManager* tenant_mem_mgr = DTL.get_dfc_server().get_tenant_mem_manager(tenant_id_);
+  ObDtlTenantMemManager *tenant_mem_mgr = DTL.get_dfc_server().get_tenant_mem_manager(tenant_id_);
   if (nullptr == tenant_mem_mgr) {
     ret = OB_ERR_UNEXPECTED;
     LOG_ERROR("tenant_mem_mgr is null", K(lbt()), K(tenant_id_), K(ret));
@@ -66,6 +64,7 @@ void ObDtlBufAllocator::free_buf(ObDtlBasicChannel& ch, ObDtlLinkedBuffer*& buf)
   LOG_DEBUG("free memory", K(ret), K(buf), KP(buf), K(free_buffer_cnt_), K(alloc_buffer_cnt_));
 }
 
-}  // namespace dtl
-}  // namespace sql
-}  // namespace oceanbase
+}
+}
+}
+

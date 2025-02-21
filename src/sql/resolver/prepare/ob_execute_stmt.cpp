@@ -12,10 +12,16 @@
 
 #define USING_LOG_PREFIX SQL_RESV
 
-#include "sql/resolver/prepare/ob_execute_stmt.h"
+#include "ob_execute_stmt.h"
+#include "deps/oblib/src/lib/container/ob_array.h"
 
 using namespace oceanbase::common;
 using namespace oceanbase::sql;
-namespace oceanbase {
-namespace sql {}  // namespace sql
-}  // namespace oceanbase
+namespace oceanbase
+{
+namespace sql
+{
+
+}//end of sql
+}//end of oceanbase
+

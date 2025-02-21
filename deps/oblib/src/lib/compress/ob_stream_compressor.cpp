@@ -10,14 +10,12 @@
  * See the Mulan PubL v2 for more details.
  */
 
-#include <stdlib.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <dlfcn.h>
 #include "lib/compress/ob_stream_compressor.h"
 
-namespace oceanbase {
-namespace common {
-const char* ObStreamCompressor::none_compressor_name = "none";
-}  // namespace common
-}  // namespace oceanbase*/
+namespace oceanbase
+{
+namespace common
+{
+const char *ObStreamCompressor::none_compressor_name = "none";
+}//namespace common
+}//namespace oceanbase*/

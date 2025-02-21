@@ -9,9 +9,12 @@
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PubL v2 for more details.
  */
-#include "lib/lock/ob_rwlock.h"
 
-using namespace oceanbase::obsys;
+#include "ob_rwlock.h"
+#include "lib/allocator/ob_malloc.h"
+
+using namespace oceanbase;
+using namespace obsys;
 
 int ObRLock::lock() const
 {
@@ -44,6 +47,8 @@ int ObWLock::unlock() const
 }
 
 ObRWLock::ObRWLock(LockMode lockMode)
+  : rlock_(&rwlock_),
+    wlock_(&rwlock_)
 {
   pthread_rwlockattr_t attr;
   pthread_rwlockattr_init(&attr);
@@ -53,13 +58,9 @@ ObRWLock::ObRWLock(LockMode lockMode)
     pthread_rwlockattr_setkind_np(&attr, PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP);
   }
   pthread_rwlock_init(&rwlock_, &attr);
-  rlock_ = new ObRLock(&rwlock_);
-  wlock_ = new ObWLock(&rwlock_);
 }
 
 ObRWLock::~ObRWLock()
 {
   pthread_rwlock_destroy(&rwlock_);
-  delete rlock_;
-  delete wlock_;
 }

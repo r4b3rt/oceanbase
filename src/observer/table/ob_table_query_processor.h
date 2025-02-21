@@ -16,7 +16,9 @@
 #include "rpc/obrpc/ob_rpc_processor.h"
 #include "share/table/ob_table_rpc_proxy.h"
 #include "ob_table_rpc_processor.h"
-#include "ob_table_service.h"
+#include "ob_table_context.h"
+#include "ob_table_executor.h"
+#include "ob_table_cache.h"
 
 namespace oceanbase
 {
@@ -30,22 +32,25 @@ public:
   virtual ~ObTableQueryP() {}
 
   virtual int deserialize() override;
+  virtual int before_process() override;
 protected:
   virtual int check_arg() override;
   virtual int try_process() override;
   virtual void reset_ctx() override;
-  virtual table::ObTableAPITransCb *new_callback(rpc::ObRequest *req) override;
-  virtual void audit_on_finish() override;
   virtual uint64_t get_request_checksum() override;
+  virtual table::ObTableEntityType get_entity_type() override { return arg_.entity_type_; }
+  virtual bool is_kv_processor() override { return true; }
 
 private:
-  int  get_partition_ids(uint64_t table_id, common::ObIArray<int64_t> &part_ids);
-  void set_htable_compressor();
-  DISALLOW_COPY_AND_ASSIGN(ObTableQueryP);
+  int init_tb_ctx(table::ObTableApiCacheGuard &cache_guard);
+  int query_and_result(table::ObTableApiScanExecutor *executor);
+
 private:
   common::ObArenaAllocator allocator_;
-  ObTableServiceQueryCtx table_service_ctx_;
+  table::ObTableCtx tb_ctx_;
   int64_t result_row_count_;
+private:
+  DISALLOW_COPY_AND_ASSIGN(ObTableQueryP);
 };
 
 } // end namespace observer

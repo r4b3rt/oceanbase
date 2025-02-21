@@ -13,7 +13,6 @@
 #define USING_LOG_PREFIX SQL_ENG
 
 #include "ob_sql_mem_mgr_processor.h"
-#include "observer/omt/ob_tenant_config_mgr.h"
 
 namespace oceanbase {
 
@@ -21,38 +20,54 @@ using namespace omt;
 
 namespace sql {
 
-int ObSqlMemMgrProcessor::init(ObIAllocator* allocator, uint64_t tenant_id, int64_t cache_size,
-    const ObPhyOperatorType op_type, const uint64_t op_id, ObExecContext* exec_ctx)
+int ObSqlMemMgrProcessor::init(
+  ObIAllocator *allocator,
+  uint64_t tenant_id,
+  int64_t cache_size,
+  const ObPhyOperatorType op_type,
+  const uint64_t op_id,
+  ObSqlProfileExecInfo exec_info)
 {
   int ret = OB_SUCCESS;
   bool tmp_enable_auto_mem_mgr = false;
-  ObTenantSqlMemoryManager* sql_mem_mgr = get_sql_mem_mgr();
+  ObTenantSqlMemoryManager *sql_mem_mgr = get_sql_mem_mgr();
   is_auto_mgr_ = false;
   reset();
   tenant_id_ = tenant_id;
   profile_.set_operator_type(op_type);
   profile_.set_operator_id(op_id);
-  profile_.set_exec_ctx(exec_ctx);
-  if (OB_FAIL(alloc_dir_id(dir_id_))) {
+  profile_.set_exec_info(exec_info);
+  const int64_t DEFAULT_CACHE_SIZE = 2 * 1024 * 1024;
+  if (cache_size < 0) {
+    LOG_WARN("unexpected cache size got", K(lbt()), K(cache_size), K(op_id), K(op_type));
+    cache_size = DEFAULT_CACHE_SIZE;
+  }
+  if (OB_ISNULL(allocator)) {
+    ret = OB_ERR_UNEXPECTED;
+    LOG_WARN("failed to get allocator", K(ret));
+  } else if (OB_FAIL(alloc_dir_id(dir_id_))) {
   } else if (OB_NOT_NULL(sql_mem_mgr)) {
+    profile_.disable_auto_mem_mgr_ = exec_info.get_disable_auto_mem_mgr();
     if (sql_mem_mgr->enable_auto_memory_mgr()) {
       tmp_enable_auto_mem_mgr = true;
       if (profile_.get_auto_policy()) {
         // update
         int64_t pre_size = profile_.get_cache_size();
-        if (cache_size != pre_size &&
-            OB_FAIL(sql_mem_mgr_->update_work_area_profile(allocator, profile_, cache_size - pre_size))) {
+        if (cache_size != pre_size
+          && OB_FAIL(sql_mem_mgr_->update_work_area_profile(
+            allocator, profile_, cache_size - pre_size))) {
           LOG_WARN("failed update work area profile", K(ret), K(cache_size));
         } else {
           profile_.init(cache_size, OB_MALLOC_MIDDLE_BLOCK_SIZE);
-          LOG_TRACE(
-              "trace update cache size", K(profile_.get_cache_size()), K(profile_.get_expect_size()), K(cache_size));
+          LOG_TRACE("trace update cache size", K(profile_.get_cache_size()),
+            K(profile_.get_expect_size()), K(cache_size));
         }
       } else {
         // first time to register
         profile_.init(cache_size, OB_MALLOC_MIDDLE_BLOCK_SIZE);
         LOG_TRACE("trace register work area profile", K(profile_.get_cache_size()));
       }
+      // 每次初始化都认为是未注册
       profile_.set_expect_size(OB_INVALID_ID);
       if (OB_FAIL(ret)) {
       } else if (OB_FAIL(sql_mem_mgr_->register_work_area_profile(profile_))) {
@@ -61,12 +76,8 @@ int ObSqlMemMgrProcessor::init(ObIAllocator* allocator, uint64_t tenant_id, int6
         LOG_WARN("failed to get available mem size", K(ret));
       } else {
         is_auto_mgr_ = profile_.get_auto_policy();
-        LOG_TRACE("trace enable sql memory manager",
-            K(ret),
-            K(profile_.get_cache_size()),
-            K(profile_.get_expect_size()),
-            K(is_auto_mgr_),
-            K(profile_.is_registered()));
+        LOG_DEBUG("trace enable sql memory manager", K(ret), K(profile_.get_cache_size()),
+          K(profile_.get_expect_size()), K(is_auto_mgr_), K(profile_.is_registered()));
       }
     } else {
       profile_.init(cache_size, OB_MALLOC_MIDDLE_BLOCK_SIZE);
@@ -74,30 +85,36 @@ int ObSqlMemMgrProcessor::init(ObIAllocator* allocator, uint64_t tenant_id, int6
       if (OB_FAIL(sql_mem_mgr_->register_work_area_profile(profile_))) {
         LOG_WARN("failed to register workarea profile", K(ret));
       }
-      LOG_TRACE("trace only register sql memory manager",
-          K(ret),
-          K(profile_.get_cache_size()),
-          K(profile_.get_expect_size()),
-          K(is_auto_mgr_));
+      // 如果从AUTO->MANUAL，是否需要清理一些数据
+      LOG_TRACE("trace only register sql memory manager", K(ret), K(profile_.get_cache_size()),
+          K(profile_.get_expect_size()), K(is_auto_mgr_));
     }
   } else {
     profile_.set_expect_size(OB_INVALID_ID);
   }
   int64_t max_mem_size = MAX_SQL_MEM_SIZE;
   if (OB_FAIL(ret)) {
-  } else if (OB_FAIL(ObSqlWorkareaUtil::get_workarea_size(profile_.get_work_area_type(), tenant_id_, max_mem_size))) {
+  } else if (OB_FAIL(ObSqlWorkareaUtil::get_workarea_size(
+      profile_.get_work_area_type(), tenant_id_, exec_info, max_mem_size))) {
     LOG_WARN("failed to get workarea size", K(ret), K(tenant_id_), K(max_mem_size));
   }
   if (!profile_.get_auto_policy()) {
     profile_.set_max_bound(max_mem_size);
   }
-  // don't register small runners
+  if (OB_SUCC(ret) && nullptr == dummy_alloc_) {
+    dummy_alloc_ = allocator;
+    if (OB_ISNULL(dummy_ptr_ = static_cast<char *> (dummy_alloc_->alloc(sizeof(char))))) {
+      ret = OB_ALLOCATE_MEMORY_FAILED;
+      LOG_WARN("failed to alloc dummy memory", K(ret));
+    }
+  }
+  // 如果开启了sql memory manager，但由于预估数据量比较少，不需要注册到manager里，这里限制为MAX_SQL_MEM_SIZE
   origin_max_mem_size_ = max_mem_size;
   default_available_mem_size_ = tmp_enable_auto_mem_mgr ? MAX_SQL_MEM_SIZE : max_mem_size;
   return ret;
 }
 
-int ObSqlMemMgrProcessor::get_max_available_mem_size(ObIAllocator* allocator)
+int ObSqlMemMgrProcessor::get_max_available_mem_size(ObIAllocator *allocator)
 {
   int ret = OB_SUCCESS;
   if (OB_UNLIKELY(!is_auto_mgr())) {
@@ -105,14 +122,17 @@ int ObSqlMemMgrProcessor::get_max_available_mem_size(ObIAllocator* allocator)
     if (OB_FAIL(sql_mem_mgr_->get_work_area_size(allocator, profile_))) {
       LOG_WARN("failed to get work area size", K(ret));
     } else {
-      LOG_TRACE("trace get max available mem size", K(profile_.get_cache_size()), K(profile_.get_expect_size()));
+      LOG_TRACE("trace get max available mem size",
+        K(profile_.get_cache_size()), K(profile_.get_expect_size()));
     }
   }
   return ret;
 }
 
 int ObSqlMemMgrProcessor::update_max_available_mem_size_periodically(
-    ObIAllocator* allocator, PredFunc predicate, bool& updated)
+  ObIAllocator *allocator,
+  PredFunc predicate,
+  bool &updated)
 {
   int ret = OB_SUCCESS;
   updated = false;
@@ -122,16 +142,19 @@ int ObSqlMemMgrProcessor::update_max_available_mem_size_periodically(
     } else {
       updated = true;
       periodic_cnt_ <<= 1;
-      LOG_TRACE("trace get max available mem size periodically",
-          K(periodic_cnt_),
-          K(profile_.get_cache_size()),
-          K(profile_.get_expect_size()));
+      if (0 >= periodic_cnt_) {
+        ret = OB_ERR_UNEXPECTED;
+        LOG_ERROR("unexpected status: periodic_cnt_", K(periodic_cnt_));
+      }
+      LOG_TRACE("trace get max available mem size periodically", K(periodic_cnt_),
+        K(profile_.get_cache_size()), K(profile_.get_expect_size()));
     }
   }
   return ret;
 }
 
-int ObSqlMemMgrProcessor::update_cache_size(ObIAllocator* allocator, int64_t cache_size)
+// 调整cache size
+int ObSqlMemMgrProcessor::update_cache_size(ObIAllocator *allocator, int64_t cache_size)
 {
   int ret = OB_SUCCESS;
   if (OB_UNLIKELY(!is_auto_mgr())) {
@@ -141,21 +164,27 @@ int ObSqlMemMgrProcessor::update_cache_size(ObIAllocator* allocator, int64_t cac
       LOG_TRACE("unexpected status: profile need register", K(ret));
     } else if (cache_size != pre_size) {
       profile_.init(cache_size, OB_MALLOC_MIDDLE_BLOCK_SIZE);
-      if (OB_FAIL(sql_mem_mgr_->update_work_area_profile(allocator, profile_, cache_size - pre_size))) {
+      if (OB_FAIL(sql_mem_mgr_->update_work_area_profile(
+                  allocator, profile_, cache_size - pre_size))) {
         LOG_WARN("failed update work area profile", K(ret), K(cache_size));
       } else {
-        LOG_TRACE(
-            "trace update cache size", K(profile_.get_cache_size()), K(profile_.get_expect_size()), K(cache_size));
+        LOG_TRACE("trace update cache size", K(profile_.get_cache_size()),
+          K(profile_.get_expect_size()), K(cache_size), K(pre_size));
       }
     }
   }
   return ret;
 }
 
+// 更新operator使用的memory size
+// 这里只关注终态，即申请了多少，后续每次调用，则更新，最后一次需要减为0
 int ObSqlMemMgrProcessor::update_used_mem_size(int64_t used_size)
 {
   int ret = OB_SUCCESS;
   int64_t delta_size = used_size - profile_.mem_used_;
+  if (OB_NOT_NULL(op_monitor_info_)) {
+    op_monitor_info_->update_memory(delta_size);
+  }
   if (delta_size > 0) {
     if (OB_NOT_NULL(sql_mem_mgr_) && OB_NOT_NULL(mem_callback_)) {
       mem_callback_->alloc(delta_size);
@@ -175,22 +204,24 @@ int ObSqlMemMgrProcessor::update_used_mem_size(int64_t used_size)
   return ret;
 }
 
-int ObSqlMemMgrProcessor::try_upgrade_auto_mgr(ObIAllocator* allocator, int64_t mem_used)
+// 当auto模式打开，但由于"under-estimate"导致没有采用auto管理，内存设置了一个固定大小
+// 如果超估了该值，会dump，这个时候采用"升级"模式，启动auto进行管理
+int ObSqlMemMgrProcessor::try_upgrade_auto_mgr(ObIAllocator *allocator, int64_t mem_used)
 {
   int ret = OB_SUCCESS;
   if (!is_auto_mgr() && OB_NOT_NULL(sql_mem_mgr_)) {
     int64_t max_area_size = max(default_available_mem_size_, MAX_SQL_MEM_SIZE);
-    if (sql_mem_mgr_->enable_auto_memory_mgr() && sql_mem_mgr_->get_global_bound_size() < max_area_size) {
+    if (sql_mem_mgr_->enable_auto_memory_mgr()
+        && sql_mem_mgr_->get_global_bound_size() < max_area_size) {
     } else if (OB_FAIL(update_used_mem_size(0))) {
       LOG_WARN("failed to update used mem size", K(ret));
-    } else if (OB_FAIL(init(allocator,
-                   tenant_id_,
-                   max_area_size * (EXTEND_RATIO + 100) / 100,
-                   profile_.get_operator_type(),
-                   profile_.get_operator_id(),
-                   profile_.get_exec_ctx()))) {
+    } else if (OB_FAIL(init(allocator, tenant_id_,
+                            max_area_size * (EXTEND_RATIO + 100) /100,
+                            profile_.get_operator_type(),
+                            profile_.get_operator_id(), profile_.get_exec_info()))) {
       LOG_WARN("failed to upgrade sql memory manager", K(ret));
     } else if (is_auto_mgr()) {
+      // 由于之前未注册，所以对内存统计不会反应到sql mem manager中，但现在注册了，则需要重新更新下内存值
       if (OB_FAIL(update_used_mem_size(mem_used))) {
         LOG_WARN("failed to update used mem_size", K(ret));
       }
@@ -204,12 +235,16 @@ int ObSqlMemMgrProcessor::try_upgrade_auto_mgr(ObIAllocator* allocator, int64_t 
 
 // try to extend max memory size to avoid dump or require more memory when need dump
 int ObSqlMemMgrProcessor::extend_max_memory_size(
-    ObIAllocator* allocator, PredFunc dump_fun, bool& need_dump, int64_t mem_used, int64_t max_times)
+  ObIAllocator *allocator,
+  PredFunc dump_fun,
+  bool &need_dump,
+  int64_t mem_used,
+  int64_t max_times)
 {
   int ret = OB_SUCCESS;
   need_dump = true;
   if (OB_FAIL(try_upgrade_auto_mgr(allocator, mem_used))) {
-    LOG_WARN("failed to try udgrade auto manager", K(ret));
+    LOG_WARN("failed to try upgrade auto manager", K(ret));
   } else if (OB_UNLIKELY(!is_auto_mgr())) {
     /* do nothing */
   } else if (OB_NOT_NULL(sql_mem_mgr_)) {
@@ -221,8 +256,12 @@ int ObSqlMemMgrProcessor::extend_max_memory_size(
       int64_t pre_cache_size = profile_.get_cache_size();
       int64_t pre_expect_size = profile_.get_expect_size();
       if (pre_cache_size > pre_expect_size) {
+        // 内存管理给的的内存小于实际要求的
+        // 策略：获取当前最大可用内存，如果小于cache_size，则退出，说明内存管理模块只能给这么多
+        //      否则，继续判断是否dump，走真正扩展内存逻辑
         if (OB_FAIL(get_max_available_mem_size(allocator))) {
-          LOG_WARN("failed to get max available memory size", K(pre_cache_size), K(pre_expect_size), K(ret));
+          LOG_WARN("failed to get max available memory size", K(pre_cache_size),
+            K(pre_expect_size), K(ret));
         } else if (profile_.get_cache_size() > profile_.get_expect_size()) {
           LOG_TRACE("trace extend max memory size", K(pre_cache_size), K(pre_expect_size));
           break;
@@ -232,27 +271,21 @@ int ObSqlMemMgrProcessor::extend_max_memory_size(
         if (OB_FAIL(update_cache_size(allocator, new_cache_size))) {
           LOG_WARN("failed to upadte cache size", K(ret), K(new_cache_size));
         } else if (OB_FAIL(get_max_available_mem_size(allocator))) {
-          LOG_WARN("failed to get max available memory size",
-              K(new_cache_size),
-              K(pre_cache_size),
-              K(pre_expect_size),
-              K(ret));
+          LOG_WARN("failed to get max available memory size", K(new_cache_size),
+            K(pre_cache_size), K(pre_expect_size), K(ret));
         } else if (profile_.get_cache_size() > profile_.get_expect_size()) {
           if (OB_FAIL(update_cache_size(allocator, pre_cache_size))) {
             LOG_WARN("failed to get max memory size", K(ret), K(pre_cache_size));
           }
-          LOG_TRACE("trace extend max memory size",
-              K(pre_cache_size),
-              K(pre_expect_size),
-              K(profile_.get_cache_size()),
-              K(profile_.get_expect_size()));
+          LOG_TRACE("trace extend max memory size", K(pre_cache_size), K(pre_expect_size),
+            K(profile_.get_cache_size()), K(profile_.get_expect_size()));
           break;
         }
       }
       ++times;
       if (0 == times % 16) {
-        LOG_INFO(
-            "extend max memory size", K(ret), K(times), K(profile_.get_expect_size()), K(profile_.get_cache_size()));
+        LOG_INFO("extend max memory size", K(ret), K(times), K(profile_.get_expect_size()),
+          K(profile_.get_cache_size()));
       }
       if (max_times <= times) {
         LOG_TRACE("extend memory size too more times", K(times));
@@ -269,16 +302,20 @@ void ObSqlMemMgrProcessor::unregister_profile()
   if (OB_NOT_NULL(sql_mem_mgr_)) {
     sql_mem_mgr_->unregister_work_area_profile(profile_);
     destroy();
-    LOG_TRACE("trace unregister work area profile", K(profile_));
+    LOG_DEBUG("trace unregister work area profile", K(profile_));
+  }
+  if (OB_NOT_NULL(dummy_ptr_)) {
+    dummy_alloc_->free(dummy_ptr_);
+    dummy_ptr_ = nullptr;
+    dummy_alloc_ = nullptr;
   }
 }
 
-int ObSqlMemMgrProcessor::alloc_dir_id(int64_t& dir_id)
+int ObSqlMemMgrProcessor::alloc_dir_id(int64_t &dir_id)
 {
   int ret = OB_SUCCESS;
-  dir_id = 0;
   if (0 == dir_id_) {
-    if (OB_FAIL(ObChunkStoreUtil::alloc_dir_id(dir_id_))) {
+    if (OB_FAIL(ObChunkStoreUtil::alloc_dir_id(tenant_id_, dir_id_))) {
       LOG_WARN("failed to alloc dir id", K(ret));
     }
   }
@@ -286,26 +323,76 @@ int ObSqlMemMgrProcessor::alloc_dir_id(int64_t& dir_id)
   return ret;
 }
 
-int ObSqlWorkareaUtil::get_workarea_size(const ObSqlWorkAreaType wa_type, const int64_t tenant_id, int64_t& value)
+int ObSqlWorkareaUtil::get_workarea_size(const ObSqlWorkAreaType wa_type,
+                                         const int64_t tenant_id,
+                                         ObExecContext *exec_ctx,
+                                         int64_t &value)
 {
   int ret = OB_SUCCESS;
-  ObTenantConfigGuard tenant_config(TENANT_CONF(tenant_id));
-  if (tenant_config.is_valid()) {
-    if (HASH_WORK_AREA == wa_type) {
-      value = tenant_config->_hash_area_size;
-    } else if (SORT_WORK_AREA == wa_type) {
-      value = tenant_config->_sort_area_size;
-    } else {
-      ret = OB_ERR_UNEXPECTED;
-      LOG_WARN("unexpected status: workarea type", K(wa_type), K(tenant_id));
+  if (OB_ISNULL(exec_ctx)) {
+    if (OB_FAIL(get_workarea_size(wa_type, tenant_id, value, nullptr))) {
+      LOG_WARN("Fail to get workarea size", K(ret));
     }
-    LOG_DEBUG("debug workarea size", K(value), K(tenant_id), K(lbt()));
-  } else {
-    ret = OB_ERR_UNEXPECTED;
-    LOG_WARN("failed to init tenant config", K(tenant_id), K(ret));
+  } else if (OB_FAIL(get_workarea_size(wa_type, tenant_id, value, exec_ctx->get_my_session()))) {
+    LOG_WARN("Fail to get workarea size", K(ret));
   }
   return ret;
 }
 
-}  // namespace sql
-}  // namespace oceanbase
+int ObSqlWorkareaUtil::get_workarea_size(const ObSqlWorkAreaType wa_type,
+                                         const int64_t tenant_id,
+                                         ObSqlProfileExecInfo &exec_info,
+                                         int64_t &value)
+{
+  int ret = OB_SUCCESS;
+  if (OB_FAIL(get_workarea_size(wa_type, tenant_id, value, exec_info.get_my_session()))) {
+    LOG_WARN("Fail to get workarea size", K(ret));
+  }
+  return ret;
+}
+
+int ObSqlWorkareaUtil::get_workarea_size(const ObSqlWorkAreaType wa_type,
+                                         const int64_t tenant_id,
+                                         int64_t &value,
+                                         ObSQLSessionInfo *session)
+{
+  int ret = OB_SUCCESS;
+  if (OB_NOT_NULL(session)) {
+    if (HASH_WORK_AREA == wa_type) {
+      value = session->get_tenant_hash_area_size();
+    } else if (SORT_WORK_AREA == wa_type) {
+      value = session->get_tenant_sort_area_size();
+    } else {
+      ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("unexpected status: workarea type", K(wa_type), K(tenant_id));
+    }
+  } else {
+    ObTenantConfigGuard tenant_config(TENANT_CONF(tenant_id));
+    if (tenant_config.is_valid()) {
+      if (HASH_WORK_AREA == wa_type) {
+        value = tenant_config->_hash_area_size;
+      } else if (SORT_WORK_AREA == wa_type) {
+        value = tenant_config->_sort_area_size;
+      } else {
+        ret = OB_ERR_UNEXPECTED;
+        LOG_WARN("unexpected status: workarea type", K(wa_type), K(tenant_id));
+      }
+    } else {
+      ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("failed to init tenant config", K(tenant_id), K(ret));
+    }
+  }
+  LOG_DEBUG("debug workarea size", K(value), K(tenant_id), K(lbt()));
+  return ret;
+}
+
+void ObSqlMemMgrProcessor::unregister_profile_if_necessary()
+{
+  if (!is_unregistered()) {
+    LOG_ERROR_RET(OB_ERROR, "profile is not actively unregistered", K(lbt()));
+    unregister_profile();
+  }
+}
+
+} // sql
+} // oceanbase

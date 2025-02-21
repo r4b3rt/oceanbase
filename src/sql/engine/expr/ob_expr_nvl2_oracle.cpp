@@ -13,20 +13,26 @@
 #define USING_LOG_PREFIX SQL_ENG
 
 #include "sql/engine/expr/ob_expr_nvl2_oracle.h"
-
-namespace oceanbase {
-namespace sql {
+#include "pl/ob_pl_type.h"
+namespace oceanbase
+{
+namespace sql
+{
 using namespace oceanbase::common;
 
-ObExprNvl2Oracle::ObExprNvl2Oracle(ObIAllocator& alloc)
-    : ObFuncExprOperator(alloc, T_FUN_NVL2, N_NVL2, 3, NOT_ROW_DIMENSION)
-{}
+ObExprNvl2Oracle::ObExprNvl2Oracle(ObIAllocator &alloc)
+  : ObFuncExprOperator(alloc, T_FUN_NVL2, N_NVL2, 3, VALID_FOR_GENERATED_COL, NOT_ROW_DIMENSION)
+{
+}
 
 ObExprNvl2Oracle::~ObExprNvl2Oracle()
 {}
 
-int ObExprNvl2Oracle::calc_result_type3(ObExprResType& type, ObExprResType& type1, ObExprResType& type2,
-    ObExprResType& type3, common::ObExprTypeCtx& type_ctx) const
+int ObExprNvl2Oracle::calc_result_type3(ObExprResType &type,
+                                        ObExprResType &type1,
+                                        ObExprResType &type2,
+                                        ObExprResType &type3,
+                                        common::ObExprTypeCtx &type_ctx) const
 {
   UNUSED(type1);
   // nvl2 reference: https://docs.oracle.com/database/121/SQLRF/functions132.htm#SQLRF00685
@@ -35,26 +41,53 @@ int ObExprNvl2Oracle::calc_result_type3(ObExprResType& type, ObExprResType& type
   return ObExprOracleNvl::calc_nvl_oralce_result_type(type, type2, type3, type_ctx);
 }
 
-int ObExprNvl2Oracle::calc_result3(common::ObObj& result, const common::ObObj& obj1, const common::ObObj& obj2,
-    const common::ObObj& obj3, common::ObExprCtx& expr_ctx) const
-{
-  UNUSED(expr_ctx);
+int ObExprNvl2Oracle::calc_nvl2_oracle_expr_batch(const ObExpr &expr,
+                                      ObEvalCtx &ctx,
+                                      const ObBitVector &skip,
+                                      const int64_t batch_size) {
+  LOG_DEBUG("eval nvl2 oracle batch mode", K(batch_size));
   int ret = OB_SUCCESS;
-  if (obj1.is_null_oracle()) {
-    result = obj3;
+  ObDatum* results = expr.locate_batch_datums(ctx);
+  ObBitVector &eval_flags = expr.get_evaluated_flags(ctx);
+  ObDatumVector args0;
+  ObDatumVector args1;
+  ObDatumVector args2;
+  bool is_udt_type = lib::is_oracle_mode() && expr.args_[0]->obj_meta_.is_ext();
+  bool v = false;
+  if (OB_FAIL(expr.eval_batch_param_value(ctx, skip, batch_size, args0,
+                                        args1, args2))) {
+    LOG_WARN("eval batch args failed", K(ret));
   } else {
-    result = obj2;
+    for (int64_t i = 0; OB_SUCC(ret) && i < batch_size; ++i) {
+      if (skip.at(i) || eval_flags.at(i)) {
+        continue;
+      }
+      eval_flags.set(i);
+      ObDatum *arg0 = args0.at(i);
+      ObDatum *arg1 = args1.at(i);
+      ObDatum *arg2 = args2.at(i);
+      if (OB_FAIL(pl::ObPLDataType::datum_is_null(arg0, is_udt_type, v))) {
+        LOG_WARN("failed to check datum null", K(ret), K(arg0), K(is_udt_type));
+      } else if (!v) {
+        results[i].set_datum(*arg1);
+      } else {
+        results[i].set_datum(*arg2);
+      }
+    }
   }
+
   return ret;
 }
 
-int ObExprNvl2Oracle::cg_expr(ObExprCGCtx& expr_cg_ctx, const ObRawExpr& raw_expr, ObExpr& rt_expr) const
+int ObExprNvl2Oracle::cg_expr(ObExprCGCtx &expr_cg_ctx, const ObRawExpr &raw_expr,
+                       ObExpr &rt_expr) const
 {
   int ret = OB_SUCCESS;
   UNUSED(expr_cg_ctx);
   UNUSED(raw_expr);
   rt_expr.eval_func_ = ObExprNvlUtil::calc_nvl_expr2;
+  rt_expr.eval_batch_func_ = calc_nvl2_oracle_expr_batch;
   return ret;
 }
-}  // namespace sql
-}  // namespace oceanbase
+} // namespace sql
+} // namespqce oceanbase

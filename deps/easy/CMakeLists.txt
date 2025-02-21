@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20.0)
+cmake_minimum_required(VERSION 3.20)
 project(easy
   VERSION 1.1.22
   LANGUAGES C CXX)
@@ -20,22 +20,30 @@ set_property(GLOBAL PROPERTY EASY_INCLUDE_DIRS
   ${INNER_INCLUDE_DIRS}
 )
 
-target_include_directories(
-  easy_base INTERFACE
-  ${INNER_INCLUDE_DIRS}
-  ${DEP_DIR}/include
-)
-
-set(EASY_ARCH_COMPILE_OPTIONS "")
-if(${ARCHITECTURE} STREQUAL "aarch64")
-  set(EASY_ARCH_COMPILE_OPTIONS -Wno-tautological-constant-out-of-range-compare)
+if(OB_USE_BABASSL)
+  target_include_directories(
+    easy_base INTERFACE
+    ${INNER_INCLUDE_DIRS}
+    ${DEP_3RD_DIR}/usr/local/babassl-ob/include
+  )
+else()
+  target_include_directories(
+    easy_base INTERFACE
+    ${INNER_INCLUDE_DIRS}
+    ${DEP_DIR}/include
+  )
 endif()
 
 
 if (OB_USE_CLANG)
-  set(EASY_CC_WNO -fno-strict-aliasing -Wno-unused-variable -Wno-unused-function -fmax-type-align=8 ${EASY_ARCH_COMPILE_OPTIONS})
+  set(EASY_CC_WNO -fno-strict-aliasing -Wno-unused-variable -Wno-unused-function -fmax-type-align=8
+  -Wno-tautological-constant-out-of-range-compare -fno-omit-frame-pointer)
+  if(CPP_STANDARD_20)
+    set(EASY_CC_WNO ${EASY_CC_WNO} -Wno-unused-but-set-variable)
+  endif()
 else()
-  set(EASY_CC_WNO -fno-strict-aliasing -Wno-unused-variable -Wno-implicit-function-declaration -Wno-unused-but-set-variable -Wno-unused-function ${EASY_ARCH_COMPILE_OPTIONS})
+  set(EASY_CC_WNO -fno-strict-aliasing -Wno-unused-variable -Wno-implicit-function-declaration 
+  -Wno-unused-but-set-variable -Wno-unused-function -fno-omit-frame-pointer)
 endif()
 
 
@@ -49,6 +57,7 @@ target_compile_options(easy_base
 target_link_libraries(easy_base
   INTERFACE
   -L${DEP_DIR}/lib
+  -L${DEP_3RD_DIR}/usr/local/babassl-ob/lib/
   -lpthread -lm -l:libssl.a -l:libcrypto.a
   ${ARCH_LDFLAGS}
 )

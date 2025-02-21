@@ -16,7 +16,20 @@
 #include "rpc/obrpc/ob_rpc_processor.h"
 #include "share/table/ob_table_rpc_proxy.h"
 #include "ob_table_rpc_processor.h"
-#include "ob_table_service.h"
+#include "ob_table_context.h"
+#include "ob_table_executor.h"
+#include "ob_table_cache.h"
+#include "sql/plan_cache/ob_cache_object_factory.h"
+#include "sql/plan_cache/ob_plan_cache.h"
+#include "ob_table_update_executor.h"
+#include "ob_table_insert_executor.h"
+#include "ob_table_delete_executor.h"
+#include "ob_table_replace_executor.h"
+#include "ob_table_insert_up_executor.h"
+#include "ob_table_op_wrapper.h"
+#include "ob_table_batch_service.h"
+
+
 namespace oceanbase
 {
 namespace observer
@@ -30,36 +43,27 @@ public:
   virtual ~ObTableBatchExecuteP() = default;
 
   virtual int deserialize() override;
+  virtual int before_process() override;
   virtual int response(const int retcode) override;
 protected:
   virtual int check_arg() override;
   virtual int try_process() override;
   virtual void reset_ctx() override;
-  table::ObTableAPITransCb *new_callback(rpc::ObRequest *req) override;
-  virtual void audit_on_finish() override;
   virtual uint64_t get_request_checksum() override;
+  virtual table::ObTableEntityType get_entity_type() override { return arg_.entity_type_; }
+  virtual bool is_kv_processor() override { return true; }
 
 private:
-  int check_arg2() const;
-  int get_rowkeys(common::ObIArray<common::ObRowkey> &rowkeys);
-  int get_partition_ids(uint64_t table_id, common::ObIArray<int64_t> &part_ids);
-  int multi_insert_or_update();
-  int multi_get();
-  int multi_delete();
-  int multi_insert();
-  int multi_replace();
-  int multi_update();
-  int batch_execute(bool is_readonly);
-  int htable_delete();
-  int htable_put();
-  int htable_mutate_row();
+  int init_single_op_tb_ctx(table::ObTableCtx &ctx,
+                            const table::ObTableOperation &table_operation);
+  int init_batch_ctx();
+  int start_trans();
+  int end_trans(bool is_rollback);
 private:
-  static const int64_t COMMON_COLUMN_NUM = 16;
   table::ObTableEntityFactory<table::ObTableEntity> default_entity_factory_;
   table::ObTableEntity result_entity_;
   common::ObArenaAllocator allocator_;
-  ObTableServiceGetCtx table_service_ctx_;
-  bool need_rollback_trans_;
+  table::ObTableBatchCtx batch_ctx_;
 };
 
 } // end namespace observer

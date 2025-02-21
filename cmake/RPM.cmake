@@ -3,151 +3,128 @@ set(CPACK_GENERATOR "RPM")
 set(CPACK_COMPONENTS_IGNORE_GROUPS 1)
 set(CPACK_RPM_COMPONENT_INSTALL ON)
 # use "server" as main component so its RPM filename won't have "server"
-set(CPACK_RPM_MAIN_COMPONENT "server")
+if (BUILD_CDC_ONLY)
+  set(CPACK_RPM_MAIN_COMPONENT "cdc")
+else()
+  set(CPACK_RPM_MAIN_COMPONENT "server")
+endif()
 # let rpmbuild determine rpm filename
 set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
-set(CPACK_RPM_PACKAGE_RELEASE ${OB_RELEASEID})
-set(CPACK_RPM_PACKAGE_RELEASE_DIST ON)
+set(CMAKE_INSTALL_LIBDIR "lib64")
+## Stardard debuginfo generating instructions in cmake.  However 6u
+## server with rpm-4.8.0 which doesn't support dwarf4 won't generate
+## BUILDID for RPM. And Our debuginfo package doesn't contain source
+## code. Thus we don't use the way cmake sugguests.
+#set(CPACK_RPM_DEBUGINFO_PACKAGE ON)
+#set(CPACK_RPM_BUILD_SOURCE_DIRS_PREFIX "/usr/src/debug")
 # RPM package informations.
-set(CPACK_PACKAGING_INSTALL_PREFIX /home/admin/oceanbase)
-# set relocation path install prefix for each component
-set(CPACK_RPM_DEVEL_PACKAGE_PREFIX /usr)
-set(CPACK_RPM_UTILS_PACKAGE_PREFIX /usr)
-list(APPEND CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "/home/admin/oceanbase")
-set(CPACK_PACKAGE_NAME "oceanbase-ce")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "OceanBase CE is a distributed relational database")
-set(CPACK_PACKAGE_VENDOR "Ant Group CO., Ltd.")
-set(CPACK_PACKAGE_VERSION 3.1.4)
-set(CPACK_PACKAGE_VERSION_MAJOR 3)
-set(CPACK_PACKAGE_VERSION_MINOR 1)
-set(CPACK_PACKAGE_VERSION_PATCH 4)
+
+include(cmake/Pack.cmake)
+
+set(CPACK_RPM_PACKAGE_RELEASE ${OB_RELEASEID})
+if (OB_DISABLE_LSE)
+  ob_insert_nonlse_to_package_version(${CPACK_RPM_PACKAGE_RELEASE} CPACK_RPM_PACKAGE_RELEASE)
+  message(STATUS "CPACK_RPM_PACKAGE_RELEASE: ${CPACK_RPM_PACKAGE_RELEASE}")
+endif()
+
+if (OB_BUILD_OPENSOURCE)
+  set(CPACK_RPM_PACKAGE_URL "${OceanBase_CE_HOMEPAGE_URL}")
+  set(CPACK_RPM_PACKAGE_RELEASE_DIST ON)
+  ## set relocation path install prefix for each component
+  set(CPACK_RPM_DEVEL_PACKAGE_PREFIX /usr)
+  set(CPACK_RPM_UTILS_PACKAGE_PREFIX /usr)
+  list(APPEND CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "/home")
+  list(APPEND CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "/home/admin")
+  list(APPEND CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "/home/admin/oceanbase")
+else()
+  set(CPACK_RPM_PACKAGE_URL "${OceanBase_HOMEPAGE_URL}")
+endif()
+
 set(CPACK_RPM_PACKAGE_GROUP "Applications/Databases")
-set(CPACK_RPM_PACKAGE_URL "https://open.oceanbase.com")
-set(CPACK_RPM_PACKAGE_DESCRIPTION "OceanBase CE is a distributed relational database")
+set(CPACK_RPM_PACKAGE_DESCRIPTION ${CPACK_PACKAGE_DESCRIPTION})
 set(CPACK_RPM_PACKAGE_LICENSE "Mulan PubL v2.")
 set(CPACK_RPM_DEFAULT_USER "admin")
 set(CPACK_RPM_DEFAULT_GROUP "admin")
+if (OB_BUILD_OPENSOURCE AND NOT BUILD_CDC_ONLY)
+  set(DEBUG_INSTALL_POST "mv $RPM_BUILD_ROOT/../server/home/admin/oceanbase/bin/obshell %{_builddir}/obshell; %{_rpmconfigdir}/find-debuginfo.sh %{?_find_debuginfo_opts} %{_builddir}/%{?buildsubdir}; mv %{_builddir}/obshell $RPM_BUILD_ROOT/../server/home/admin/oceanbase/bin/obshell; %{nil}")
+else()
+  set(DEBUG_INSTALL_POST "%{_rpmconfigdir}/find-debuginfo.sh %{?_find_debuginfo_opts} %{_builddir}/%{?buildsubdir};%{nil}")
+endif()
 set(CPACK_RPM_SPEC_MORE_DEFINE
   "%global _missing_build_ids_terminate_build 0
 %global _find_debuginfo_opts -g
-%define __debug_install_post %{_rpmconfigdir}/find-debuginfo.sh %{?_find_debuginfo_opts} %{_builddir}/%{?buildsubdir};%{nil}
-%define debug_package %{nil}")
+%global __brp_check_rpaths %{nil}
+%define __strip ${CMAKE_SOURCE_DIR}/deps/3rd/usr/local/oceanbase/devtools/bin/llvm-strip
+%undefine __brp_mangle_shebangs
+%global __requires_exclude ^\(/bin/bash\|/usr/bin/\.*\)$
+%define __debug_install_post ${DEBUG_INSTALL_POST}
+%if \\\"%name\\\" != \\\"oceanbase-ce-sql-parser\\\" && \\\"%name\\\" != \\\"oceanbase-sql-parser\\\"
+%debug_package
+%endif
+")
 
-## TIPS
-#
-# - PATH is relative to the **ROOT directory** of project other than the cmake directory.
+# systemd define on rpm
+if (OB_BUILD_OPENSOURCE)
+  set(CPACK_RPM_SERVER_PACKAGE_REQUIRES "oceanbase-ce-libs = ${CPACK_PACKAGE_VERSION}, systemd")
+
+  configure_file(${CMAKE_CURRENT_SOURCE_DIR}/tools/systemd/profile/pre_install.sh.template
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/systemd/profile/pre_install.sh
+                @ONLY)
+  set(CPACK_RPM_SERVER_PRE_INSTALL_SCRIPT_FILE ${CMAKE_CURRENT_SOURCE_DIR}/tools/systemd/profile/pre_install.sh)
+
+  configure_file(${CMAKE_CURRENT_SOURCE_DIR}/tools/systemd/profile/post_install.sh.template
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/systemd/profile/post_install.sh
+                @ONLY)
+  set(CPACK_RPM_SERVER_POST_INSTALL_SCRIPT_FILE ${CMAKE_CURRENT_SOURCE_DIR}/tools/systemd/profile/post_install.sh)
+
+  configure_file(${CMAKE_CURRENT_SOURCE_DIR}/tools/systemd/profile/pre_uninstall.sh.template
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/systemd/profile/pre_uninstall.sh
+                @ONLY)
+  set(CPACK_RPM_SERVER_PRE_UNINSTALL_SCRIPT_FILE ${CMAKE_CURRENT_SOURCE_DIR}/tools/systemd/profile/pre_uninstall.sh)
+
+  configure_file(${CMAKE_CURRENT_SOURCE_DIR}/tools/systemd/profile/post_uninstall.sh.template
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/systemd/profile/post_uninstall.sh
+                @ONLY)
+  set(CPACK_RPM_SERVER_POST_UNINSTALL_SCRIPT_FILE ${CMAKE_CURRENT_SOURCE_DIR}/tools/systemd/profile/post_uninstall.sh)
+endif()
 
 ## server
+if (NOT OB_BUILD_OPENSOURCE)
 install(PROGRAMS
-  tools/timezone/import_time_zone_info.py
-  ${CMAKE_BINARY_DIR}/src/observer/observer
-  $<$<STREQUAL:${ARCHITECTURE},"x86_64">:tools/timezone/mysql_tzinfo_to_sql>
+  ${DEVTOOLS_DIR}/bin/obstack
   DESTINATION bin
   COMPONENT server)
+endif()
 
+# add the rpm post and pre script
+if (OB_BUILD_OPENSOURCE)
 install(FILES
-  tools/timezone/timezone_V1.log
-  tools/upgrade/upgrade_pre.py
-  tools/upgrade/upgrade_post.py
-  tools/upgrade/upgrade_post_checker.py
-  tools/upgrade/upgrade_checker.py
-  tools/upgrade/upgrade_cluster_health_checker.py
-  tools/upgrade/upgrade_rolling_pre.py
-  tools/upgrade/upgrade_rolling_post.py
-  tools/upgrade/priv_checker.py
-  tools/upgrade/oceanbase_upgrade_dep.yml
-  DESTINATION etc
+  tools/systemd/profile/pre_install.sh
+  tools/systemd/profile/post_install.sh
+  tools/systemd/profile/post_uninstall.sh
+  tools/systemd/profile/pre_uninstall.sh
+  DESTINATION profile
   COMPONENT server)
-
-## oceanbase-devel
-# libobcdc.so and libob_sql_proxy_parser_static.a
-set(OCEANBASE_DEVEL_LIB_FILES "")
-set(OCEANBASE_DEVEL_INCLUDE_FILES deps/oblib/src/lib/ob_errno.h)
-set(OCEANBASE_DEVEL_BIN_FILES "")
-
-message(STATUS "OB_BUILD_LIBOB_SQL_PROXY_PARSER ${OB_BUILD_LIBOB_SQL_PROXY_PARSER}")
-if (OB_BUILD_LIBOB_SQL_PROXY_PARSER)
-  # lib
-  list(APPEND OCEANBASE_DEVEL_LIB_FILES ${CMAKE_BINARY_DIR}/src/sql/parser/libob_sql_proxy_parser_static.a)
-
-  # headers
-  list(APPEND OCEANBASE_DEVEL_INCLUDE_FILES deps/oblib/src/common/sql_mode/ob_sql_mode.h)
-  list(APPEND OCEANBASE_DEVEL_INCLUDE_FILES src/sql/parser/ob_item_type.h)
-  list(APPEND OCEANBASE_DEVEL_INCLUDE_FILES src/sql/parser/ob_sql_parser.h)
-  list(APPEND OCEANBASE_DEVEL_INCLUDE_FILES src/sql/parser/parse_malloc.h)
-  list(APPEND OCEANBASE_DEVEL_INCLUDE_FILES src/sql/parser/parser_proxy_func.h)
-  list(APPEND OCEANBASE_DEVEL_INCLUDE_FILES src/sql/parser/parse_node.h)
 endif()
 
-if (OB_BUILD_LIBOBLOG)
-  # lib
-  # list(APPEND OCEANBASE_DEVEL_LIB_FILES ${CMAKE_BINARY_DIR}/tools/libobcdc/src/libobcdc.a)
-  list(APPEND OCEANBASE_DEVEL_LIB_FILES ${CMAKE_BINARY_DIR}/tools/obcdc/src/libobcdc.so)
-  list(APPEND OCEANBASE_DEVEL_LIB_FILES ${CMAKE_BINARY_DIR}/tools/obcdc/src/libobcdc.so.1)
-  list(APPEND OCEANBASE_DEVEL_LIB_FILES ${CMAKE_BINARY_DIR}/tools/obcdc/src/libobcdc.so.1.0.0)
-
-  # include lilboblog header
-  list(APPEND OCEANBASE_DEVEL_INCLUDE_FILES tools/obcdc/src/libobcdc.h)
-
-  # bin
-  list(APPEND OCEANBASE_DEVEL_BIN_FILES ${CMAKE_BINARY_DIR}/tools/obcdc/tests/obcdc_tailf)
+if (BUILD_CDC_ONLY)
+  message(STATUS "oceanbase build cdc only")
+  set(CPACK_COMPONENTS_ALL cdc)
+  set(CPACK_PACKAGE_NAME "oceanbase-cdc")
+  if (OB_BUILD_OPENSOURCE)
+    set(CPACK_PACKAGE_NAME "oceanbase-ce-cdc")
+  endif()
+else()
+  add_custom_target(bitcode_to_elf ALL
+    DEPENDS ${BITCODE_TO_ELF_LIST})
+  add_custom_target(ob_table ALL
+    DEPENDS obtable obtable_static)
 endif()
+message(STATUS "Cpack Components:${CPACK_COMPONENTS_ALL}")
 
-set(CPACK_RPM_DEVEL_DEFAULT_USER "root")
-set(CPACK_RPM_DEVEL_DEFAULT_GROUP "root")
-
-install(PROGRAMS
-  ${OCEANBASE_DEVEL_LIB_FILES}
-  DESTINATION /usr/lib
-  COMPONENT devel
-)
-
-install(FILES
-  ${OCEANBASE_DEVEL_INCLUDE_FILES}
-  DESTINATION /usr/include
-  COMPONENT devel
-)
-
-install(PROGRAMS
-  ${OCEANBASE_DEVEL_BIN_FILES}
-  DESTINATION /usr/bin
-  COMPONENT devel
-)
-
-if (OB_BUILD_LIBOBLOG)
-  install(DIRECTORY
-    "deps/logmessage/include/"
-    DESTINATION /usr/include/oblogmsg
-    COMPONENT devel)
-endif()
-
-## oceanbase-libs
-install(PROGRAMS
-  deps/3rd/usr/local/oceanbase/deps/devel/lib/libaio.so.1
-  deps/3rd/usr/local/oceanbase/deps/devel/lib/libaio.so.1.0.1
-  deps/3rd/usr/local/oceanbase/deps/devel/lib/libaio.so
-  deps/3rd/usr/local/oceanbase/deps/devel/lib/mariadb/libmariadb.so
-  deps/3rd/usr/local/oceanbase/deps/devel/lib/mariadb/libmariadb.so.3
-  DESTINATION lib
-  COMPONENT libs
-  )
-
-# utils
-set(CPACK_RPM_UTILS_DEFAULT_USER "root")
-set(CPACK_RPM_UTILS_DEFAULT_GROUP "root")
-
-if (OB_BUILD_TOOLS)
-  install(PROGRAMS
-    ${CMAKE_BINARY_DIR}/tools/ob_admin/ob_admin
-    ${CMAKE_BINARY_DIR}/tools/ob_error/src/ob_error
-    DESTINATION /usr/bin
-    COMPONENT utils
-  )
-endif()
-file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/utils_post.script "/sbin/ldconfig /home/admin/oceanbase/lib")
-set(CPACK_RPM_UTILS_POST_INSTALL_SCRIPT_FILE  ${CMAKE_CURRENT_BINARY_DIR}/utils_post.script)
-file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/utils_postun.script "/sbin/ldconfig")
-set(CPACK_RPM_UTILS_POST_UNINSTALL_SCRIPT_FILE  ${CMAKE_CURRENT_BINARY_DIR}/utils_postun.script)
+# refs https://stackoverflow.com/questions/48711342/what-does-the-cpack-preinstall-target-do
+# see https://cmake.org/cmake/help/latest/module/CPack.html
+set(CPACK_CMAKE_GENERATOR "Ninja") # this disables a rebuild i.e. "CPack: - Run preinstall target for..." which seems to be only done for "Unix Makefiles"
 
 # install cpack to make everything work
 include(CPack)
@@ -155,6 +132,4 @@ include(CPack)
 #add rpm target to create RPMS
 add_custom_target(rpm
   COMMAND +make package
-  DEPENDS
-  observer ob_admin ob_error
-  ob_sql_proxy_parser_static)
+  )

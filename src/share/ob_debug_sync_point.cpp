@@ -10,14 +10,15 @@
  * See the Mulan PubL v2 for more details.
  */
 
-#include "lib/ob_define.h"
 #include "lib/string/ob_string.h"
 #include "ob_debug_sync_point.h"
 
-namespace oceanbase {
-namespace common {
+namespace oceanbase
+{
+namespace common
+{
 
 DEFINE_ENUM_FUNC(ObDebugSyncPoint, debug_sync_point, OB_DEBUG_SYNC_POINT_DEF);
 
-}  // namespace common
-}  // end namespace oceanbase
+} // end naespace common
+} // end namespace oceanbase
